@@ -28,6 +28,7 @@ export const poolAbi = parseAbi([
   'function getUserEMode(address user) view returns (uint256)',
   'function FLASHLOAN_PREMIUM_TOTAL() view returns (uint128)',
   'function ADDRESSES_PROVIDER() view returns (address)',
+  'function getReservesList() view returns (address[])',
 ])
 
 export const providerAbi = parseAbi(['function getPriceOracle() view returns (address)'])
@@ -39,6 +40,8 @@ export const erc20Abi = parseAbi([
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
   'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
   'function nonces(address owner) view returns (uint256)',
   'function DOMAIN_SEPARATOR() view returns (bytes32)',
 ])

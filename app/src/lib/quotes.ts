@@ -1,9 +1,10 @@
 import { getAddress, hexToBigInt, isAddress, isHex, slice, type Address, type Hex } from 'viem'
-import { AGGREGATORS, CHAIN_ID, QUOTE_MODE, VELORA_EXCLUDE_DEXS, VELORA_INCLUDE_DEXS, VELORA_PARTNER, type AggregatorId, type Token } from '../config'
+import { AGGREGATORS, QUOTE_MODE, VELORA_EXCLUDE_DEXS, VELORA_INCLUDE_DEXS, VELORA_PARTNER, type AggregatorId, type Token } from '../config'
 import { applySlippage, oracleSwapOut, type Side } from './math'
 
 export type QuoteRequest = {
   aggregator: AggregatorId
+  chainId: number
   sell: Token
   buy: Token
   sellAmount: bigint
@@ -111,7 +112,7 @@ const LIVE: Record<AggregatorId, (req: QuoteRequest, signal?: AbortSignal) => Pr
   // 0x Swap API v2, AllowanceHolder flow: approve and call transaction.to (AllowanceHolder), never Settler.
   async '0x'(req, signal) {
     const q = new URLSearchParams({
-      chainId: String(CHAIN_ID),
+      chainId: String(req.chainId),
       sellToken: req.sell.address,
       buyToken: req.buy.address,
       sellAmount: req.sellAmount.toString(),
@@ -139,7 +140,7 @@ const LIVE: Record<AggregatorId, (req: QuoteRequest, signal?: AbortSignal) => Pr
       disableEstimate: 'true',
       allowPartialFill: 'false',
     })
-    const body = await fetchJson(`/api/1inch/swap/v6.0/${CHAIN_ID}/swap?${q}`, { signal })
+    const body = await fetchJson(`/api/1inch/swap/v6.0/${req.chainId}/swap?${q}`, { signal })
     return { to: body.tx.to, data: body.tx.data, value: body.tx.value, buyAmount: body.dstAmount }
   },
 
@@ -152,7 +153,7 @@ const LIVE: Record<AggregatorId, (req: QuoteRequest, signal?: AbortSignal) => Pr
       destDecimals: String(req.buy.decimals),
       amount: req.sellAmount.toString(),
       side: 'SELL',
-      network: String(CHAIN_ID),
+      network: String(req.chainId),
       userAddress: req.taker,
       version: '6.2',
       partner: VELORA_PARTNER,
@@ -162,7 +163,7 @@ const LIVE: Record<AggregatorId, (req: QuoteRequest, signal?: AbortSignal) => Pr
     const { priceRoute } = await fetchJson(`${VELORA_API}/prices?${q}`, { signal })
     if (!priceRoute) throw new QuoteError('Velora : pas de route')
     if (priceRoute.partnerFee) throw new QuoteError(`Velora applique des frais partenaire (${priceRoute.partnerFee} %)`)
-    const tx = await fetchJson(`${VELORA_API}/transactions/${CHAIN_ID}?ignoreChecks=true`, {
+    const tx = await fetchJson(`${VELORA_API}/transactions/${req.chainId}?ignoreChecks=true`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal,

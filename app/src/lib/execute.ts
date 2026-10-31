@@ -8,6 +8,7 @@ import { signATokenPermit, signDelegation } from './signatures'
 export type Progress = (step: string) => void
 
 export type OpenPlan = {
+  chainId: number
   executor: Address
   user: Address
   collateral: Address
@@ -21,6 +22,7 @@ export type OpenPlan = {
 }
 
 export type ClosePlan = {
+  chainId: number
   executor: Address
   user: Address
   collateral: Address
@@ -57,9 +59,10 @@ export function closeArgs(p: ClosePlan) {
   } as const
 }
 
-async function approve(token: Address, spender: Address, amount: bigint, account: Address, onStep: Progress) {
+async function approve(chainId: number, token: Address, spender: Address, amount: bigint, account: Address, onStep: Progress) {
   onStep('Approbation du collatéral (transaction 1)…')
   const { request } = await simulateContract(wagmiConfig, {
+    chainId,
     account,
     address: token,
     abi: erc20Abi,
@@ -67,14 +70,14 @@ async function approve(token: Address, spender: Address, amount: bigint, account
     args: [spender, amount],
   })
   const hash = await writeContract(wagmiConfig, request)
-  await waitForTransactionReceipt(wagmiConfig, { hash })
+  await waitForTransactionReceipt(wagmiConfig, { chainId, hash })
 }
 
 /** Opens the position: approval if needed, credit delegation by signature if needed, then one transaction. */
 export async function executeOpen(p: OpenPlan, onStep: Progress): Promise<Hash> {
   if (p.quote.simulated) throw new Error('Devis simulé : impossible à exécuter')
   if (p.initialCollateral > 0n && p.collateralAllowance < p.initialCollateral) {
-    await approve(p.collateral, p.executor, p.initialCollateral, p.user, onStep)
+    await approve(p.chainId, p.collateral, p.executor, p.initialCollateral, p.user, onStep)
   }
 
   const args = openArgs(p)
@@ -83,6 +86,7 @@ export async function executeOpen(p: OpenPlan, onStep: Progress): Promise<Hash> 
   if (p.borrowAllowance >= p.debtAmount) {
     onStep('Simulation de l’ouverture…')
     const { request } = await simulateContract(wagmiConfig, {
+      chainId: p.chainId,
       account: p.user,
       address: p.executor,
       abi: executorAbi,
@@ -93,9 +97,10 @@ export async function executeOpen(p: OpenPlan, onStep: Progress): Promise<Hash> 
     hash = await writeContract(wagmiConfig, request)
   } else {
     onStep('Signature de la délégation de crédit…')
-    const sig = await signDelegation(p.user, p.variableDebtToken, p.executor, p.debtAmount)
+    const sig = await signDelegation(p.chainId, p.user, p.variableDebtToken, p.executor, p.debtAmount)
     onStep('Simulation de l’ouverture…')
     const { request } = await simulateContract(wagmiConfig, {
+      chainId: p.chainId,
       account: p.user,
       address: p.executor,
       abi: executorAbi,
@@ -106,7 +111,7 @@ export async function executeOpen(p: OpenPlan, onStep: Progress): Promise<Hash> 
     hash = await writeContract(wagmiConfig, request)
   }
   onStep('En attente d’inclusion…')
-  const receipt = await waitForTransactionReceipt(wagmiConfig, { hash })
+  const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: p.chainId, hash })
   if (receipt.status !== 'success') throw new Error('La transaction a échoué')
   return hash
 }
@@ -120,6 +125,7 @@ export async function executeClose(p: ClosePlan, onStep: Progress): Promise<Hash
   if (p.aTokenAllowance >= p.aTokensNeeded) {
     onStep('Simulation de la fermeture…')
     const { request } = await simulateContract(wagmiConfig, {
+      chainId: p.chainId,
       account: p.user,
       address: p.executor,
       abi: executorAbi,
@@ -132,9 +138,10 @@ export async function executeClose(p: ClosePlan, onStep: Progress): Promise<Hash
     onStep('Signature de l’autorisation sur les aTokens…')
     // a little headroom: aToken balances grow every block
     const value = p.full ? (p.aTokensNeeded * 1001n) / 1000n : p.aTokensNeeded
-    const sig = await signATokenPermit(p.user, p.aToken, p.executor, value)
+    const sig = await signATokenPermit(p.chainId, p.user, p.aToken, p.executor, value)
     onStep('Simulation de la fermeture…')
     const { request } = await simulateContract(wagmiConfig, {
+      chainId: p.chainId,
       account: p.user,
       address: p.executor,
       abi: executorAbi,
@@ -145,7 +152,7 @@ export async function executeClose(p: ClosePlan, onStep: Progress): Promise<Hash
     hash = await writeContract(wagmiConfig, request)
   }
   onStep('En attente d’inclusion…')
-  const receipt = await waitForTransactionReceipt(wagmiConfig, { hash })
+  const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: p.chainId, hash })
   if (receipt.status !== 'success') throw new Error('La transaction a échoué')
   return hash
 }

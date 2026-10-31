@@ -1,12 +1,14 @@
-import { http, createConfig } from 'wagmi'
-import { base } from 'wagmi/chains'
+import { createConfig, fallback, http } from 'wagmi'
 import { injected } from 'wagmi/connectors'
-import { RPC_URL } from './config'
+import type { Chain } from 'viem'
+import { MARKETS, rpcUrls } from './config'
+
+const chains = [...new Map(MARKETS.map((m) => [m.chain.id, m.chain])).values()] as [Chain, ...Chain[]]
 
 export const wagmiConfig = createConfig({
-  chains: [base],
+  chains,
   connectors: [injected()],
-  transports: { [base.id]: http(RPC_URL) },
+  transports: Object.fromEntries(chains.map((c) => [c.id, fallback(rpcUrls(c).map((u) => http(u)))])),
 })
 
 declare module 'wagmi' {

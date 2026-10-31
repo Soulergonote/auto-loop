@@ -2,7 +2,6 @@ import { domainSeparator, hexToSignature, type Address, type Hex, type TypedData
 import { readContract, signTypedData } from '@wagmi/core'
 import { wagmiConfig } from '../wagmi'
 import { debtTokenAbi } from '../abi'
-import { CHAIN_ID } from '../config'
 
 /** Signature struct expected by LeverageExecutor.openWithSig / closeWithSig. */
 export type ExecutorSignature = { value: bigint; deadline: bigint; v: number; r: Hex; s: Hex }
@@ -12,18 +11,18 @@ export type ExecutorSignature = { value: bigint; deadline: bigint; v: number; r:
  * The domain is rebuilt locally and checked against the token's DOMAIN_SEPARATOR before signing,
  * so a wrong guess fails loudly instead of producing a useless signature.
  */
-async function aaveTokenDomain(token: Address): Promise<{ domain: TypedDataDomain; nonceOf: (o: Address) => Promise<bigint> }> {
+async function aaveTokenDomain(chainId: number, token: Address): Promise<{ domain: TypedDataDomain; nonceOf: (o: Address) => Promise<bigint> }> {
   const [name, separator] = await Promise.all([
-    readContract(wagmiConfig, { address: token, abi: debtTokenAbi, functionName: 'name' }),
-    readContract(wagmiConfig, { address: token, abi: debtTokenAbi, functionName: 'DOMAIN_SEPARATOR' }),
+    readContract(wagmiConfig, { chainId, address: token, abi: debtTokenAbi, functionName: 'name' }),
+    readContract(wagmiConfig, { chainId, address: token, abi: debtTokenAbi, functionName: 'DOMAIN_SEPARATOR' }),
   ])
-  const domain: TypedDataDomain = { name, version: '1', chainId: CHAIN_ID, verifyingContract: token }
+  const domain: TypedDataDomain = { name, version: '1', chainId, verifyingContract: token }
   const computed = domainSeparator({ domain })
   if (computed.toLowerCase() !== separator.toLowerCase()) {
     throw new Error(`Domaine EIP-712 inattendu pour ${name} : signature annulée`)
   }
   const nonceOf = (owner: Address) =>
-    readContract(wagmiConfig, { address: token, abi: debtTokenAbi, functionName: 'nonces', args: [owner] })
+    readContract(wagmiConfig, { chainId, address: token, abi: debtTokenAbi, functionName: 'nonces', args: [owner] })
   return { domain, nonceOf }
 }
 
@@ -35,8 +34,8 @@ function split(sig: Hex, value: bigint, deadline: bigint): ExecutorSignature {
 const deadlineIn = (seconds: number) => BigInt(Math.floor(Date.now() / 1000) + seconds)
 
 /** Credit delegation on the variable debt token, consumed by openWithSig. */
-export async function signDelegation(owner: Address, debtToken: Address, delegatee: Address, value: bigint) {
-  const { domain, nonceOf } = await aaveTokenDomain(debtToken)
+export async function signDelegation(chainId: number, owner: Address, debtToken: Address, delegatee: Address, value: bigint) {
+  const { domain, nonceOf } = await aaveTokenDomain(chainId, debtToken)
   const nonce = await nonceOf(owner)
   const deadline = deadlineIn(20 * 60)
   const sig = await signTypedData(wagmiConfig, {
@@ -57,8 +56,8 @@ export async function signDelegation(owner: Address, debtToken: Address, delegat
 }
 
 /** EIP-2612 permit on the collateral aToken, consumed by closeWithSig. */
-export async function signATokenPermit(owner: Address, aToken: Address, spender: Address, value: bigint) {
-  const { domain, nonceOf } = await aaveTokenDomain(aToken)
+export async function signATokenPermit(chainId: number, owner: Address, aToken: Address, spender: Address, value: bigint) {
+  const { domain, nonceOf } = await aaveTokenDomain(chainId, aToken)
   const nonce = await nonceOf(owner)
   const deadline = deadlineIn(20 * 60)
   const sig = await signTypedData(wagmiConfig, {

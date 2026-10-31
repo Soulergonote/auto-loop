@@ -1,6 +1,6 @@
 # Auto-loop : interface
 
-Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 (Base) en **une transaction**, via le contrat `LeverageExecutor` (`../contracts`). On choisit la plateforme, la paire collatéral / dette et le levier ; le swap passe par Velora (0x et 1inch sont codés mais affichés « bientôt ») ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
+Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon et BNB Chain, via le contrat `LeverageExecutor` (`../contracts`). On choisit la plateforme, la paire collatéral / dette et le levier ; le swap passe par Velora (0x et 1inch sont codés mais affichés « bientôt ») ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
 
 Stack : Vite + React + TypeScript, wagmi 2 / viem 2.
 
@@ -19,12 +19,16 @@ Le build ne dépend d'aucun serveur : le navigateur appelle directement l'API Ve
 
 | Variable | Rôle |
 |---|---|
-| `VITE_EXECUTOR_ADDRESS` | Adresse du contrat déployé. Vide : tout est calculé et la transaction est affichée, mais le bouton de signature reste désactivé. |
-| `VITE_RPC_URL` | RPC pour les lectures et simulations (vide = RPC public de Base). Pour un fork local : `anvil --fork-url https://mainnet.base.org --chain-id 8453` puis `http://127.0.0.1:8545`. |
+| `VITE_EXECUTORS` | Adresse du contrat déployé pour chaque marché, en JSON (`{"base":"0x…"}`) : un contrat par pool Aave. Marché absent : tout est calculé et la transaction est affichée, mais le bouton de signature reste désactivé. `VITE_EXECUTOR_ADDRESS` reste lue pour Base. |
+| `VITE_RPC_URL_<chainId>` | RPC d'une chaîne pour les lectures et simulations (vide = PublicNode, puis le RPC public de la chaîne). `VITE_RPC_URL` vaut pour Base. Pour un fork local : `anvil --fork-url https://mainnet.base.org --chain-id 8453` puis `http://127.0.0.1:8545`. |
 | `VITE_QUOTE_MODE` | `auto` (API réelles, repli sur un devis simulé si elles ne répondent pas), `live` ou `mock`. Un devis simulé n’est jamais exécutable. |
 | `ZEROX_API_KEY`, `ONEINCH_API_KEY` | Lues uniquement par le serveur de dev (proxy `/api/0x` et `/api/1inch` dans `vite.config.ts`), jamais envoyées au navigateur : 0x et 1inch ne marchent donc pas dans le build statique. Inutiles tant que 0x et 1inch sont désactivés ; Velora n’en demande pas. |
 | `VITE_VELORA_INCLUDE_DEXS`, `VITE_VELORA_EXCLUDE_DEXS` | Listes de DEX (noms Velora, séparés par des virgules) autorisés ou exclus des routes. Vide = toutes les routes. Sert surtout au test sur fork (voir plus bas). |
 | `VITE_DEMO` | `true` : prix et paramètres fictifs, pour voir l’interface sans réseau. |
+
+## Marchés
+
+Liste dans `src/config.ts` (`MARKETS`), adresses des pools tirées de `@bgd-labs/aave-address-book`. Les actifs de chaque marché sont lus sur la chaîne (`getReservesList`), donc un nouvel actif listé par Aave apparaît sans changer le code. Seules les chaînes couvertes par Velora sont sélectionnables : Monad et Plasma ont un marché Aave v3 mais Velora n'y cote pas encore (vérifié le 2026-10-31), ils sont affichés « bientôt ».
 
 ## Ce que fait l’interface
 

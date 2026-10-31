@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { encodeFunctionData, parseUnits, type Address, type Hash } from 'viem'
-import { AGGREGATORS, EXECUTOR, QUOTE_TAKER, TARGET_MIN_HF, type AggregatorId } from '../config'
+import { AGGREGATORS, TARGET_MIN_HF, type AggregatorId } from '../config'
 import { executorAbi } from '../abi'
 import type { Reserves, UserState } from '../lib/useMarket'
 import { useQuote } from '../lib/useQuote'
@@ -9,7 +9,7 @@ import { getQuote } from '../lib/quotes'
 import { debtForLeverage, maxLeverage, netApy, project, EMPTY_ACCOUNT } from '../lib/math'
 import { executeOpen, explainError, openArgs, type OpenPlan } from '../lib/execute'
 import { fmtAmount, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX } from '../lib/format'
-import { Card, Metric, Notice, Segmented, Steps, hfTone } from './ui'
+import { Card, Metric, Notice, Segmented, Steps, TxLink, hfTone } from './ui'
 
 const SLIPPAGES = ['30', '50', '100'] as const
 
@@ -22,7 +22,8 @@ type Props = {
 }
 
 export function OpenPanel({ reserves, user, account, aggregator, onDone }: Props) {
-  const { collateral: C, debt: D } = reserves
+  const { market, collateral: C, debt: D } = reserves
+  const executor = market.executor
   const [amountText, setAmountText] = useState('1')
   const [leverage, setLeverage] = useState(2)
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('50')
@@ -49,10 +50,11 @@ export function OpenPanel({ reserves, user, account, aggregator, onDone }: Props
     debtAmount > 0n
       ? {
           aggregator,
+          chainId: market.chain.id,
           sell: D.token,
           buy: C.token,
           sellAmount: debtAmount,
-          taker: QUOTE_TAKER,
+          taker: market.quoteTaker,
           slippageBps: BigInt(slippage),
           oracle: { sell: D.side, buy: C.side },
         }
@@ -94,7 +96,8 @@ export function OpenPanel({ reserves, user, account, aggregator, onDone }: Props
   const plan = (quoteOverride = q): OpenPlan | undefined =>
     quoteOverride && account && initial !== undefined
       ? {
-          executor: EXECUTOR ?? QUOTE_TAKER,
+          chainId: market.chain.id,
+          executor: executor ?? market.quoteTaker,
           user: account,
           collateral: C.token.address,
           debt: D.token.address,
@@ -124,8 +127,8 @@ export function OpenPanel({ reserves, user, account, aggregator, onDone }: Props
     : undefined
 
   const stale = initial !== debouncedInitial || quote.isFetching
-  const canSign = !!EXECUTOR && !!account && !!q && !q.simulated && problems.length === 0 && !stale && !busy
-  const disabledReason = !EXECUTOR
+  const canSign = !!executor && !!account && !!q && !q.simulated && problems.length === 0 && !stale && !busy
+  const disabledReason = !executor
     ? 'Contrat pas encore déployé'
     : !account
       ? 'Connecte ton portefeuille'
@@ -225,14 +228,14 @@ export function OpenPanel({ reserves, user, account, aggregator, onDone }: Props
         </button>
         {disabledReason && !busy && <span className="muted small">{disabledReason}</span>}
       </div>
-      {result && <Notice tone={result.ok ? 'info' : 'bad'}>{result.text} {result.hash && <a href={`https://basescan.org/tx/${result.hash}`} target="_blank" rel="noreferrer">Voir sur Basescan</a>}</Notice>}
+      {result && <Notice tone={result.ok ? 'info' : 'bad'}>{result.text} {result.hash && <TxLink market={market} hash={result.hash} />}</Notice>}
 
       {preview && (
         <details className="preview">
           <summary>Transaction envoyée au contrat</summary>
           <dl>
             <dt>Contrat</dt>
-            <dd>{EXECUTOR ?? `${QUOTE_TAKER} (adresse des tests sur fork, contrat non déployé)`}</dd>
+            <dd>{executor ?? `${market.quoteTaker} (adresse des tests sur fork, contrat non déployé)`}</dd>
             <dt>Routeur</dt>
             <dd>{q!.router}</dd>
             <dt>Minimum reçu</dt>

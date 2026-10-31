@@ -1,3 +1,4 @@
+import type { Market } from '../config'
 import type { ReactNode } from 'react'
 
 export function Card({ title, children, aside }: { title?: string; children: ReactNode; aside?: ReactNode }) {
@@ -76,4 +77,15 @@ export function hfTone(hf: number, target: number): Tone {
   if (!Number.isFinite(hf) || hf >= target) return 'good'
   if (hf >= 1.1) return 'warn'
   return 'bad'
+}
+
+/** Link to a transaction on the market's block explorer. */
+export function TxLink({ market, hash }: { market: Market; hash: string }) {
+  const explorer = market.chain.blockExplorers?.default
+  if (!explorer) return null
+  return (
+    <a href={`${explorer.url}/tx/${hash}`} target="_blank" rel="noreferrer">
+      Voir sur {explorer.name}
+    </a>
+  )
 }

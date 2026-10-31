@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { encodeFunctionData, type Address, type Hash } from 'viem'
-import { AGGREGATORS, EXECUTOR, QUOTE_TAKER, TARGET_MIN_HF, type AggregatorId } from '../config'
+import { AGGREGATORS, TARGET_MIN_HF, type AggregatorId } from '../config'
 import { executorAbi } from '../abi'
 import type { Reserves, UserState } from '../lib/useMarket'
 import { useQuote } from '../lib/useQuote'
@@ -8,7 +8,7 @@ import { getQuote } from '../lib/quotes'
 import { collateralToSellForRepay, flashLoanOwed, toBase } from '../lib/math'
 import { closeArgs, executeClose, explainError, type ClosePlan } from '../lib/execute'
 import { fmtAmount, fmtHf, fmtPct, fmtUsd } from '../lib/format'
-import { Card, Metric, Notice, Segmented, Steps, hfTone } from './ui'
+import { Card, Metric, Notice, Segmented, Steps, TxLink, hfTone } from './ui'
 
 const FRACTIONS = ['25', '50', '75', '100'] as const
 const SLIPPAGES = ['30', '50', '100'] as const
@@ -22,7 +22,7 @@ type Props = {
 }
 
 export function ClosePanel({ reserves, user, account, aggregator, onDone }: Props) {
-  const { collateral: C, debt: D, premiumBps } = reserves
+  const { market, collateral: C, debt: D, premiumBps } = reserves
   const [fraction, setFraction] = useState<(typeof FRACTIONS)[number]>('100')
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('50')
   const [busy, setBusy] = useState<string>()
@@ -43,19 +43,20 @@ export function ClosePanel({ reserves, user, account, aggregator, onDone }: Prop
           {C.token.symbol}, dette {fmtAmount(user.debtBalance, D.token.decimals)} {D.token.symbol}).
         </p>
         {/* a full close lands here: keep its confirmation visible */}
-        {result?.ok && <Notice tone="info">{result.text} {result.hash && <a href={`https://basescan.org/tx/${result.hash}`} target="_blank" rel="noreferrer">Voir sur Basescan</a>}</Notice>}
+        {result?.ok && <Notice tone="info">{result.text} {result.hash && <TxLink market={market} hash={result.hash} />}</Notice>}
       </Card>
     )
   }
 
   return (
     <ClosePanelInner
-      {...{ C, D, premiumBps, user, account, aggregator, onDone, fraction, setFraction, slippage, setSlippage, busy, setBusy, result, setResult }}
+      {...{ market, C, D, premiumBps, user, account, aggregator, onDone, fraction, setFraction, slippage, setSlippage, busy, setBusy, result, setResult }}
     />
   )
 }
 
 function ClosePanelInner(p: {
+  market: Reserves['market']
   C: Reserves['collateral']
   D: Reserves['debt']
   premiumBps: bigint
@@ -72,7 +73,7 @@ function ClosePanelInner(p: {
   result?: { ok: boolean; text: string; hash?: Hash }
   setResult: (r?: { ok: boolean; text: string; hash?: Hash }) => void
 }) {
-  const { C, D, premiumBps, user, account, aggregator, fraction, slippage, busy, setBusy, result, setResult } = p
+  const { market, C, D, premiumBps, user, account, aggregator, fraction, slippage, busy, setBusy, result, setResult } = p
   const full = fraction === '100'
   const repay = (user.debtBalance * BigInt(fraction)) / 100n
   const owed = flashLoanOwed(repay, premiumBps)
@@ -81,10 +82,11 @@ function ClosePanelInner(p: {
 
   const quoteReq = {
     aggregator,
+    chainId: market.chain.id,
     sell: C.token,
     buy: D.token,
     sellAmount: toSell,
-    taker: QUOTE_TAKER,
+    taker: market.quoteTaker,
     slippageBps: BigInt(slippage),
     oracle: { sell: C.side, buy: D.side },
   }
@@ -124,7 +126,8 @@ function ClosePanelInner(p: {
   const makePlan = (quoteOverride = q): ClosePlan | undefined =>
     quoteOverride && account
       ? {
-          executor: EXECUTOR ?? QUOTE_TAKER,
+          chainId: market.chain.id,
+          executor: market.executor ?? market.quoteTaker,
           user: account,
           collateral: C.token.address,
           debt: D.token.address,
@@ -157,8 +160,8 @@ function ClosePanelInner(p: {
       })
     : undefined
 
-  const canSign = !!EXECUTOR && !!account && !!q && !q.simulated && problems.length === 0 && !quote.isFetching && !busy
-  const disabledReason = !EXECUTOR ? 'Contrat pas encore déployé' : q?.simulated ? 'Devis simulé' : problems.length ? 'Corrige les points ci-dessus' : undefined
+  const canSign = !!market.executor && !!account && !!q && !q.simulated && problems.length === 0 && !quote.isFetching && !busy
+  const disabledReason = !market.executor ? 'Contrat pas encore déployé' : q?.simulated ? 'Devis simulé' : problems.length ? 'Corrige les points ci-dessus' : undefined
 
   async function onClose() {
     setResult(undefined)
@@ -227,7 +230,7 @@ function ClosePanelInner(p: {
         </button>
         {disabledReason && !busy && <span className="muted small">{disabledReason}</span>}
       </div>
-      {result && <Notice tone={result.ok ? 'info' : 'bad'}>{result.text} {result.hash && <a href={`https://basescan.org/tx/${result.hash}`} target="_blank" rel="noreferrer">Voir sur Basescan</a>}</Notice>}
+      {result && <Notice tone={result.ok ? 'info' : 'bad'}>{result.text} {result.hash && <TxLink market={market} hash={result.hash} />}</Notice>}
 
       {preview && (
         <details className="preview">

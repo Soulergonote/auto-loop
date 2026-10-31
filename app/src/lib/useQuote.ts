@@ -7,6 +7,7 @@ export function useQuote(req: QuoteRequest | undefined) {
     queryKey: [
       'quote',
       req?.aggregator,
+      req?.chainId,
       req?.sell.address,
       req?.buy.address,
       req?.sellAmount.toString(),

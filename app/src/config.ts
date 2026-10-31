@@ -1,16 +1,36 @@
-import { getAddress, isAddress, keccak256, slice, toBytes, type Address } from 'viem'
-
-export const CHAIN_ID = 8453 // Base
+import { getAddress, isAddress, keccak256, slice, toBytes, type Address, type Chain } from 'viem'
+import { arbitrum, avalanche, base, bsc, mainnet, monad, optimism, plasma, polygon } from 'viem/chains'
 
 export type Token = { symbol: string; name: string; address: Address; decimals: number }
 
-/** Aave v3 market on Base. Prices and risk parameters are read on-chain, only addresses live here. */
-export const AAVE_V3_BASE = {
-  pool: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5' as Address,
-}
+/**
+ * Aave v3 markets the app offers: chains where Aave v3 is large and Velora quotes (checked 2026-10-31 against
+ * @bgd-labs/aave-address-book and api.paraswap.io). Prices, risk parameters and the asset list are read on-chain.
+ * `soon`: listed for visibility but not selectable, with the reason shown.
+ */
+export type MarketDef = { id: string; label: string; chain: Chain; pool: Address; soon?: string }
 
-/** Assets listed on Aave v3 Base that make sense as collateral or debt. Decimals are re-read on-chain. */
-export const TOKENS: Token[] = [
+export const MARKETS: MarketDef[] = [
+  { id: 'ethereum', label: 'Ethereum (Core)', chain: mainnet, pool: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2' },
+  { id: 'ethereum-prime', label: 'Ethereum (Prime)', chain: mainnet, pool: '0x4e033931ad43597d96D6bcc25c280717730B58B1' },
+  { id: 'arbitrum', label: 'Arbitrum', chain: arbitrum, pool: '0x794a61358D6845594F94dc1DB02A252b5b4814aD' },
+  { id: 'base', label: 'Base', chain: base, pool: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5' },
+  { id: 'avalanche', label: 'Avalanche', chain: avalanche, pool: '0x794a61358D6845594F94dc1DB02A252b5b4814aD' },
+  { id: 'optimism', label: 'Optimism', chain: optimism, pool: '0x794a61358D6845594F94dc1DB02A252b5b4814aD' },
+  { id: 'polygon', label: 'Polygon', chain: polygon, pool: '0x794a61358D6845594F94dc1DB02A252b5b4814aD' },
+  { id: 'bnb', label: 'BNB Chain', chain: bsc, pool: '0x6807dc923806fE8Fd134338EABCA509979a7e0cB' },
+  { id: 'monad', label: 'Monad', chain: monad, pool: '0x69a5F9AD4f96ebf0a0C792dD42a01cC5C0102fef', soon: 'Velora ne couvre pas encore Monad' },
+  { id: 'plasma', label: 'Plasma', chain: plasma, pool: '0x925a2A7214Ed92428B5b1B090F80b25700095e12', soon: 'Velora ne couvre pas encore Plasma' },
+]
+
+export const DEFAULT_MARKET_ID = 'base'
+
+/** Default pair on a new market: first symbol found in each list. */
+export const DEFAULT_COLLATERAL_SYMBOLS = ['WETH', 'WETH.e', 'ETH', 'WBNB']
+export const DEFAULT_DEBT_SYMBOLS = ['USDC', 'USDT0', 'USDT', 'USDt']
+
+/** Base assets used by the demo mode (VITE_DEMO=true), where nothing is read on-chain. */
+export const DEMO_TOKENS: Token[] = [
   { symbol: 'WETH', name: 'Wrapped Ether', address: '0x4200000000000000000000000000000000000006', decimals: 18 },
   { symbol: 'USDC', name: 'USD Coin', address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 },
   { symbol: 'cbBTC', name: 'Coinbase Wrapped BTC', address: '0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf', decimals: 8 },
@@ -52,13 +72,57 @@ export const PLATFORMS = [
 /** Address the fork tests deploy the executor at; used as the quote taker until a real deployment exists. */
 export const FORK_EXECUTOR: Address = getAddress(slice(keccak256(toBytes('auto-loop.executor.fork')), 12))
 
-const rawExecutor = import.meta.env.VITE_EXECUTOR_ADDRESS as string | undefined
-export const EXECUTOR: Address | undefined = rawExecutor && isAddress(rawExecutor) ? getAddress(rawExecutor) : undefined
+/**
+ * Deployed LeverageExecutor per market (one per Aave pool): VITE_EXECUTORS='{"base":"0x…","arbitrum":"0x…"}'.
+ * VITE_EXECUTOR_ADDRESS is still read as the Base one. Missing = not deployed there: everything is computed and
+ * shown, but nothing is offered for signing.
+ */
+function readExecutors(): Record<string, Address> {
+  const out: Record<string, Address> = {}
+  try {
+    const raw = JSON.parse((import.meta.env.VITE_EXECUTORS as string | undefined) || '{}') as Record<string, string>
+    for (const [id, a] of Object.entries(raw)) if (isAddress(a)) out[id] = getAddress(a)
+  } catch {
+    console.warn('VITE_EXECUTORS illisible, ignoré')
+  }
+  const legacy = import.meta.env.VITE_EXECUTOR_ADDRESS as string | undefined
+  if (legacy && isAddress(legacy) && !out.base) out.base = getAddress(legacy)
+  return out
+}
+const EXECUTORS = readExecutors()
 
-/** Taker sent to the aggregators: the contract holds the tokens during the swap. */
-export const QUOTE_TAKER: Address = EXECUTOR ?? FORK_EXECUTOR
+export type Market = MarketDef & {
+  executor?: Address
+  /** taker sent to the aggregators: the contract holds the tokens during the swap */
+  quoteTaker: Address
+}
 
-export const RPC_URL = (import.meta.env.VITE_RPC_URL as string | undefined) || undefined
+export function getMarket(id: string): Market {
+  const def = MARKETS.find((m) => m.id === id && !m.soon) ?? MARKETS.find((m) => m.id === DEFAULT_MARKET_ID)!
+  const executor = EXECUTORS[def.id]
+  return { ...def, executor, quoteTaker: executor ?? FORK_EXECUTOR }
+}
+
+/**
+ * RPC per chain: VITE_RPC_URL_<chainId> if set (VITE_RPC_URL for Base, e.g. a local anvil fork), otherwise the
+ * PublicNode endpoint with the chain's default public RPC as fallback. All keyless and callable from a browser.
+ */
+const PUBLICNODE: Record<number, string> = {
+  [mainnet.id]: 'https://ethereum-rpc.publicnode.com',
+  [arbitrum.id]: 'https://arbitrum-one-rpc.publicnode.com',
+  [base.id]: 'https://base-rpc.publicnode.com',
+  [avalanche.id]: 'https://avalanche-c-chain-rpc.publicnode.com',
+  [optimism.id]: 'https://optimism-rpc.publicnode.com',
+  [polygon.id]: 'https://polygon-bor-rpc.publicnode.com',
+  [bsc.id]: 'https://bsc-rpc.publicnode.com',
+}
+
+export function rpcUrls(chain: Chain): string[] {
+  const env = import.meta.env as Record<string, string | undefined>
+  const override = env[`VITE_RPC_URL_${chain.id}`] || (chain.id === base.id ? env.VITE_RPC_URL : undefined)
+  if (override) return [override]
+  return [PUBLICNODE[chain.id], chain.rpcUrls.default.http[0]].filter((u): u is string => !!u)
+}
 
 export type QuoteMode = 'auto' | 'live' | 'mock'
 const rawMode = import.meta.env.VITE_QUOTE_MODE as string | undefined
