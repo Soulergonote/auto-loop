@@ -17,7 +17,7 @@ import {
   type Market,
   type Token,
 } from './config'
-import { useMarket, useReserveTokens } from './lib/useMarket'
+import { eligibleEModes, useEModeCategories, useMarket, useReserveTokens, withEMode } from './lib/useMarket'
 import { fmtPct, fmtPrice } from './lib/format'
 import { Card, Notice, Segmented } from './components/ui'
 import { OpenPanel } from './components/OpenPanel'
@@ -221,7 +221,10 @@ type PairViewProps = {
 function PairView({ market: m, collateral, debt, account, aggregator, selectors }: PairViewProps) {
   const [tab, setTab] = useState<'open' | 'close'>('open')
   const market = useMarket(m, collateral, debt, account)
+  const emodes = useEModeCategories(m)
   const r = market.reserves
+  // closing works inside the account's current eMode, if it applies to the pair
+  const currentEMode = r && market.user ? eligibleEModes(emodes, r.collateral, r.debt).find((c) => c.id === market.user!.eModeCategory) : undefined
 
   return (
     <>
@@ -271,9 +274,9 @@ function PairView({ market: m, collateral, debt, account, aggregator, selectors 
 
       {r &&
         (tab === 'open' ? (
-          <OpenPanel reserves={r} user={market.user} account={account} aggregator={aggregator} onDone={market.refetchUser} />
+          <OpenPanel reserves={r} emodes={emodes} user={market.user} account={account} aggregator={aggregator} onDone={market.refetchUser} />
         ) : (
-          <ClosePanel reserves={r} user={market.user} account={account} aggregator={aggregator} onDone={market.refetchUser} />
+          <ClosePanel reserves={withEMode(r, currentEMode)} user={market.user} account={account} aggregator={aggregator} onDone={market.refetchUser} />
         ))}
     </>
   )

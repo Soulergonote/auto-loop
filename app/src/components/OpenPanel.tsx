@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { encodeFunctionData, parseUnits, type Address, type Hash } from 'viem'
 import { AGGREGATORS, TARGET_MIN_HF, type AggregatorId } from '../config'
 import { executorAbi } from '../abi'
-import type { Reserves, UserState } from '../lib/useMarket'
+import { eligibleEModes, withEMode, type EModeCategory, type Reserves, type UserState } from '../lib/useMarket'
 import { useQuote } from '../lib/useQuote'
 import { useDebounced } from '../lib/useDebounced'
 import { getQuote } from '../lib/quotes'
@@ -15,13 +15,26 @@ const SLIPPAGES = ['30', '50', '100'] as const
 
 type Props = {
   reserves: Reserves
+  /** all eMode categories of the market */
+  emodes: EModeCategory[]
   user?: UserState
   account?: Address
   aggregator: AggregatorId
   onDone: () => void
 }
 
-export function OpenPanel({ reserves, user, account, aggregator, onDone }: Props) {
+export function OpenPanel({ reserves: base, emodes, user, account, aggregator, onDone }: Props) {
+  const eligible = eligibleEModes(emodes, base.collateral, base.debt)
+  // default: the account's current category when it fits the pair, otherwise the best one (highest LTV)
+  const [chosenEMode, setChosenEMode] = useState<number>()
+  const currentEMode = user?.eModeCategory ?? 0
+  const emodeId =
+    chosenEMode !== undefined && (chosenEMode === 0 || eligible.some((c) => c.id === chosenEMode))
+      ? chosenEMode
+      : eligible.some((c) => c.id === currentEMode)
+        ? currentEMode
+        : (eligible[0]?.id ?? 0)
+  const reserves = withEMode(base, eligible.find((c) => c.id === emodeId))
   const { market, collateral: C, debt: D } = reserves
   const executor = market.executor
   const [amountText, setAmountText] = useState('1')
@@ -86,7 +99,9 @@ export function OpenPanel({ reserves, user, account, aggregator, onDone }: Props
 
   const warnings: string[] = []
   if (proj && proj.healthFactor < TARGET_MIN_HF) warnings.push(`Health factor sous ${TARGET_MIN_HF} : une petite baisse suffit à te faire liquider.`)
-  if (user && user.eModeCategory !== 0) warnings.push(`eMode actif (catégorie ${user.eModeCategory}) : les LTV affichées sont hors eMode, Aave en applique de plus élevées.`)
+  const switchEMode = !!user && currentEMode !== emodeId
+  if (switchEMode && currentEMode !== 0 && (user.account.debtBase > 0n || user.account.collateralBase > 0n))
+    warnings.push(`Ton compte Aave est en eMode « ${emodes.find((c) => c.id === currentEMode)?.label ?? currentEMode} » : le changer s’applique à toutes tes positions sur ce marché.`)
   if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${AGGREGATORS[aggregator].label} : ${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
 
   const needsApprove = !!user && !!initial && user.collateralAllowance < initial
@@ -107,6 +122,8 @@ export function OpenPanel({ reserves, user, account, aggregator, onDone }: Props
           quote: quoteOverride,
           collateralAllowance: user?.collateralAllowance ?? 0n,
           borrowAllowance: user?.borrowAllowance ?? 0n,
+          pool: market.pool,
+          eModeTarget: switchEMode ? emodeId : undefined,
         }
       : undefined
 
@@ -176,6 +193,20 @@ export function OpenPanel({ reserves, user, account, aggregator, onDone }: Props
         </div>
       </div>
 
+      {eligible.length > 0 && (
+        <label className="field">
+          <span>eMode Aave (actifs corrélés : LTV plus haute)</span>
+          <select value={emodeId} onChange={(e) => setChosenEMode(Number(e.target.value))}>
+            <option value={0}>Aucun (LTV {fmtPct(base.collateral.config.ltvBps / 10_000, 0)})</option>
+            {eligible.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label} (LTV {fmtPct(c.ltvBps / 10_000, 0)}, seuil {fmtPct(c.liquidationThresholdBps / 10_000, 0)})
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
       <label className="field">
         <span>
           Levier <strong className="lev">{fmtX(lev)}</strong>
@@ -216,6 +247,9 @@ export function OpenPanel({ reserves, user, account, aggregator, onDone }: Props
 
       <Steps
         steps={[
+          ...(switchEMode || (!user && emodeId !== 0)
+            ? [{ label: emodeId === 0 ? 'Sortir de l’eMode sur ton compte Aave (transaction, une fois)' : `Passer ton compte Aave en eMode « ${reserves.emode!.label} » (transaction, une fois)` }]
+            : []),
           ...(needsApprove || !user ? [{ label: `Autoriser le contrat à prendre ${amountText || 0} ${C.token.symbol} (transaction, une fois)` }] : []),
           ...(needsDelegation ? [{ label: `Signer la délégation de crédit ${D.token.symbol} (signature, sans gas)` }] : []),
           { label: 'Signer la transaction : flash loan, swap et dépôt en une fois' },

@@ -1,7 +1,7 @@
 import { BaseError, ContractFunctionRevertedError, maxUint256, type Address, type Hash } from 'viem'
 import { simulateContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
 import { wagmiConfig } from '../wagmi'
-import { erc20Abi, executorAbi } from '../abi'
+import { erc20Abi, executorAbi, poolAbi } from '../abi'
 import type { Quote } from './quotes'
 import { signATokenPermit, signDelegation } from './signatures'
 
@@ -19,6 +19,10 @@ export type OpenPlan = {
   quote: Quote
   collateralAllowance: bigint
   borrowAllowance: bigint
+  /** Aave pool, for the eMode switch */
+  pool: Address
+  /** eMode category to put the account in before opening (0 = leave eMode); undefined = already right */
+  eModeTarget?: number
 }
 
 export type ClosePlan = {
@@ -60,7 +64,7 @@ export function closeArgs(p: ClosePlan) {
 }
 
 async function approve(chainId: number, token: Address, spender: Address, amount: bigint, account: Address, onStep: Progress) {
-  onStep('Approbation du collatéral (transaction 1)…')
+  onStep('Approbation du collatéral (transaction)…')
   const { request } = await simulateContract(wagmiConfig, {
     chainId,
     account,
@@ -73,9 +77,26 @@ async function approve(chainId: number, token: Address, spender: Address, amount
   await waitForTransactionReceipt(wagmiConfig, { chainId, hash })
 }
 
-/** Opens the position: approval if needed, credit delegation by signature if needed, then one transaction. */
+/** eMode is a setting of the user's own Aave account: only the user can change it, the executor cannot. */
+async function setEMode(p: OpenPlan, categoryId: number, onStep: Progress) {
+  onStep(categoryId === 0 ? 'Sortie de l’eMode (transaction)…' : 'Activation de l’eMode (transaction)…')
+  const { request } = await simulateContract(wagmiConfig, {
+    chainId: p.chainId,
+    account: p.user,
+    address: p.pool,
+    abi: poolAbi,
+    functionName: 'setUserEMode',
+    args: [categoryId],
+  })
+  const hash = await writeContract(wagmiConfig, request)
+  const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: p.chainId, hash })
+  if (receipt.status !== 'success') throw new Error('Le changement d’eMode a échoué')
+}
+
+/** Opens the position: eMode switch if needed, approval if needed, credit delegation by signature if needed, then one transaction. */
 export async function executeOpen(p: OpenPlan, onStep: Progress): Promise<Hash> {
   if (p.quote.simulated) throw new Error('Devis simulé : impossible à exécuter')
+  if (p.eModeTarget !== undefined) await setEMode(p, p.eModeTarget, onStep)
   if (p.initialCollateral > 0n && p.collateralAllowance < p.initialCollateral) {
     await approve(p.chainId, p.collateral, p.executor, p.initialCollateral, p.user, onStep)
   }

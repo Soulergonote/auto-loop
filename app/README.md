@@ -30,6 +30,10 @@ Le build ne dépend d'aucun serveur : le navigateur appelle directement l'API Ve
 
 Liste dans `src/config.ts` (`MARKETS`), adresses des pools tirées de `@bgd-labs/aave-address-book`. Les actifs de chaque marché sont lus sur la chaîne (`getReservesList`), donc un nouvel actif listé par Aave apparaît sans changer le code. Chaque agrégateur n'est proposé que sur ses chaînes (`chains` dans `AGGREGATORS`) : Velora ne couvre ni Mantle, ni Plasma, ni Linea, ni Monad, KyberSwap prend alors le relais. KyberSwap est appelé sans clé (en-tête `x-client-id: auto-loop`) ; un devis qui contient des frais (`extraFee`) est refusé.
 
+## eMode
+
+Les catégories eMode du marché sont lues sur le pool (getters Aave v3.2+ : configuration, bitmaps collatéral, empruntable et LTV nulle). Pour une paire, l'interface propose les catégories où le collatéral compte avec la LTV de la catégorie et où la dette est empruntable, la meilleure LTV par défaut (ou la catégorie actuelle du compte si elle convient). Les calculs utilisent alors la LTV et le seuil de liquidation de la catégorie. L'eMode est un réglage du compte Aave que seul l'utilisateur peut changer : si besoin, une transaction `setUserEMode` part avant l'ouverture, le contrat ne change pas. La fermeture calcule avec l'eMode actuel du compte.
+
 ## Ce que fait l’interface
 
 **Ouvrir** : emprunt `D = capital × (levier − 1)` au prix de l’oracle Aave, devis D → collatéral chez l’agrégateur choisi (taker = contrat), `minOut` = devis − slippage. Affiche collatéral déposé, levier effectif, health factor (attendu et pire cas), prix de liquidation, LTV face au maximum d’Aave, APY net. Bloque si la LTV dépasse le maximum, si l’actif est isolé, gelé, sans flash loan, ou si le solde manque.

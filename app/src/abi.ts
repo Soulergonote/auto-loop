@@ -29,6 +29,12 @@ export const poolAbi = parseAbi([
   'function FLASHLOAN_PREMIUM_TOTAL() view returns (uint128)',
   'function ADDRESSES_PROVIDER() view returns (address)',
   'function getReservesList() view returns (address[])',
+  'function getEModeCategoryLabel(uint8 id) view returns (string)',
+  'function getEModeCategoryCollateralConfig(uint8 id) view returns ((uint16 ltv, uint16 liquidationThreshold, uint16 liquidationBonus))',
+  'function getEModeCategoryCollateralBitmap(uint8 id) view returns (uint128)',
+  'function getEModeCategoryBorrowableBitmap(uint8 id) view returns (uint128)',
+  'function getEModeCategoryLtvzeroBitmap(uint8 id) view returns (uint128)',
+  'function setUserEMode(uint8 categoryId)',
 ])
 
 export const providerAbi = parseAbi(['function getPriceOracle() view returns (address)'])

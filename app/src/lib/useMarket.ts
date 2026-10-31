@@ -9,6 +9,8 @@ import type { Account, Side } from './math'
 
 export type Reserve = {
   token: Token
+  /** index of the reserve in the pool, its bit in eMode bitmaps */
+  id: number
   config: ReserveConfig
   aToken: Address
   variableDebtToken: Address
@@ -97,6 +99,7 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
       return {
         token: { ...token, decimals: config.decimals },
         config,
+        id: r.id,
         aToken: r.aTokenAddress,
         variableDebtToken: r.variableDebtTokenAddress,
         supplyApy: rayAprToApy(r.currentLiquidityRate),
@@ -159,4 +162,86 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
   }
 }
 
-export type Reserves = { market: Market; collateral: Reserve; debt: Reserve; premiumBps: bigint }
+export type Reserves = { market: Market; emode?: EModeCategory; collateral: Reserve; debt: Reserve; premiumBps: bigint }
+
+/** Aave eMode category (v3.2+ layout): higher LTV for its collateral assets, borrowing limited to its list. */
+export type EModeCategory = {
+  id: number
+  label: string
+  ltvBps: number
+  liquidationThresholdBps: number
+  liquidationBonusBps: number
+  collateralBitmap: bigint
+  borrowableBitmap: bigint
+  ltvZeroBitmap: bigint
+}
+
+/** Highest category id probed: markets use far fewer (Base: 11 in Oct. 2026). */
+const MAX_EMODE_ID = 40
+const EMODE_FNS = [
+  'getEModeCategoryLabel',
+  'getEModeCategoryCollateralConfig',
+  'getEModeCategoryCollateralBitmap',
+  'getEModeCategoryBorrowableBitmap',
+  'getEModeCategoryLtvzeroBitmap',
+] as const
+
+/** All eMode categories of the market. Empty on a pool without the v3.2 eMode getters. */
+export function useEModeCategories(market: Market): EModeCategory[] {
+  const chainId = market.chain.id
+  const reads = useReadContracts({
+    contracts: Array.from({ length: MAX_EMODE_ID }, (_, i) =>
+      EMODE_FNS.map((functionName) => ({ chainId, address: market.pool, abi: poolAbi, functionName, args: [i + 1] }) as const),
+    ).flat(),
+    allowFailure: true,
+    query: { enabled: !DEMO, staleTime: 600_000 },
+  })
+  return useMemo(() => {
+    const out: EModeCategory[] = []
+    if (!reads.data) return out
+    for (let i = 0; i < MAX_EMODE_ID; i++) {
+      const [label, config, collat, borrow, ltvZero] = reads.data.slice(i * EMODE_FNS.length, (i + 1) * EMODE_FNS.length).map((r) => r.result)
+      const c = config as { ltv: number; liquidationThreshold: number; liquidationBonus: number } | undefined
+      if (!c || c.liquidationThreshold === 0) continue // unused id
+      out.push({
+        id: i + 1,
+        label: (label as string) || `catégorie ${i + 1}`,
+        ltvBps: c.ltv,
+        liquidationThresholdBps: c.liquidationThreshold,
+        liquidationBonusBps: c.liquidationBonus,
+        collateralBitmap: (collat as bigint) ?? 0n,
+        borrowableBitmap: (borrow as bigint) ?? 0n,
+        ltvZeroBitmap: (ltvZero as bigint) ?? 0n,
+      })
+    }
+    return out
+  }, [reads.data])
+}
+
+const hasBit = (bitmap: bigint, id: number) => ((bitmap >> BigInt(id)) & 1n) === 1n
+
+/** Categories in which the collateral counts with the category LTV and the debt asset can be borrowed, best LTV first. */
+export function eligibleEModes(categories: EModeCategory[], collateral: Reserve, debt: Reserve): EModeCategory[] {
+  return categories
+    .filter((c) => hasBit(c.collateralBitmap, collateral.id) && !hasBit(c.ltvZeroBitmap, collateral.id) && hasBit(c.borrowableBitmap, debt.id))
+    .sort((a, b) => b.ltvBps - a.ltvBps || a.id - b.id)
+}
+
+/** The pair as Aave sees it inside the category: the collateral's LTV and liquidation threshold are the category's. */
+export function withEMode(reserves: Reserves, category?: EModeCategory): Reserves {
+  if (!category) return { ...reserves, emode: undefined }
+  const C = reserves.collateral
+  return {
+    ...reserves,
+    emode: category,
+    collateral: {
+      ...C,
+      config: {
+        ...C.config,
+        ltvBps: category.ltvBps,
+        liquidationThresholdBps: category.liquidationThresholdBps,
+        liquidationBonusBps: category.liquidationBonusBps,
+      },
+    },
+  }
+}

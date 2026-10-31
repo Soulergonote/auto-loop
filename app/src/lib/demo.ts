@@ -18,6 +18,7 @@ export function demoReserve(token: Token): Reserve {
   const price = BigInt(Math.round(p.price * 1e8))
   return {
     token,
+    id: 0,
     config: {
       ltvBps: p.ltv,
       liquidationThresholdBps: p.lt,
