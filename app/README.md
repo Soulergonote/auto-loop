@@ -1,6 +1,6 @@
 # Auto-loop : interface
 
-Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon et BNB Chain, via le contrat `LeverageExecutor` (`../contracts`). On choisit la plateforme, la paire collatéral / dette et le levier ; le swap passe par Velora (0x et 1inch sont codés mais affichés « bientôt ») ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
+Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Plasma, Linea, Sonic et Monad, via le contrat `LeverageExecutor` (`../contracts`). On choisit la plateforme, la paire collatéral / dette et le levier ; le swap passe par Velora ou KyberSwap, au choix selon la chaîne (0x et 1inch sont codés mais affichés « bientôt ») ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
 
 Stack : Vite + React + TypeScript, wagmi 2 / viem 2.
 
@@ -28,7 +28,7 @@ Le build ne dépend d'aucun serveur : le navigateur appelle directement l'API Ve
 
 ## Marchés
 
-Liste dans `src/config.ts` (`MARKETS`), adresses des pools tirées de `@bgd-labs/aave-address-book`. Les actifs de chaque marché sont lus sur la chaîne (`getReservesList`), donc un nouvel actif listé par Aave apparaît sans changer le code. Seules les chaînes couvertes par Velora sont sélectionnables : Monad et Plasma ont un marché Aave v3 mais Velora n'y cote pas encore (vérifié le 2026-10-31), ils sont affichés « bientôt ».
+Liste dans `src/config.ts` (`MARKETS`), adresses des pools tirées de `@bgd-labs/aave-address-book`. Les actifs de chaque marché sont lus sur la chaîne (`getReservesList`), donc un nouvel actif listé par Aave apparaît sans changer le code. Chaque agrégateur n'est proposé que sur ses chaînes (`chains` dans `AGGREGATORS`) : Velora ne couvre ni Mantle, ni Plasma, ni Linea, ni Monad, KyberSwap prend alors le relais. KyberSwap est appelé sans clé (en-tête `x-client-id: auto-loop`) ; un devis qui contient des frais (`extraFee`) est refusé.
 
 ## Ce que fait l’interface
 

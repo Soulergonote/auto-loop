@@ -10,7 +10,9 @@ import {
   MARKETS,
   PLATFORMS,
   QUOTE_MODE,
+  aggregatorsFor,
   getMarket,
+  supportsChain,
   type AggregatorId,
   type Market,
   type Token,
@@ -92,7 +94,9 @@ export function App() {
   const reserveTokens = useReserveTokens(market)
   const tokens = reserveTokens.tokens
   const [platform, setPlatform] = useState<string>('aave-v3')
-  const [aggregator, setAggregator] = useState<AggregatorId>('velora')
+  const [preferredAggregator, setAggregator] = useState<AggregatorId>('velora')
+  // keep the choice when it quotes on this chain, otherwise fall back to the first one that does
+  const aggregator = supportsChain(preferredAggregator, market.chain.id) ? preferredAggregator : (aggregatorsFor(market.chain.id)[0] ?? preferredAggregator)
   const [picked, setPicked] = useState<{ market: string; collateral: Address; debt: Address }>()
 
   const pair = useMemo(() => {
@@ -143,12 +147,15 @@ export function App() {
         <Segmented
           value={aggregator}
           onChange={setAggregator}
-          options={(Object.keys(AGGREGATORS) as AggregatorId[]).map((id) => ({
-            value: id,
-            label: AGGREGATORS[id].label,
-            disabled: !AGGREGATORS[id].available,
-            hint: AGGREGATORS[id].available ? undefined : 'bientôt',
-          }))}
+          options={(Object.keys(AGGREGATORS) as AggregatorId[]).map((id) => {
+            const usable = AGGREGATORS[id].available && supportsChain(id, market.chain.id)
+            return {
+              value: id,
+              label: AGGREGATORS[id].label,
+              disabled: !usable,
+              hint: !AGGREGATORS[id].available ? 'bientôt' : usable ? undefined : `pas sur ${market.chain.name}`,
+            }
+          })}
         />
       </div>
       {tokens && pair && (

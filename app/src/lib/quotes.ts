@@ -1,5 +1,5 @@
 import { getAddress, hexToBigInt, isAddress, isHex, slice, type Address, type Hex } from 'viem'
-import { AGGREGATORS, QUOTE_MODE, VELORA_EXCLUDE_DEXS, VELORA_INCLUDE_DEXS, VELORA_PARTNER, type AggregatorId, type Token } from '../config'
+import { AGGREGATORS, KYBER_CHAIN_SLUGS, KYBER_CLIENT_ID, QUOTE_MODE, VELORA_EXCLUDE_DEXS, VELORA_INCLUDE_DEXS, VELORA_PARTNER, type AggregatorId, type Token } from '../config'
 import { applySlippage, oracleSwapOut, type Side } from './math'
 
 export type QuoteRequest = {
@@ -83,6 +83,7 @@ async function liveQuote(req: QuoteRequest, signal?: AbortSignal): Promise<Quote
 
 /** Velora's public API allows any origin (CORS *), so the browser calls it directly: no server needed. */
 const VELORA_API = 'https://api.paraswap.io'
+const KYBER_API = 'https://aggregator-api.kyberswap.com'
 
 type RawQuote = { to: string; data: string; value?: string; buyAmount: string }
 
@@ -142,6 +143,43 @@ const LIVE: Record<AggregatorId, (req: QuoteRequest, signal?: AbortSignal) => Pr
     })
     const body = await fetchJson(`/api/1inch/swap/v6.0/${req.chainId}/swap?${q}`, { signal })
     return { to: body.tx.to, data: body.tx.data, value: body.tx.value, buyAmount: body.dstAmount }
+  },
+
+  // KyberSwap API v1: route, then build. No fee unless the integrator asks for one: any extraFee is refused.
+  async kyber(req, signal) {
+    const chain = KYBER_CHAIN_SLUGS[req.chainId]
+    if (!chain) throw new QuoteError('KyberSwap ne couvre pas cette chaîne')
+    const headers = { 'x-client-id': KYBER_CLIENT_ID }
+    const q = new URLSearchParams({
+      tokenIn: req.sell.address,
+      tokenOut: req.buy.address,
+      amountIn: req.sellAmount.toString(),
+      gasInclude: 'true',
+    })
+    const route = await fetchJson(`${KYBER_API}/${chain}/api/v1/routes?${q}`, { headers, signal })
+    const summary = route?.data?.routeSummary
+    if (!summary) throw new QuoteError(`KyberSwap : pas de route${route?.message ? ` (${route.message})` : ''}`)
+    if (summary.extraFee?.feeAmount && Number(summary.extraFee.feeAmount) !== 0) {
+      throw new QuoteError(`KyberSwap applique des frais (${summary.extraFee.feeAmount})`)
+    }
+    const built = await fetchJson(`${KYBER_API}/${chain}/api/v1/route/build`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      signal,
+      body: JSON.stringify({
+        routeSummary: summary,
+        sender: req.taker,
+        recipient: req.taker,
+        slippageTolerance: Number(req.slippageBps),
+        deadline: Math.floor(Date.now() / 1000) + 20 * 60,
+        source: KYBER_CLIENT_ID,
+        // the executor holds no tokens yet when quoting
+        skipSimulateTx: true,
+      }),
+    })
+    const tx = built?.data
+    if (!tx?.data) throw new QuoteError(`KyberSwap : construction refusée${built?.message ? ` (${built.message})` : ''}`)
+    return { to: tx.routerAddress, data: tx.data, value: tx.transactionValue, buyAmount: tx.amountOut ?? summary.amountOut }
   },
 
   // Velora (ParaSwap) v6.2: price route, then transaction build with ignoreChecks (taker has no balance yet).
