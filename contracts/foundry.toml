@@ -1,0 +1,19 @@
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+libs = ["lib"]
+solc = "0.8.27"
+evm_version = "cancun"  # the live Aave v3 Pool on Base uses Cancun opcodes (fork reverts with NotActivated under shanghai)
+optimizer = true
+optimizer_runs = 200
+bytecode_hash = "none"
+# required by the Aave test deployment helpers (they only read .env through sed + cast)
+ffi = true
+
+[fuzz]
+runs = 256
+
+[rpc_endpoints]
+base = "${BASE_RPC_URL}"
+arbitrum = "${ARBITRUM_RPC_URL}"
