@@ -18,7 +18,7 @@ import {
   type Token,
 } from './config'
 import { eligibleEModes, useEModeCategories, useMarket, useReserveTokens, withEMode, withIncentives } from './lib/useMarket'
-import { useIncentives } from './lib/merkl'
+import { useCampaigns } from './lib/merkl'
 import { fmtPct, fmtPrice } from './lib/format'
 import { Card, Notice, Segmented } from './components/ui'
 import { OpenPanel } from './components/OpenPanel'
@@ -223,7 +223,7 @@ function PairView({ market: m, collateral, debt, account, aggregator, selectors 
   const [tab, setTab] = useState<'open' | 'close'>('open')
   const market = useMarket(m, collateral, debt, account)
   const emodes = useEModeCategories(m)
-  const incentives = useIncentives(m)
+  const incentives = useCampaigns(m)
   const r = market.reserves && withIncentives(market.reserves, incentives.data)
   // closing works inside the account's current eMode, if it applies to the pair
   const currentEMode = r && market.user ? eligibleEModes(emodes, r.collateral, r.debt).find((c) => c.id === market.user!.eModeCategory) : undefined

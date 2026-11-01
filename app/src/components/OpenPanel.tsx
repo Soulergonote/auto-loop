@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { encodeFunctionData, parseUnits, type Address, type Hash } from 'viem'
 import { AGGREGATORS, TARGET_MIN_HF, type AggregatorId } from '../config'
 import { executorAbi } from '../abi'
+import { campaignsForPair, rewardsOnEquity } from '../lib/merkl'
 import { eligibleEModes, withEMode, type EModeCategory, type Reserves, type UserState } from '../lib/useMarket'
 import { useQuote } from '../lib/useQuote'
 import { useDebounced } from '../lib/useDebounced'
@@ -106,8 +107,11 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
 
   const needsApprove = !!user && !!initial && user.collateralAllowance < initial
   const needsDelegation = !user || user.borrowAllowance < debtAmount
-  const apy = proj ? netApy(proj.leverage, C.supplyApy + C.supplyRewardApr, D.borrowApy - D.borrowRewardApr) : undefined
-  const rewardsApy = proj ? netApy(proj.leverage, C.supplyRewardApr, -D.borrowRewardApr) : 0
+  const pairCampaigns = campaignsForPair(reserves.campaigns, C, D)
+  const rewardsApy = proj ? rewardsOnEquity(pairCampaigns, proj.leverage, C.token.symbol, D.token.symbol) : 0
+  const apy = proj ? netApy(proj.leverage, C.supplyApy, D.borrowApy) + rewardsApy : undefined
+  for (const c of [...pairCampaigns.supply, ...pairCampaigns.borrow].filter((c) => c.conditional))
+    warnings.push(`Rewards Merkl « ${c.name} » comptés dans l’APY, mais soumis à des conditions (par exemple health factor maximum ou actifs empruntés) : vérifie-les sur Merkl.`)
 
   const plan = (quoteOverride = q): OpenPlan | undefined =>
     quoteOverride && account && initial !== undefined

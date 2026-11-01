@@ -20,7 +20,7 @@ export const MARKETS: MarketDef[] = [
   { id: 'optimism', label: 'Optimism', chain: optimism, pool: '0x794a61358D6845594F94dc1DB02A252b5b4814aD' },
   { id: 'polygon', label: 'Polygon', chain: polygon, pool: '0x794a61358D6845594F94dc1DB02A252b5b4814aD' },
   { id: 'bnb', label: 'BNB Chain', chain: bsc, pool: '0x6807dc923806fE8Fd134338EABCA509979a7e0cB' },
-  { id: 'mantle', label: 'Mantle', chain: mantle, pool: '0x458F293454fE0d67EC0655f3672301301DD51422' },
+  { id: 'mantle', label: 'Mantle', chain: mantle, pool: '0x458F293454fE0d67EC0655f3672301301DD51422', soon: 'ni Velora ni KyberSwap n’y cotent' },
   { id: 'plasma', label: 'Plasma', chain: plasma, pool: '0x925a2A7214Ed92428B5b1B090F80b25700095e12' },
   { id: 'linea', label: 'Linea', chain: linea, pool: '0xc47b8C00b0f69a36fa203Ffeac0334874574a8Ac' },
   { id: 'sonic', label: 'Sonic', chain: sonic, pool: '0x5362dBb1e601abF3a4c14c22ffEdA64042E5eAA3' },
@@ -69,15 +69,16 @@ export const AGGREGATORS: Record<AggregatorId, Aggregator> = {
     router: '0x6A000F20005980200259B80c5102003040001068',
     needsKey: false,
     available: true,
-    // from the API's own "Supported chains" error, 2026-10-31
-    chains: [1, 10, 56, 100, 130, 137, 146, 4663, 8453, 42161, 43114],
+    // from the API's own "Supported chains" error, 2026-10-31; Sonic (146) is listed but answers 503
+    chains: [1, 10, 56, 100, 130, 137, 4663, 8453, 42161, 43114],
   },
   kyber: {
     label: 'KyberSwap',
     router: '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5',
     needsKey: false,
     available: true,
-    chains: [1, 10, 56, 137, 143, 146, 5000, 8453, 9745, 42161, 43114, 59144],
+    // Mantle answers 404 (checked 2026-11-01)
+    chains: [1, 10, 56, 137, 143, 146, 8453, 9745, 42161, 43114, 59144],
   },
 }
 
@@ -89,7 +90,6 @@ export const KYBER_CHAIN_SLUGS: Record<number, string> = {
   137: 'polygon',
   143: 'monad',
   146: 'sonic',
-  5000: 'mantle',
   8453: 'base',
   9745: 'plasma',
   42161: 'arbitrum',

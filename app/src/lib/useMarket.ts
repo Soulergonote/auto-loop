@@ -6,7 +6,7 @@ import { DEMO, DEMO_TOKENS, type Market, type Token } from '../config'
 import { demoReserve, demoUser } from './demo'
 import { decodeReserveConfig, rayAprToApy, type ReserveConfig } from './aave'
 import type { Account, Side } from './math'
-import { rewardsFor, type Incentives } from './merkl'
+import { headlineRewards, type Campaign } from './merkl'
 
 export type Reserve = {
   token: Token
@@ -168,7 +168,7 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
   }
 }
 
-export type Reserves = { market: Market; emode?: EModeCategory; collateral: Reserve; debt: Reserve; premiumBps: bigint }
+export type Reserves = { market: Market; emode?: EModeCategory; campaigns?: Campaign[]; collateral: Reserve; debt: Reserve; premiumBps: bigint }
 
 /** Aave eMode category (v3.2+ layout): higher LTV for its collateral assets, borrowing limited to its list. */
 export type EModeCategory = {
@@ -252,11 +252,11 @@ export function withEMode(reserves: Reserves, category?: EModeCategory): Reserve
   }
 }
 
-/** Adds the Merkl reward APRs of each reserve. */
-export function withIncentives(reserves: Reserves, incentives: Incentives | undefined): Reserves {
+/** Adds the headline Merkl reward APRs of each reserve and keeps the campaigns for the pair-level computation. */
+export function withIncentives(reserves: Reserves, campaigns: Campaign[] | undefined): Reserves {
   const add = (r: Reserve): Reserve => {
-    const rw = rewardsFor(incentives, r.aToken, r.variableDebtToken)
+    const rw = headlineRewards(campaigns, r)
     return { ...r, supplyRewardApr: rw.supply, borrowRewardApr: rw.borrow }
   }
-  return { ...reserves, collateral: add(reserves.collateral), debt: add(reserves.debt) }
+  return { ...reserves, campaigns, collateral: add(reserves.collateral), debt: add(reserves.debt) }
 }
