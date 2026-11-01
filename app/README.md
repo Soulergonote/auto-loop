@@ -30,6 +30,10 @@ Le build ne dépend d'aucun serveur : le navigateur appelle directement l'API Ve
 
 Liste dans `src/config.ts` (`MARKETS`), adresses des pools tirées de `@bgd-labs/aave-address-book`. Les actifs de chaque marché sont lus sur la chaîne (`getReservesList`), donc un nouvel actif listé par Aave apparaît sans changer le code. Chaque agrégateur n'est proposé que sur ses chaînes (`chains` dans `AGGREGATORS`) : Velora ne couvre ni Mantle, ni Plasma, ni Linea, ni Monad, KyberSwap prend alors le relais. KyberSwap est appelé sans clé (en-tête `x-client-id: auto-loop`) ; un devis qui contient des frais (`extraFee`) est refusé.
 
+## Rewards Merkl
+
+Les APY ajoutent les campagnes Merkl en cours sur Aave (`api.merkl.xyz/v4/opportunities`, sans clé) : rewards de dépôt sur l'aToken du collatéral, rewards d'emprunt sur le jeton de dette. Une campagne n'est comptée que si elle nomme l'adresse de l'aToken ou du jeton de dette ; sinon elle est ignorée. Les conditions d'éligibilité propres à certaines campagnes ne sont pas vérifiées. Si l'API ne répond pas, l'interface le dit et affiche les APY sans bonus.
+
 ## eMode
 
 Les catégories eMode du marché sont lues sur le pool (getters Aave v3.2+ : configuration, bitmaps collatéral, empruntable et LTV nulle). Pour une paire, l'interface propose les catégories où le collatéral compte avec la LTV de la catégorie et où la dette est empruntable, la meilleure LTV par défaut (ou la catégorie actuelle du compte si elle convient). Les calculs utilisent alors la LTV et le seuil de liquidation de la catégorie. L'eMode est un réglage du compte Aave que seul l'utilisateur peut changer : si besoin, une transaction `setUserEMode` part avant l'ouverture, le contrat ne change pas. La fermeture calcule avec l'eMode actuel du compte.

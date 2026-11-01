@@ -6,6 +6,7 @@ import { DEMO, DEMO_TOKENS, type Market, type Token } from '../config'
 import { demoReserve, demoUser } from './demo'
 import { decodeReserveConfig, rayAprToApy, type ReserveConfig } from './aave'
 import type { Account, Side } from './math'
+import { rewardsFor, type Incentives } from './merkl'
 
 export type Reserve = {
   token: Token
@@ -16,6 +17,9 @@ export type Reserve = {
   variableDebtToken: Address
   supplyApy: number
   borrowApy: number
+  /** Merkl reward APRs (fractions), 0 when there is no campaign */
+  supplyRewardApr: number
+  borrowRewardApr: number
   price: bigint
   side: Side
 }
@@ -104,6 +108,8 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
         variableDebtToken: r.variableDebtTokenAddress,
         supplyApy: rayAprToApy(r.currentLiquidityRate),
         borrowApy: rayAprToApy(r.currentVariableBorrowRate),
+        supplyRewardApr: 0,
+        borrowRewardApr: 0,
         price,
         side: { price, decimals: config.decimals },
       }
@@ -244,4 +250,13 @@ export function withEMode(reserves: Reserves, category?: EModeCategory): Reserve
       },
     },
   }
+}
+
+/** Adds the Merkl reward APRs of each reserve. */
+export function withIncentives(reserves: Reserves, incentives: Incentives | undefined): Reserves {
+  const add = (r: Reserve): Reserve => {
+    const rw = rewardsFor(incentives, r.aToken, r.variableDebtToken)
+    return { ...r, supplyRewardApr: rw.supply, borrowRewardApr: rw.borrow }
+  }
+  return { ...reserves, collateral: add(reserves.collateral), debt: add(reserves.debt) }
 }

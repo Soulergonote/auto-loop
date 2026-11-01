@@ -17,7 +17,8 @@ import {
   type Market,
   type Token,
 } from './config'
-import { eligibleEModes, useEModeCategories, useMarket, useReserveTokens, withEMode } from './lib/useMarket'
+import { eligibleEModes, useEModeCategories, useMarket, useReserveTokens, withEMode, withIncentives } from './lib/useMarket'
+import { useIncentives } from './lib/merkl'
 import { fmtPct, fmtPrice } from './lib/format'
 import { Card, Notice, Segmented } from './components/ui'
 import { OpenPanel } from './components/OpenPanel'
@@ -222,7 +223,8 @@ function PairView({ market: m, collateral, debt, account, aggregator, selectors 
   const [tab, setTab] = useState<'open' | 'close'>('open')
   const market = useMarket(m, collateral, debt, account)
   const emodes = useEModeCategories(m)
-  const r = market.reserves
+  const incentives = useIncentives(m)
+  const r = market.reserves && withIncentives(market.reserves, incentives.data)
   // closing works inside the account's current eMode, if it applies to the pair
   const currentEMode = r && market.user ? eligibleEModes(emodes, r.collateral, r.debt).find((c) => c.id === market.user!.eModeCategory) : undefined
 
@@ -252,13 +254,20 @@ function PairView({ market: m, collateral, debt, account, aggregator, selectors 
                   <td>
                     {fmtPct(x.config.ltvBps / 10_000, 0)} / {fmtPct(x.config.liquidationThresholdBps / 10_000, 0)}
                   </td>
-                  <td>{fmtPct(x.supplyApy)}</td>
-                  <td>{fmtPct(x.borrowApy)}</td>
+                  <td>
+                    {fmtPct(x.supplyApy)}
+                    {x.supplyRewardApr > 0 && <small className="reward"> + {fmtPct(x.supplyRewardApr)} Merkl</small>}
+                  </td>
+                  <td>
+                    {fmtPct(x.borrowApy)}
+                    {x.borrowRewardApr > 0 && <small className="reward"> − {fmtPct(x.borrowRewardApr)} Merkl</small>}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
+        {r && incentives.isError && <p className="muted small">Rewards Merkl indisponibles : APY sans bonus.</p>}
       </Card>
 
       <div className="tabs">

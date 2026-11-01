@@ -35,6 +35,8 @@ export function demoReserve(token: Token): Reserve {
     variableDebtToken: zeroAddress,
     supplyApy: p.supply,
     borrowApy: p.borrow,
+    supplyRewardApr: 0,
+    borrowRewardApr: 0,
     price,
     side: { price, decimals: token.decimals },
   }

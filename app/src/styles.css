@@ -106,3 +106,4 @@ footer { text-align: center; }
   .metrics { grid-template-columns: 1fr 1fr; }
   .reserves th:nth-child(4), .reserves td:nth-child(4) { display: none; }
 }
+.reward { color: var(--good); font-weight: 500; }

@@ -106,7 +106,8 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
 
   const needsApprove = !!user && !!initial && user.collateralAllowance < initial
   const needsDelegation = !user || user.borrowAllowance < debtAmount
-  const apy = proj ? netApy(proj.leverage, C.supplyApy, D.borrowApy) : undefined
+  const apy = proj ? netApy(proj.leverage, C.supplyApy + C.supplyRewardApr, D.borrowApy - D.borrowRewardApr) : undefined
+  const rewardsApy = proj ? netApy(proj.leverage, C.supplyRewardApr, -D.borrowRewardApr) : 0
 
   const plan = (quoteOverride = q): OpenPlan | undefined =>
     quoteOverride && account && initial !== undefined
@@ -234,7 +235,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           value={proj && Number.isFinite(proj.healthFactor) ? fmtPrice(BigInt(Math.round(Number(C.price) * (1 - proj.dropToLiquidation)))) : '…'}
           sub={proj && `baisse de ${fmtPct(proj.dropToLiquidation, 1)} face à ${D.token.symbol}`}
         />
-        <Metric label="APY net sur le capital" value={apy !== undefined ? fmtPct(apy) : '…'} sub="taux variables, hors coût du swap" tone={apy !== undefined && apy < 0 ? 'warn' : undefined} />
+        <Metric label="APY net sur le capital" value={apy !== undefined ? fmtPct(apy) : '…'} sub={rewardsApy !== 0 ? `dont ${fmtPct(rewardsApy)} de rewards Merkl, hors coût du swap` : "taux variables, hors coût du swap"} tone={apy !== undefined && apy < 0 ? 'warn' : undefined} />
       </div>
 
       {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
