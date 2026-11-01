@@ -12,6 +12,8 @@ import {
   QUOTE_MODE,
   aggregatorsFor,
   getMarket,
+  savedExecutors,
+  storeExecutors,
   supportsChain,
   type AggregatorId,
   type Market,
@@ -23,6 +25,8 @@ import { fmtPct, fmtPrice } from './lib/format'
 import { Card, Notice, Segmented } from './components/ui'
 import { OpenPanel } from './components/OpenPanel'
 import { ClosePanel } from './components/ClosePanel'
+import { DeployPanel } from './components/DeployPanel'
+import { useExecutorCheck } from './lib/deploy'
 
 function WalletButton({ market }: { market: Market }) {
   const { address, chainId, isConnected } = useAccount()
@@ -91,7 +95,21 @@ function defaultPair(tokens: Token[]) {
 export function App() {
   const { address } = useAccount()
   const [marketId, setMarketId] = useState(savedMarketId)
-  const market = useMemo(() => getMarket(marketId), [marketId])
+  const [localExecutors, setLocalExecutors] = useState(savedExecutors)
+  const declared = useMemo(() => getMarket(marketId, localExecutors), [marketId, localExecutors])
+  // an executor is only offered for signing once its on-chain code is checked to be exactly this contract
+  const check = useExecutorCheck(declared)
+  const market = useMemo(
+    () => (declared.executor && check.data !== true ? { ...declared, executor: undefined } : declared),
+    [declared, check.data],
+  )
+  function setLocalExecutor(id: string, a?: Address) {
+    const next = { ...localExecutors }
+    if (a) next[id] = a
+    else delete next[id]
+    setLocalExecutors(next)
+    storeExecutors(next)
+  }
   const reserveTokens = useReserveTokens(market)
   const tokens = reserveTokens.tokens
   const [platform, setPlatform] = useState<string>('aave-v3')
@@ -182,12 +200,27 @@ export function App() {
       </header>
 
       {DEMO && <Notice tone="info">Mode démo : prix et paramètres de marché fictifs, rien n’est lu sur la chaîne.</Notice>}
-      {!market.executor && (
-        <Notice tone="info">
-          Le contrat n’est pas encore déployé sur {market.label} : tout est calculé et la transaction est affichée, mais pas
-          proposée à la signature.
+      {!DEMO && declared.executor && check.isPending && <Notice tone="info">Vérification du contrat Auto-loop sur {market.label}…</Notice>}
+      {!DEMO && declared.executor && check.isError && (
+        <Notice tone="bad">
+          Contrat {declared.executor} refusé : {check.error.message}. Rien ne sera proposé à la signature avec lui.{' '}
+          {declared.executorSource === 'wallet' && (
+            <button className="btn ghost" onClick={() => setLocalExecutor(market.id)}>
+              Oublier cette adresse
+            </button>
+          )}
         </Notice>
       )}
+      {!DEMO && market.executor && (
+        <p className="muted small">
+          Contrat Auto-loop vérifié sur {market.label} :{' '}
+          <a href={`${market.chain.blockExplorers?.default.url}/address/${market.executor}`} target="_blank" rel="noreferrer">
+            {market.executor}
+          </a>
+          {market.executorSource === 'wallet' && ' (déployé ou ajouté depuis ce navigateur)'}
+        </p>
+      )}
+      {!DEMO && !declared.executor && <DeployPanel market={market} onReady={(a) => setLocalExecutor(market.id, a)} />}
       {QUOTE_MODE === 'mock' && <Notice tone="info">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</Notice>}
 
       {pair ? (

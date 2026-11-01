@@ -4,7 +4,6 @@ pragma solidity ^0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Ownable, Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {IAaveV3Pool, IFlashLoanReceiver, ICreditDelegationToken} from "./interfaces/IAaveV3.sol";
@@ -35,7 +34,9 @@ import {IAaveV3Pool, IFlashLoanReceiver, ICreditDelegationToken} from "./interfa
 ///   - aggregator calls only go to whitelisted routers, with an exact approval reset to 0 after the call,
 ///     and the output is checked as a balance delta against minOut
 ///   - the contract keeps no funds and no allowances between transactions
-contract LeverageExecutor is IFlashLoanReceiver, Ownable2Step, ReentrancyGuard {
+///   - no owner and no admin function: the router list is fixed at deployment, so nobody (deployer included)
+///     can later point swaps at a token contract and spend the allowances users gave to this contract
+contract LeverageExecutor is IFlashLoanReceiver, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint256 private constant MODE_NONE = 0;
@@ -43,8 +44,9 @@ contract LeverageExecutor is IFlashLoanReceiver, Ownable2Step, ReentrancyGuard {
 
     IAaveV3Pool public immutable POOL;
 
-    /// @notice Aggregator routers the contract may call. For every supported aggregator the call target is also
-    /// the address that pulls the tokens (0x AllowanceHolder, 1inch AggregationRouterV6, Velora Augustus v6.2).
+    /// @notice Aggregator routers the contract may call, fixed at deployment. For every supported aggregator the
+    /// call target is also the address that pulls the tokens (0x AllowanceHolder, 1inch AggregationRouterV6,
+    /// Velora Augustus v6.2, KyberSwap MetaAggregationRouterV2).
     mapping(address => bool) public isRouterAllowed;
 
     enum Action {
@@ -92,7 +94,7 @@ contract LeverageExecutor is IFlashLoanReceiver, Ownable2Step, ReentrancyGuard {
         bytes32 s;
     }
 
-    event RouterSet(address indexed router, bool allowed);
+    event RouterAllowed(address indexed router);
     event PositionOpened(
         address indexed user,
         address indexed collateralAsset,
@@ -123,31 +125,16 @@ contract LeverageExecutor is IFlashLoanReceiver, Ownable2Step, ReentrancyGuard {
     error SellExceedsWithdrawn(uint256 toSell, uint256 withdrawn);
     error InsufficientToRepayFlashLoan(uint256 balance, uint256 owed);
 
-    constructor(IAaveV3Pool pool, address owner_, address[] memory routers) Ownable(owner_) {
+    constructor(IAaveV3Pool pool, address[] memory routers) {
         if (address(pool) == address(0)) revert ZeroAddress();
         POOL = pool;
         for (uint256 i; i < routers.length; ++i) {
-            _setRouter(routers[i], true);
+            address router = routers[i];
+            // an EOA would make every swap a no-op call; the pool and this contract must never be call targets
+            if (router == address(pool) || router == address(this) || router.code.length == 0) revert InvalidRouter(router);
+            isRouterAllowed[router] = true;
+            emit RouterAllowed(router);
         }
-    }
-
-    // ---------------------------------------------------------------------------------------------
-    // Admin
-    // ---------------------------------------------------------------------------------------------
-
-    function setRouter(address router, bool allowed) external onlyOwner {
-        _setRouter(router, allowed);
-    }
-
-    /// @notice Recovers tokens sent to the contract by mistake. The contract holds nothing between transactions.
-    function rescue(IERC20 token, address to, uint256 amount) external onlyOwner {
-        token.safeTransfer(to, amount);
-    }
-
-    function _setRouter(address router, bool allowed) internal {
-        if (router == address(0) || router == address(POOL) || router == address(this)) revert InvalidRouter(router);
-        isRouterAllowed[router] = allowed;
-        emit RouterSet(router, allowed);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -334,6 +321,8 @@ contract LeverageExecutor is IFlashLoanReceiver, Ownable2Step, ReentrancyGuard {
         returns (uint256 received)
     {
         if (!isRouterAllowed[s.router]) revert RouterNotAllowed(s.router);
+        // defense in depth: a call to a token contract could spend allowances users gave to this contract
+        if (s.router == tokenIn || s.router == tokenOut) revert InvalidRouter(s.router);
 
         uint256 inBefore = IERC20(tokenIn).balanceOf(address(this));
         uint256 outBefore = IERC20(tokenOut).balanceOf(address(this));

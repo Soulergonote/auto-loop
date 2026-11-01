@@ -55,6 +55,7 @@ contract BaseForkTest is Test {
     address constant ZEROX_ALLOWANCE_HOLDER = 0x0000000000001fF3684f28c67538d4D072C22734;
     address constant ONEINCH_ROUTER_V6 = 0x111111125421cA6dc452d289314280a0f8842A65;
     address constant VELORA_AUGUSTUS_V62 = 0x6A000F20005980200259B80c5102003040001068;
+    address constant KYBER_META_AGGREGATOR_V2 = 0x6131B5fae19EA4f9D964eAc0408E4408b66337b5;
 
     address constant EXECUTOR = address(uint160(uint256(keccak256("auto-loop.executor.fork"))));
 
@@ -74,12 +75,13 @@ contract BaseForkTest is Test {
         if (forkBlock == 0) vm.createSelectFork(rpc);
         else vm.createSelectFork(rpc, forkBlock);
 
-        address[] memory routers = new address[](4);
+        address[] memory routers = new address[](5);
         routers[0] = UNI_ROUTER02;
         routers[1] = ZEROX_ALLOWANCE_HOLDER;
         routers[2] = ONEINCH_ROUTER_V6;
         routers[3] = VELORA_AUGUSTUS_V62;
-        deployCodeTo("LeverageExecutor.sol:LeverageExecutor", abi.encode(POOL, address(this), routers), EXECUTOR);
+        routers[4] = KYBER_META_AGGREGATOR_V2;
+        deployCodeTo("LeverageExecutor.sol:LeverageExecutor", abi.encode(POOL, routers), EXECUTOR);
         executor = LeverageExecutor(EXECUTOR);
 
         oracle = IOracleLike(IPoolAddressesProviderLike(IPoolLike(POOL).ADDRESSES_PROVIDER()).getPriceOracle());

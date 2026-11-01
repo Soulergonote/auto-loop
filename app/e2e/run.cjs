@@ -2,6 +2,8 @@
 //   node e2e/run.cjs open ouvrir     open 1 WETH at 3x against USDC
 //   node e2e/run.cjs close50 f50    repay 50 %
 //   node e2e/run.cjs close fermer   close everything
+//   node e2e/run.cjs deploy deployer deploy the contract from the test wallet with the app's button
+// EXECUTOR=0x… preloads an executor as if deployed from this browser (app built without VITE_EXECUTORS).
 // Writes <prefix>-avant.png / <prefix>-apres.png and prints the notices. Needs playwright (NODE_PATH=$(npm root -g)).
 const { chromium } = require('playwright')
 const [,, mode, outPrefix] = process.argv
@@ -10,6 +12,7 @@ const U = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
   const browser = await chromium.launch()
   const page = await browser.newPage({ viewport: { width: 1100, height: 1500 } })
   page.on('console', (m) => { if (m.type() === 'error') console.log('console:', m.text().slice(0, 300)) })
+  if (process.env.EXECUTOR) await page.addInitScript((a) => localStorage.setItem('auto-loop.executors', JSON.stringify({ base: a })), process.env.EXECUTOR)
   await page.addInitScript((U) => {
     let id = 0
     const rpc = async (method, params) => {
@@ -34,6 +37,15 @@ const U = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
   await page.goto(process.env.APP_URL || 'http://localhost:5173/')
   await page.getByText('Connecter le portefeuille').click()
   await page.waitForSelector('table.reserves', { timeout: 30000 })
+  if (mode === 'deploy') {
+    await page.getByText('Déployer le contrat sur Base').click()
+    await page.waitForSelector('text=Contrat Auto-loop vérifié', { timeout: 60000 }).catch(() => {})
+    await page.screenshot({ path: `${outPrefix}-apres.png`, fullPage: true })
+    console.log('verified line:', await page.locator('text=Contrat Auto-loop vérifié').allTextContents())
+    console.log('notices:', (await page.locator('.notice').allTextContents()).join(' | '))
+    console.log('saved:', await page.evaluate(() => localStorage.getItem('auto-loop.executors')))
+    return browser.close()
+  }
   if (mode.startsWith('close')) await page.getByText('Fermer / réduire').click()
   if (mode === 'close50') { await page.waitForTimeout(3000); await page.locator('button', { hasText: /^50\s*%$/ }).first().click() }
   if (mode === 'open') {

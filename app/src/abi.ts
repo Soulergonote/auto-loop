@@ -6,6 +6,8 @@ const openParams = `(address collateralAsset, address debtAsset, uint256 initial
 const closeParams = `(address collateralAsset, address debtAsset, uint256 repayAmount, uint256 collateralToWithdraw, uint256 collateralToSell, ${swap} swap)`
 
 export const executorAbi = parseAbi([
+  'constructor(address pool, address[] routers)',
+  'function POOL() view returns (address)',
   `function open(${openParams} p)`,
   `function openWithSig(${openParams} p, ${sig} delegation)`,
   `function close(${closeParams} p)`,
@@ -19,6 +21,8 @@ export const executorAbi = parseAbi([
   'error ExcessiveInput(uint256 spent, uint256 maxIn)',
   'error SellExceedsWithdrawn(uint256 toSell, uint256 withdrawn)',
   'error InsufficientToRepayFlashLoan(uint256 balance, uint256 owed)',
+  'error ZeroAddress()',
+  'error InvalidRouter(address router)',
 ])
 
 export const poolAbi = parseAbi([

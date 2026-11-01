@@ -152,14 +152,48 @@ const EXECUTORS = readExecutors()
 
 export type Market = MarketDef & {
   executor?: Address
+  /** where the executor address comes from: the build (VITE_EXECUTORS) or a deployment from this browser's wallet */
+  executorSource?: 'build' | 'wallet'
   /** taker sent to the aggregators: the contract holds the tokens during the swap */
   quoteTaker: Address
 }
 
-export function getMarket(id: string): Market {
+/** Executors the user deployed (or pasted) from this browser, per market id. */
+const LOCAL_EXECUTORS_KEY = 'auto-loop.executors'
+
+export function savedExecutors(): Record<string, Address> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LOCAL_EXECUTORS_KEY) || '{}') as Record<string, string>
+    const out: Record<string, Address> = {}
+    for (const [id, a] of Object.entries(raw)) if (isAddress(a)) out[id] = getAddress(a)
+    return out
+  } catch {
+    return {}
+  }
+}
+
+export function storeExecutors(all: Record<string, Address>) {
+  try {
+    localStorage.setItem(LOCAL_EXECUTORS_KEY, JSON.stringify(all))
+  } catch {
+    // private window: the address is kept for this visit only
+  }
+}
+
+/** Routers a new executor whitelists on a chain: those of the aggregators that quote there (fixed for good). */
+export function executorRouters(chainId: number): { id: AggregatorId; label: string; router: Address }[] {
+  const seen = new Set<string>()
+  return aggregatorsFor(chainId)
+    .map((id) => ({ id, label: AGGREGATORS[id].label, router: getAddress(AGGREGATORS[id].router) }))
+    .filter((r) => !seen.has(r.router) && !!seen.add(r.router))
+}
+
+export function getMarket(id: string, local: Record<string, Address> = {}): Market {
   const def = MARKETS.find((m) => m.id === id && !m.soon) ?? MARKETS.find((m) => m.id === DEFAULT_MARKET_ID)!
-  const executor = EXECUTORS[def.id]
-  return { ...def, executor, quoteTaker: executor ?? FORK_EXECUTOR }
+  const fromBuild = EXECUTORS[def.id]
+  const executor = fromBuild ?? local[def.id]
+  const executorSource = fromBuild ? 'build' : executor ? 'wallet' : undefined
+  return { ...def, executor, executorSource, quoteTaker: executor ?? FORK_EXECUTOR }
 }
 
 /**

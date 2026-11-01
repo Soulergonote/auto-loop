@@ -19,7 +19,7 @@ Le build ne dépend d'aucun serveur : le navigateur appelle directement l'API Ve
 
 | Variable | Rôle |
 |---|---|
-| `VITE_EXECUTORS` | Adresse du contrat déployé pour chaque marché, en JSON (`{"base":"0x…"}`) : un contrat par pool Aave. Marché absent : tout est calculé et la transaction est affichée, mais le bouton de signature reste désactivé. `VITE_EXECUTOR_ADDRESS` reste lue pour Base. |
+| `VITE_EXECUTORS` | Adresse du contrat déployé pour chaque marché, en JSON (`{"base":"0x…"}`) : un contrat par pool Aave. Marché absent : l'app propose de **déployer le contrat depuis le portefeuille connecté** (bouton « Déployer le contrat », routeurs = agrégateurs qui cotent sur la chaîne), ou de coller l'adresse d'un contrat déjà déployé ; l'adresse est retenue dans le navigateur. Toute adresse, d'ici ou du navigateur, n'est utilisée qu'après vérification on-chain que son code est exactement celui du contrat pour ce Pool. `VITE_EXECUTOR_ADDRESS` reste lue pour Base. |
 | `VITE_RPC_URL_<chainId>` | RPC d'une chaîne pour les lectures et simulations (vide = PublicNode, puis le RPC public de la chaîne). `VITE_RPC_URL` vaut pour Base. Pour un fork local : `anvil --fork-url https://mainnet.base.org --chain-id 8453` puis `http://127.0.0.1:8545`. |
 | `VITE_QUOTE_MODE` | `auto` (API réelles, repli sur un devis simulé si elles ne répondent pas), `live` ou `mock`. Un devis simulé n’est jamais exécutable. |
 | `ZEROX_API_KEY`, `ONEINCH_API_KEY` | Lues uniquement par le serveur de dev (proxy `/api/0x` et `/api/1inch` dans `vite.config.ts`), jamais envoyées au navigateur : 0x et 1inch ne marchent donc pas dans le build statique. Inutiles tant que 0x et 1inch sont désactivés ; Velora n’en demande pas. |
@@ -52,6 +52,8 @@ Avant chaque signature : nouvelle cotation (un devis expire en quelques blocs), 
 Seul agrégateur actif pour l’instant. Chaque appel (`/prices` et `/transactions`) passe `partner=auto-loop` : sans ce paramètre, l’API publique ajoute 1 bp de frais « anon ». L’interface refuse un devis si `partnerFee` n’est pas nul ou si le calldata Augustus v6.2 encode des frais (champ `partnerAndFee`, vérifié sur de vrais devis : 1 bp sans `partner`, 0 avec). Le montant affiché est `destAmountAfterFee` quand Velora le fournit.
 
 ## Test de bout en bout sur fork de Base
+
+Testé le 01/11/2026 avec le contrat sans owner : déploiement par le bouton de l'app (`NO_DEPLOY=1 bash e2e/fork.sh`, puis `node e2e/run.cjs deploy d`), puis ouverture 3x et fermeture totale avec ce contrat (`EXECUTOR=0x… node e2e/run.cjs open o`). Une adresse qui n'est pas le contrat (ex. WETH) est refusée.
 
 Testé le 18/10/2026 : anvil sur fork de Base, contrat déployé sur le fork avec seulement le routeur Velora en liste blanche, interface dans Chromium avec un portefeuille de test (compte anvil 1), vraies lectures Aave v3 et vrais devis Velora.
 

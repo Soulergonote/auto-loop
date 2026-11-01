@@ -89,12 +89,13 @@ describe('executor ABI', () => {
     const S = '(address,bytes,uint256)'
     const G = '(uint256,uint256,uint8,bytes32,bytes32)'
     expect(sigs).toEqual([
+      'POOL()',
       `open((address,address,uint256,uint256,${S}))`,
       `openWithSig((address,address,uint256,uint256,${S}),${G})`,
       `close((address,address,uint256,uint256,uint256,${S}))`,
       `closeWithSig((address,address,uint256,uint256,uint256,${S}),${G})`,
       'isRouterAllowed(address)',
     ])
-    expect(toFunctionSelector(sigs[0])).toMatch(/^0x[0-9a-f]{8}$/)
+    expect(toFunctionSelector(sigs[1])).toMatch(/^0x[0-9a-f]{8}$/)
   })
 })

@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 // Real Aave v3 (aave-v3-origin, v3.6) deployed locally by the official test procedures
 import {TestnetProcedures} from "aave-v3-origin/tests/utils/TestnetProcedures.sol";
@@ -55,7 +54,7 @@ contract LeverageExecutorTest is TestnetProcedures {
 
         address[] memory routers = new address[](1);
         routers[0] = address(router);
-        executor = new LeverageExecutor(pool, address(this), routers);
+        executor = new LeverageExecutor(pool, routers);
 
         vm.label(address(executor), "executor");
         vm.label(address(router), "router");
@@ -455,15 +454,64 @@ contract LeverageExecutorTest is TestnetProcedures {
         contracts.poolProxy.flashLoan(address(executor), assets, amounts, modes, attacker, params, 0);
     }
 
-    function test_revert_setRouter_onlyOwner() public {
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
-        vm.prank(attacker);
-        executor.setRouter(attacker, true);
+    function test_constructor_rejectsBadRouters() public {
+        address[] memory routers = new address[](1);
+        routers[0] = address(pool);
+        vm.expectRevert(abi.encodeWithSelector(LeverageExecutor.InvalidRouter.selector, address(pool)));
+        new LeverageExecutor(pool, routers);
+
+        routers[0] = attacker; // no code
+        vm.expectRevert(abi.encodeWithSelector(LeverageExecutor.InvalidRouter.selector, attacker));
+        new LeverageExecutor(pool, routers);
     }
 
-    function test_revert_setRouter_poolForbidden() public {
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutor.InvalidRouter.selector, address(pool)));
-        executor.setRouter(address(pool), true);
+    function test_noAdmin_routerListIsFixed() public {
+        // neither the deployer nor anyone else can add a router or move funds out after deployment
+        (bool ok,) = address(executor).call(abi.encodeWithSignature("setRouter(address,bool)", attacker, true));
+        assertFalse(ok, "setRouter");
+        (bool ok2,) = address(executor).call(abi.encodeWithSignature("owner()"));
+        assertFalse(ok2, "owner");
+        (bool ok3,) =
+            address(executor).call(abi.encodeWithSignature("rescue(address,address,uint256)", WETH, attacker, 1));
+        assertFalse(ok3, "rescue");
+        assertFalse(executor.isRouterAllowed(attacker));
+    }
+
+    function test_open_leavesNoAllowanceBehind() public {
+        _open(alice, 1e18, 300);
+        assertEq(IERC20(WETH).allowance(alice, address(executor)), 0, "collateral allowance used up");
+        assertEq(IDebtToken(vUSDX).borrowAllowance(alice, address(executor)), 0, "delegation used up");
+        _assertExecutorClean();
+    }
+
+    function test_revert_attackerCannotSpendVictimCollateralAllowance() public {
+        // victim approved more than she used: the executor only ever pulls from the caller
+        vm.prank(alice);
+        IERC20(WETH).approve(address(executor), 5e18);
+        uint256 before = IERC20(WETH).balanceOf(alice);
+
+        LeverageExecutor.OpenParams memory p = _openParams(5e18, _debtFor(1e18, 300), 50);
+        vm.expectRevert();
+        vm.prank(attacker);
+        executor.open(p);
+        assertEq(IERC20(WETH).balanceOf(alice), before, "victim WETH untouched");
+    }
+
+    function test_revert_swapCannotTargetTradedToken() public {
+        // even if a token were whitelisted by mistake at deployment, a swap can never call one of its two tokens
+        address[] memory routers = new address[](2);
+        routers[0] = address(router);
+        routers[1] = WETH;
+        LeverageExecutor exec2 = new LeverageExecutor(pool, routers);
+        vm.prank(alice);
+        IERC20(WETH).approve(address(exec2), 5e18);
+
+        LeverageExecutor.OpenParams memory p = _openParams(0, _debtFor(1e18, 300), 50);
+        p.swap.router = WETH;
+        p.swap.data = abi.encodeCall(IERC20.transferFrom, (alice, attacker, 5e18));
+        vm.expectRevert(abi.encodeWithSelector(LeverageExecutor.InvalidRouter.selector, WETH));
+        vm.prank(attacker);
+        exec2.open(p);
     }
 
     // ---------------------------------------------------------------------------------------------
