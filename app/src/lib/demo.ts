@@ -30,6 +30,8 @@ export function demoReserve(token: Token): Reserve {
       paused: false,
       flashLoanEnabled: true,
       isolated: false,
+      borrowCap: 0n,
+      supplyCap: 0n,
     },
     aToken: zeroAddress,
     variableDebtToken: zeroAddress,

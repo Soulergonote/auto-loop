@@ -47,6 +47,7 @@ export const oracleAbi = parseAbi(['function getAssetsPrices(address[] assets) v
 
 export const erc20Abi = parseAbi([
   'function balanceOf(address) view returns (uint256)',
+  'function totalSupply() view returns (uint256)',
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
   'function name() view returns (string)',

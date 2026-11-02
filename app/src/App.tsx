@@ -29,6 +29,9 @@ import { OpenPanel } from './components/OpenPanel'
 import { ClosePanel } from './components/ClosePanel'
 import { DeployPanel } from './components/DeployPanel'
 import { useExecutorCheck } from './lib/deploy'
+import { Scanner, type Pick } from './components/Scanner'
+
+type View = 'loop' | 'scan'
 
 function WalletButton({ market }: { market: Market }) {
   const { address, chainId, isConnected } = useAccount()
@@ -127,10 +130,13 @@ export function App() {
   const [preferredAggregator, setAggregator] = useState<AggregatorChoice>('best')
   // keep the choice when it quotes on this chain, otherwise compare all those that do
   const aggregator: AggregatorChoice = preferredAggregator === 'best' || supportsChain(preferredAggregator, market.chain.id) ? preferredAggregator : 'best'
+  const [view, setView] = useState<View>('loop')
   const [picked, setPicked] = useState<{
     market: string
     collateral: Address
     debt: Address
+    /** set when the pair comes from the scanner: eMode and leverage to start the open panel with */
+    seed?: { emode: number; leverage: number; nonce: number }
   }>()
 
   const pair = useMemo(() => {
@@ -151,6 +157,14 @@ export function App() {
       // private window: the choice just isn't remembered
     }
   }
+  function pickFromScanner(p: Pick) {
+    chooseMarket(p.marketId)
+    setPicked({ market: p.marketId, collateral: p.collateral, debt: p.debt, seed: { emode: p.emode, leverage: p.leverage, nonce: Date.now() } })
+    setView('loop')
+    window.scrollTo({ top: 0 })
+  }
+  const seed =
+    pair && picked?.market === market.id && picked.collateral === pair.collateral.address && picked.debt === pair.debt.address ? picked.seed : undefined
   const setPair = (collateral: Token, debt: Token) =>
     setPicked({
       market: market.id,
@@ -237,64 +251,80 @@ export function App() {
         </div>
         <WalletButton market={market} />
       </header>
-
-      {DEMO && <Notice tone="info">Mode démo : prix et paramètres de marché fictifs, rien n’est lu sur la chaîne.</Notice>}
-      {!DEMO && declared.executor && check.isPending && <Notice tone="info">Vérification du contrat Auto-loop sur {market.label}…</Notice>}
-      {!DEMO && declared.executor && check.isError && (
-        <Notice tone="bad">
-          Contrat {declared.executor} refusé : {check.error.message}. Rien ne sera proposé à la signature avec lui.{' '}
-          {declared.executorSource === 'wallet' && (
-            <button className="btn ghost" onClick={() => setLocalExecutor(market.id)}>
-              Oublier cette adresse
-            </button>
-          )}
-        </Notice>
-      )}
-      {!DEMO && market.executor && (
-        <p className="muted small">
-          Contrat Auto-loop vérifié sur {market.label} :{' '}
-          <a href={`${market.chain.blockExplorers?.default.url}/address/${market.executor}`} target="_blank" rel="noreferrer">
-            {market.executor}
-          </a>
-          {market.executorSource === 'wallet' && ' (déployé ou ajouté depuis ce navigateur)'}
-        </p>
-      )}
-      {!DEMO && !declared.executor && <DeployPanel market={market} onReady={(a) => setLocalExecutor(market.id, a)} />}
-      {QUOTE_MODE === 'mock' && <Notice tone="info">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</Notice>}
-
-      {pair ? (
-        <PairView
-          key={market.id}
-          market={market}
-          collateral={pair.collateral}
-          debt={pair.debt}
-          nativeToken={wrappedNative(tokens, market.chain)?.address}
-          account={address}
-          aggregator={aggregator}
-          selectors={selectors}
+      <nav className="nav">
+        <Segmented
+          value={view}
+          onChange={setView}
+          options={[
+            { value: 'loop' as View, label: 'Boucle' },
+            { value: 'scan' as View, label: 'Scanner' },
+          ]}
         />
-      ) : (
-        <Card title="Marché">
-          {selectors}
-          {reserveTokens.error ? (
+      </nav>
+
+      {view === 'scan' && !DEMO && <Scanner onPick={pickFromScanner} />}
+      {view === 'loop' && (
+        <>
+          {DEMO && <Notice tone="info">Mode démo : prix et paramètres de marché fictifs, rien n’est lu sur la chaîne.</Notice>}
+          {!DEMO && declared.executor && check.isPending && <Notice tone="info">Vérification du contrat Auto-loop sur {market.label}…</Notice>}
+          {!DEMO && declared.executor && check.isError && (
             <Notice tone="bad">
-              Lecture d’Aave sur {market.label} impossible : {reserveTokens.error.message.split('\n')[0]} Les RPC publics de ce réseau ne répondent pas (ou
-              sont bloqués par ton réseau).{' '}
-              <button className="btn ghost" onClick={reserveTokens.refetch}>
-                Réessayer
-              </button>
+              Contrat {declared.executor} refusé : {check.error.message}. Rien ne sera proposé à la signature avec lui.{' '}
+              {declared.executorSource === 'wallet' && (
+                <button className="btn ghost" onClick={() => setLocalExecutor(market.id)}>
+                  Oublier cette adresse
+                </button>
+              )}
             </Notice>
-          ) : slow ? (
-            <Notice>
-              La lecture d’Aave sur {market.label} prend plus de temps que prévu : le RPC public répond lentement.{' '}
-              <button className="btn ghost" onClick={reserveTokens.refetch}>
-                Réessayer
-              </button>
-            </Notice>
-          ) : (
-            <p className="muted">Lecture des actifs Aave v3 sur {market.label}…</p>
           )}
-        </Card>
+          {!DEMO && market.executor && (
+            <p className="muted small">
+              Contrat Auto-loop vérifié sur {market.label} :{' '}
+              <a href={`${market.chain.blockExplorers?.default.url}/address/${market.executor}`} target="_blank" rel="noreferrer">
+                {market.executor}
+              </a>
+              {market.executorSource === 'wallet' && ' (déployé ou ajouté depuis ce navigateur)'}
+            </p>
+          )}
+          {!DEMO && !declared.executor && <DeployPanel market={market} onReady={(a) => setLocalExecutor(market.id, a)} />}
+          {QUOTE_MODE === 'mock' && <Notice tone="info">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</Notice>}
+
+          {pair ? (
+            <PairView
+              key={`${market.id}-${seed?.nonce ?? ''}`}
+              market={market}
+              collateral={pair.collateral}
+              debt={pair.debt}
+              nativeToken={wrappedNative(tokens, market.chain)?.address}
+              account={address}
+              aggregator={aggregator}
+              selectors={selectors}
+              seed={seed}
+            />
+          ) : (
+            <Card title="Marché">
+              {selectors}
+              {reserveTokens.error ? (
+                <Notice tone="bad">
+                  Lecture d’Aave sur {market.label} impossible : {reserveTokens.error.message.split('\n')[0]} Les RPC publics de ce réseau ne répondent pas (ou
+                  sont bloqués par ton réseau).{' '}
+                  <button className="btn ghost" onClick={reserveTokens.refetch}>
+                    Réessayer
+                  </button>
+                </Notice>
+              ) : slow ? (
+                <Notice>
+                  La lecture d’Aave sur {market.label} prend plus de temps que prévu : le RPC public répond lentement.{' '}
+                  <button className="btn ghost" onClick={reserveTokens.refetch}>
+                    Réessayer
+                  </button>
+                </Notice>
+              ) : (
+                <p className="muted">Lecture des actifs Aave v3 sur {market.label}…</p>
+              )}
+            </Card>
+          )}
+        </>
       )}
 
       <footer className="muted small">
@@ -312,9 +342,10 @@ type PairViewProps = {
   account?: Address
   aggregator: AggregatorChoice
   selectors: ReactNode
+  seed?: { emode: number; leverage: number }
 }
 
-function PairView({ market: m, collateral, debt, nativeToken, account, aggregator, selectors }: PairViewProps) {
+function PairView({ market: m, collateral, debt, nativeToken, account, aggregator, selectors, seed }: PairViewProps) {
   const [tab, setTab] = useState<'open' | 'close'>('open')
   const market = useMarket(m, collateral, debt, account, nativeToken)
   const emodes = useEModeCategories(m)
@@ -378,7 +409,7 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
 
       {r &&
         (tab === 'open' ? (
-          <OpenPanel reserves={r} emodes={emodes} user={market.user} account={account} aggregator={aggregator} onDone={market.refetchUser} />
+          <OpenPanel reserves={r} emodes={emodes} seed={seed} user={market.user} account={account} aggregator={aggregator} onDone={market.refetchUser} />
         ) : (
           <ClosePanel reserves={withEMode(r, currentEMode)} user={market.user} account={account} aggregator={aggregator} onDone={market.refetchUser} />
         ))}

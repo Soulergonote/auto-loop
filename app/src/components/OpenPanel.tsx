@@ -27,12 +27,14 @@ type Props = {
   account?: Address
   aggregator: AggregatorChoice
   onDone: () => void
+  /** eMode and leverage to start with (pair picked in the scanner) */
+  seed?: { emode: number; leverage: number }
 }
 
-export function OpenPanel({ reserves: base, emodes, user, account, aggregator, onDone }: Props) {
+export function OpenPanel({ reserves: base, emodes, user, account, aggregator, onDone, seed }: Props) {
   const eligible = eligibleEModes(emodes, base.collateral, base.debt)
   // default: the account's current category when it fits the pair, otherwise the best one (highest LTV)
-  const [chosenEMode, setChosenEMode] = useState<number>()
+  const [chosenEMode, setChosenEMode] = useState<number | undefined>(seed?.emode)
   const currentEMode = user?.eModeCategory ?? 0
   const emodeId =
     chosenEMode !== undefined && (chosenEMode === 0 || eligible.some((c) => c.id === chosenEMode))
@@ -44,7 +46,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const { market, collateral: C, debt: D } = reserves
   const executor = market.executor
   const [amountText, setAmountText] = useState('1')
-  const [leverage, setLeverage] = useState(2)
+  const [leverage, setLeverage] = useState(seed ? Math.floor(seed.leverage * 20) / 20 : 2)
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('50')
   const [horizonText, setHorizon] = useState('90')
   const horizon = Number(horizonText)

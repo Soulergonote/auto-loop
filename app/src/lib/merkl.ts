@@ -132,14 +132,17 @@ export async function fetchCampaigns(chainId: number, signal: AbortSignal): Prom
   return out
 }
 
+/** Live campaigns of a chain, cached 5 minutes (shared by the loop view, the scanner and the positions). */
+export const merklQuery = (chainId: number) => ({
+  queryKey: ['merkl', chainId],
+  queryFn: ({ signal }: { signal: AbortSignal }) => fetchCampaigns(chainId, signal),
+  enabled: !DEMO,
+  staleTime: 5 * 60_000,
+  retry: 1,
+})
+
 export function useCampaigns(market: Market) {
-  return useQuery({
-    queryKey: ['merkl', market.chain.id],
-    queryFn: ({ signal }) => fetchCampaigns(market.chain.id, signal),
-    enabled: !DEMO,
-    staleTime: 5 * 60_000,
-    retry: 1,
-  })
+  return useQuery(merklQuery(market.chain.id))
 }
 
 type Side = { token: { address: Address; symbol: string }; aToken: Address; variableDebtToken: Address }

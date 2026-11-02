@@ -104,7 +104,8 @@ footer { text-align: center; }
 @media (max-width: 640px) {
   .grid2 { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: 1fr 1fr; }
-  .reserves:not(.campaigns) th:nth-child(4), .reserves:not(.campaigns) td:nth-child(4) { display: none; }
+  .reserves:not(.campaigns):not(.scan) th:nth-child(4), .reserves:not(.campaigns):not(.scan) td:nth-child(4) { display: none; }
+  .scan .opt { display: none; }
   .campaigns th:nth-child(2), .campaigns td:nth-child(2) { display: none; }
 }
 .reward { color: var(--good); font-weight: 500; }
@@ -114,3 +115,8 @@ footer { text-align: center; }
 .campaigns td:last-child { color: var(--muted); font-size: 13px; }
 .risk summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }
 .risk th { padding-top: 10px; }
+.check { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); cursor: pointer; }
+.scan td { vertical-align: top; }
+.scan td .small { margin-top: 2px; }
+.scan .btn { padding: 5px 10px; }
+.nav .segmented { max-width: 460px; }

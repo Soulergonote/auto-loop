@@ -14,6 +14,9 @@ export type ReserveConfig = {
   flashLoanEnabled: boolean
   /** non-zero debt ceiling = isolated asset */
   isolated: boolean
+  /** caps in whole tokens, 0 = none */
+  borrowCap: bigint
+  supplyCap: bigint
 }
 
 export function decodeReserveConfig(data: bigint): ReserveConfig {
@@ -28,6 +31,8 @@ export function decodeReserveConfig(data: bigint): ReserveConfig {
     paused: bits(data, 60, 1) === 1n,
     flashLoanEnabled: bits(data, 63, 1) === 1n,
     isolated: bits(data, 212, 40) !== 0n,
+    borrowCap: bits(data, 80, 36),
+    supplyCap: bits(data, 116, 36),
   }
 }
 
