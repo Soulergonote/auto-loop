@@ -61,7 +61,11 @@ export function useReserveTokens(market: Market) {
       })
       .sort((a, b) => a.symbol.localeCompare(b.symbol, 'en', { sensitivity: 'base' }))
   }, [addresses, meta.data])
-  return { tokens, error: list.error ?? meta.error, loading: list.isLoading || meta.isLoading }
+  const refetch = () => {
+    void list.refetch()
+    void meta.refetch()
+  }
+  return { tokens, error: list.error ?? meta.error, loading: list.isLoading || meta.isLoading, refetch }
 }
 
 /** Reads both reserves of the pair, oracle prices, the flash loan premium and, when connected, the user's state. */

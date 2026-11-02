@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
 import type { Address } from 'viem'
 import {
@@ -115,6 +115,13 @@ export function App() {
     storeExecutors(next)
   }
   const reserveTokens = useReserveTokens(market)
+  // after 15 s without the asset list, say so instead of an endless "loading"
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    setSlow(false)
+    const t = setTimeout(() => setSlow(true), 15_000)
+    return () => clearTimeout(t)
+  }, [market.id])
   const tokens = reserveTokens.tokens
   const [platform, setPlatform] = useState<string>('aave-v3')
   const [preferredAggregator, setAggregator] = useState<AggregatorChoice>('best')
@@ -271,7 +278,18 @@ export function App() {
           {selectors}
           {reserveTokens.error ? (
             <Notice tone="bad">
-              Lecture d’Aave sur {market.label} impossible : {reserveTokens.error.message.split('\n')[0]}
+              Lecture d’Aave sur {market.label} impossible : {reserveTokens.error.message.split('\n')[0]} Les RPC publics de ce réseau ne répondent pas (ou
+              sont bloqués par ton réseau).{' '}
+              <button className="btn ghost" onClick={reserveTokens.refetch}>
+                Réessayer
+              </button>
+            </Notice>
+          ) : slow ? (
+            <Notice>
+              La lecture d’Aave sur {market.label} prend plus de temps que prévu : le RPC public répond lentement.{' '}
+              <button className="btn ghost" onClick={reserveTokens.refetch}>
+                Réessayer
+              </button>
             </Notice>
           ) : (
             <p className="muted">Lecture des actifs Aave v3 sur {market.label}…</p>
