@@ -7,6 +7,7 @@ import { useQuote } from '../lib/useQuote'
 import { getQuote } from '../lib/quotes'
 import { collateralToSellForRepay, flashLoanOwed, positionLeverage, repayForTarget, roundSignificant, toBase } from '../lib/math'
 import { useDebounced } from '../lib/useDebounced'
+import { swapLoss, swapLossProblem } from '../lib/economics'
 import { closeArgs, executeClose, explainError, type ClosePlan } from '../lib/execute'
 import { fmtAmount, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/format'
 import { Card, QuoteCompare, Metric, Notice, Segmented, Steps, TxLink, hfTone } from './ui'
@@ -138,6 +139,8 @@ function ClosePanelInner(p: {
   if (!D.config.flashLoanEnabled) problems.push(`Flash loan désactivé sur ${D.token.symbol}.`)
 
   const warnings: string[] = []
+  const lossIssue = q && swapLossProblem(swapLoss(toSell, C.side, q.buyAmount, D.side), C.token.symbol, D.token.symbol, q.simulated, 0.1) // leaving stays possible at a cost, not at any cost
+  if (lossIssue) (lossIssue.block ? problems : warnings).push(lossIssue.text)
   if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
   if (!full && hfAfter < TARGET_MIN_HF) warnings.push(`Health factor après réduction : ${fmtHf(hfAfter)}.`)
   if (user.account.collateralBase > toBase(user.aTokenBalance, C.side) + 100n * 10n ** 8n)

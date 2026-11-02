@@ -11,7 +11,7 @@ import { useQuote } from '../lib/useQuote'
 import { useDebounced } from '../lib/useDebounced'
 import { getQuote } from '../lib/quotes'
 import { extraDebtForTarget, maxLeverage, netApy, positionLeverage, project, roundSignificant, toBase, EMPTY_ACCOUNT, NO_POSITION } from '../lib/math'
-import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase } from '../lib/economics'
+import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
 import { executeOpen, explainError, openArgs, type OpenPlan } from '../lib/execute'
 import { fmtAmount, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX } from '../lib/format'
 import { Card, QuoteCompare, Metric, Notice, Segmented, Steps, TxLink, hfTone } from './ui'
@@ -42,7 +42,10 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       : eligible.some((c) => c.id === currentEMode)
         ? currentEMode
         : (eligible[0]?.id ?? 0)
-  const reserves = withEMode(base, eligible.find((c) => c.id === emodeId))
+  const reserves = withEMode(
+    base,
+    eligible.find((c) => c.id === emodeId),
+  )
   const { market, collateral: C, debt: D } = reserves
   const executor = market.executor
   const [amountText, setAmountText] = useState('1')
@@ -120,10 +123,14 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   if (user && initial && initial > user.collateralBalance) problems.push(`Solde ${C.token.symbol} insuffisant.`)
 
   const warnings: string[] = []
+  const lossIssue = q && swapLossProblem(swapLoss(debtAmount, D.side, q.buyAmount, C.side), D.token.symbol, C.token.symbol, q.simulated)
+  if (lossIssue) (lossIssue.block ? problems : warnings).push(lossIssue.text)
   if (proj && proj.healthFactor < TARGET_MIN_HF) warnings.push(`Health factor sous ${TARGET_MIN_HF} : une petite baisse suffit à te faire liquider.`)
   const switchEMode = !!user && currentEMode !== emodeId
   if (switchEMode && currentEMode !== 0 && (user.account.debtBase > 0n || user.account.collateralBase > 0n))
-    warnings.push(`Ton compte Aave est en eMode « ${emodes.find((c) => c.id === currentEMode)?.label ?? currentEMode} » : le changer s’applique à toutes tes positions sur ce marché.`)
+    warnings.push(
+      `Ton compte Aave est en eMode « ${emodes.find((c) => c.id === currentEMode)?.label ?? currentEMode} » : le changer s’applique à toutes tes positions sur ce marché.`,
+    )
   if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
 
   const needsApprove = !!user && !!initial && user.collateralAllowance < initial
@@ -161,16 +168,25 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   // the APYs above are on the equity left after the swap; over the horizon everything is measured against the
   // capital put in, so the swap loss counts once, as a cost
   const toCapital =
-    proj && capitalBase > 0n
-      ? (Number(position.collateralBase + addedCollBase) - Number(position.debtBase + soldBase)) / Number(capitalBase)
-      : 0
+    proj && capitalBase > 0n ? (Number(position.collateralBase + addedCollBase) - Number(position.debtBase + soldBase)) / Number(capitalBase) : 0
   const horizonYield =
     costs && ratesApy !== undefined && capitalBase > 0n
-      ? horizonApy({ equityBase: capitalBase, ratesApy: ratesApy * toCapital, rewardsApy: rewardsOverHorizon(yields, horizon) * toCapital, costsBase: costs.total, days: horizon })
+      ? horizonApy({
+          equityBase: capitalBase,
+          ratesApy: ratesApy * toCapital,
+          rewardsApy: rewardsOverHorizon(yields, horizon) * toCapital,
+          costsBase: costs.total,
+          days: horizon,
+        })
       : undefined
   const breakEven =
     costs && ratesApy !== undefined
-      ? breakEvenDays(capitalBase, ratesApy * toCapital, costs.total, yields.map((y) => ({ apy: y.apy * toCapital, days: daysLeft(y.campaign) })))
+      ? breakEvenDays(
+          capitalBase,
+          ratesApy * toCapital,
+          costs.total,
+          yields.map((y) => ({ apy: y.apy * toCapital, days: daysLeft(y.campaign) })),
+        )
       : undefined
   for (const c of [...pairCampaigns.supply, ...pairCampaigns.borrow].filter((c) => c.conditional))
     warnings.push(`Bonus Merkl « ${c.name} » : certaines conditions ne sont pas lisibles par l’app, vérifie la description sur Merkl.`)
@@ -254,7 +270,10 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           <span>
             {hasPosition ? 'Capital ajouté' : 'Capital initial'} en {C.token.symbol}
             {user && (
-              <button className="link" onClick={() => setAmountText(fmtAmount(user.collateralBalance, C.token.decimals, 8).replace(/\s/g, '').replace(',', '.'))}>
+              <button
+                className="link"
+                onClick={() => setAmountText(fmtAmount(user.collateralBalance, C.token.decimals, 8).replace(/\s/g, '').replace(',', '.'))}
+              >
                 solde {fmtAmount(user.collateralBalance, C.token.decimals)}
               </button>
             )}
@@ -285,7 +304,10 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       <label className="field">
         <span>
           Levier <strong className="lev">{fmtX(lev)}</strong>
-          <small className="muted"> max théorique {fmtX(maxLev)} (LTV {fmtPct(maxLtv, 0)})</small>
+          <small className="muted">
+            {' '}
+            max théorique {fmtX(maxLev)} (LTV {fmtPct(maxLtv, 0)})
+          </small>
         </span>
         <input type="range" min={sliderMin} max={sliderMax} step={0.05} value={lev} onChange={(e) => setLeverage(Number(e.target.value))} />
       </label>
@@ -296,13 +318,21 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       </div>
 
       <div className="metrics">
-        <Metric label="Emprunt (flash loan)" value={`${fmtAmount(debtAmount, D.token.decimals)} ${D.token.symbol}`} sub={proj && fmtUsd(proj.debtBase - account0.debtBase)} />
+        <Metric
+          label="Emprunt (flash loan)"
+          value={`${fmtAmount(debtAmount, D.token.decimals)} ${D.token.symbol}`}
+          sub={proj && fmtUsd(proj.debtBase - account0.debtBase)}
+        />
         <Metric
           label="Collatéral déposé"
           value={q && debouncedInitial !== undefined ? `${fmtAmount(debouncedInitial + q.buyAmount, C.token.decimals)} ${C.token.symbol}` : '…'}
           sub={q && `dont ${fmtAmount(q.buyAmount, C.token.decimals)} via ${AGGREGATORS[q.aggregator].label}`}
         />
-        <Metric label="Levier effectif" value={loopLev !== undefined ? fmtX(loopLev) : '…'} sub={hasPosition ? 'de toute la position, après swap' : 'après coût du swap'} />
+        <Metric
+          label="Levier effectif"
+          value={loopLev !== undefined ? fmtX(loopLev) : '…'}
+          sub={hasPosition ? 'de toute la position, après swap' : 'après coût du swap'}
+        />
         <Metric
           label="Health factor"
           value={proj ? fmtHf(proj.healthFactor) : '…'}
@@ -314,7 +344,12 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           value={proj && Number.isFinite(proj.healthFactor) ? fmtPrice(BigInt(Math.round(Number(C.price) * (1 - proj.dropToLiquidation)))) : '…'}
           sub={proj && `baisse de ${fmtPct(proj.dropToLiquidation, 1)} face à ${D.token.symbol}`}
         />
-        <Metric label="APY net (taux actuels)" value={apy !== undefined ? fmtPct(apy) : '…'} sub={rewardsApy !== 0 && ratesApy !== undefined ? `dont ${fmtPct(rewardsApy)} Merkl · sans Merkl ${fmtPct(ratesApy)}` : 'taux variables, hors coûts'} tone={apy !== undefined && apy < 0 ? 'warn' : undefined} />
+        <Metric
+          label="APY net (taux actuels)"
+          value={apy !== undefined ? fmtPct(apy) : '…'}
+          sub={rewardsApy !== 0 && ratesApy !== undefined ? `dont ${fmtPct(rewardsApy)} Merkl · sans Merkl ${fmtPct(ratesApy)}` : 'taux variables, hors coûts'}
+          tone={apy !== undefined && apy < 0 ? 'warn' : undefined}
+        />
         <Metric
           label="Coûts estimés"
           value={costs ? fmtUsd(costs.total) : '…'}
@@ -352,7 +387,9 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       <QuoteCompare quote={q} token={C.token} />
       {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
       {problems.map((p) => (
-        <Notice key={p} tone="bad">{p}</Notice>
+        <Notice key={p} tone="bad">
+          {p}
+        </Notice>
       ))}
       {warnings.map((w) => (
         <Notice key={w}>{w}</Notice>
@@ -361,7 +398,14 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       <Steps
         steps={[
           ...(switchEMode || (!user && emodeId !== 0)
-            ? [{ label: emodeId === 0 ? 'Sortir de l’eMode sur ton compte Aave (transaction, une fois)' : `Passer ton compte Aave en eMode « ${reserves.emode!.label} » (transaction, une fois)` }]
+            ? [
+                {
+                  label:
+                    emodeId === 0
+                      ? 'Sortir de l’eMode sur ton compte Aave (transaction, une fois)'
+                      : `Passer ton compte Aave en eMode « ${reserves.emode!.label} » (transaction, une fois)`,
+                },
+              ]
             : []),
           ...(needsApprove || !user ? [{ label: `Autoriser le contrat à prendre ${amountText || 0} ${C.token.symbol} (transaction, une fois)` }] : []),
           ...(needsDelegation ? [{ label: `Signer la délégation de crédit ${D.token.symbol} (signature, sans gas)` }] : []),
@@ -375,7 +419,11 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
         </button>
         {disabledReason && !busy && <span className="muted small">{disabledReason}</span>}
       </div>
-      {result && <Notice tone={result.ok ? 'info' : 'bad'}>{result.text} {result.hash && <TxLink market={market} hash={result.hash} />}</Notice>}
+      {result && (
+        <Notice tone={result.ok ? 'info' : 'bad'}>
+          {result.text} {result.hash && <TxLink market={market} hash={result.hash} />}
+        </Notice>
+      )}
 
       {preview && (
         <details className="preview">
@@ -386,7 +434,9 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
             <dt>Routeur</dt>
             <dd>{q!.router}</dd>
             <dt>Minimum reçu</dt>
-            <dd>{fmtAmount(q!.minOut, C.token.decimals)} {C.token.symbol}</dd>
+            <dd>
+              {fmtAmount(q!.minOut, C.token.decimals)} {C.token.symbol}
+            </dd>
             <dt>Calldata open()</dt>
             <dd className="mono">{preview}</dd>
           </dl>

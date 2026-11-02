@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { breakEvenBorrowApy, breakEvenDays, daysToLiquidationByInterest, hfAfterDays, hfAfterDrop, horizonApy, loopCosts, swapCostBase } from './economics'
+import {
+  breakEvenBorrowApy,
+  breakEvenDays,
+  daysToLiquidationByInterest,
+  hfAfterDays,
+  hfAfterDrop,
+  horizonApy,
+  loopCosts,
+  swapCostBase,
+  swapLoss,
+  swapLossProblem,
+} from './economics'
 
 const usd = (x: number) => BigInt(Math.round(x * 1e8))
 const USDC = { price: usd(1), decimals: 6 }
@@ -13,7 +24,14 @@ describe('loop economics', () => {
   })
 
   it('adds exit premium, exit swap at the entry cost share and gas', () => {
-    const c = loopCosts({ entrySoldBase: usd(6000), entrySwapBase: usd(6), debtBase: usd(6000), premiumBps: 5n, gasPriceWei: 10n ** 9n, nativePriceBase: usd(3000) })
+    const c = loopCosts({
+      entrySoldBase: usd(6000),
+      entrySwapBase: usd(6),
+      debtBase: usd(6000),
+      premiumBps: 5n,
+      gasPriceWei: 10n ** 9n,
+      nativePriceBase: usd(3000),
+    })
     expect(c.exitPremium).toBe(usd(3))
     expect(c.exitSwap).toBe(usd(6))
     // 2.5M gas x 1 gwei x 3000 $ = 7.5 $
@@ -36,7 +54,7 @@ describe('loop economics', () => {
     // -30 % rates + 36.5 % rewards ending in 3 days: never pays back once the bonus stops
     expect(breakEvenDays(usd(1000), -0.3, usd(5), [{ apy: 0.365, days: 3 }])).toBe(Infinity)
     // 1 % rates + 36.5 % rewards for 10 days, 2 % of costs: 1.03 % gained by day 10, the rest at 1 %/year
-    expect(breakEvenDays(usd(1000), 0.01, usd(20), [{ apy: 0.365, days: 10 }])).toBeCloseTo(10 + ((0.02 - 0.375 * 10 / 365) / 0.01) * 365)
+    expect(breakEvenDays(usd(1000), 0.01, usd(20), [{ apy: 0.365, days: 10 }])).toBeCloseTo(10 + ((0.02 - (0.375 * 10) / 365) / 0.01) * 365)
     expect(breakEvenDays(usd(1000), 0.01, usd(5), [{ apy: 0.365, days: 10 }])).toBeCloseTo(0.005 / (0.375 / 365))
   })
 })
@@ -55,5 +73,17 @@ describe('risk', () => {
     const d = daysToLiquidationByInterest(1.1, 0.01, 0.05)
     expect(hfAfterDays(1.1, 0.01, 0.05, d)).toBeCloseTo(1)
     expect(daysToLiquidationByInterest(1.1, 0.05, 0.01)).toBe(Infinity)
+  })
+
+  it('refuses a swap that loses too much value at oracle prices', () => {
+    const usd6 = { price: 100_000_000n, decimals: 6 }
+    const usd18 = { price: 100_000_000n, decimals: 18 }
+    // Monad, 2026-11-02: 2 000 AUSD bought 285 USDe
+    const loss = swapLoss(2000n * 10n ** 6n, usd6, 285n * 10n ** 18n, usd18)
+    expect(loss).toBeCloseTo(0.8575)
+    expect(swapLossProblem(loss, 'AUSD', 'USDe')?.block).toBe(true)
+    expect(swapLossProblem(0.01, 'AUSD', 'USDe')?.block).toBe(false)
+    expect(swapLossProblem(0.001, 'AUSD', 'USDe')).toBeUndefined()
+    expect(swapLossProblem(0.05, 'USDe', 'AUSD', false, 0.1)?.block).toBe(false)
   })
 })

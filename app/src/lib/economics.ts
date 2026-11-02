@@ -18,6 +18,35 @@ export function swapCostBase(sellAmount: bigint, sell: Side, buyAmount: bigint, 
   return lost > 0n ? lost : 0n
 }
 
+/** Share of value lost in a swap at oracle prices (price impact + fees), as a fraction; 0 when it gains. */
+export function swapLoss(sellAmount: bigint, sell: Side, buyAmount: bigint, buy: Side): number {
+  const sold = Number(toBase(sellAmount, sell))
+  return sold > 0 ? Math.max(0, 1 - Number(toBase(buyAmount, buy)) / sold) : 0
+}
+
+/** Above this loss the swap is refused: the pool is too thin for the size (seen on Monad, USDe / AUSD, 2026-11-02). */
+export const MAX_SWAP_LOSS = 0.03
+/** Above this, a warning. */
+export const WARN_SWAP_LOSS = 0.005
+
+/** Message for a swap that loses too much value, or undefined; `block` above `maxLoss`. */
+export function swapLossProblem(
+  loss: number,
+  sell: string,
+  buy: string,
+  simulated?: boolean,
+  maxLoss = MAX_SWAP_LOSS,
+): { block: boolean; text: string } | undefined {
+  if (simulated || loss <= WARN_SWAP_LOSS) return undefined
+  const pct = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(loss * 100)
+  return loss > maxLoss
+    ? {
+        block: true,
+        text: `Le swap ${sell} → ${buy} perd ${pct} % de la valeur au prix de l’oracle : pas assez de liquidité pour ce montant. Réduis le montant ou le levier.`,
+      }
+    : { block: false, text: `Le swap ${sell} → ${buy} perd ${pct} % de la valeur au prix de l’oracle (impact de prix).` }
+}
+
 export type Costs = {
   entrySwap: bigint
   /** flash loan premium paid on the debt at close */
