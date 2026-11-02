@@ -229,3 +229,13 @@ export const TARGET_MIN_HF = 1.3
 
 /** Static illustrative market data instead of on-chain reads (screenshots, offline work). Never for real use. */
 export const DEMO = import.meta.env.VITE_DEMO === 'true'
+
+/**
+ * The chain's wrapped native token among the market's assets (WETH, WPOL, WBNB, WAVAX, WXPL, wS, WMON…), to price
+ * gas with the Aave oracle. Undefined when the market does not list it.
+ */
+export function wrappedNative(tokens: Token[] | undefined, chain: Chain): Token | undefined {
+  const sym = chain.nativeCurrency.symbol.toUpperCase()
+  const names = new Set([`W${sym}`, sym, ...(sym === 'POL' ? ['WMATIC', 'WPOL'] : [])])
+  return tokens?.find((t) => names.has(t.symbol.toUpperCase()))
+}

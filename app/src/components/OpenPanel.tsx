@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useGasPrice } from 'wagmi'
 import { encodeFunctionData, parseUnits, type Address, type Hash } from 'viem'
 import { AGGREGATORS, TARGET_MIN_HF, type AggregatorId } from '../config'
 import { executorAbi } from '../abi'
@@ -7,12 +8,14 @@ import { eligibleEModes, withEMode, type EModeCategory, type Reserves, type User
 import { useQuote } from '../lib/useQuote'
 import { useDebounced } from '../lib/useDebounced'
 import { getQuote } from '../lib/quotes'
-import { debtForLeverage, maxLeverage, netApy, project, EMPTY_ACCOUNT } from '../lib/math'
+import { debtForLeverage, maxLeverage, netApy, project, toBase, EMPTY_ACCOUNT } from '../lib/math'
+import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase } from '../lib/economics'
 import { executeOpen, explainError, openArgs, type OpenPlan } from '../lib/execute'
 import { fmtAmount, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX } from '../lib/format'
 import { Card, Metric, Notice, Segmented, Steps, TxLink, hfTone } from './ui'
 
 const SLIPPAGES = ['30', '50', '100'] as const
+const HORIZON_LABELS: Record<(typeof HORIZONS)[number], string> = { 30: '30 j', 90: '90 j', 180: '6 mois', 365: '1 an' }
 
 type Props = {
   reserves: Reserves
@@ -41,6 +44,9 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const [amountText, setAmountText] = useState('1')
   const [leverage, setLeverage] = useState(2)
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('50')
+  const [horizonText, setHorizon] = useState('90')
+  const horizon = Number(horizonText)
+  const gasPrice = useGasPrice({ chainId: market.chain.id, query: { refetchInterval: 30_000 } })
   const [busy, setBusy] = useState<string>()
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash }>()
 
@@ -109,7 +115,31 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const needsDelegation = !user || user.borrowAllowance < debtAmount
   const pairCampaigns = campaignsForPair(reserves.campaigns, C, D)
   const rewardsApy = proj ? rewardsOnEquity(pairCampaigns, proj.leverage, C.token.symbol, D.token.symbol) : 0
-  const apy = proj ? netApy(proj.leverage, C.supplyApy, D.borrowApy) + rewardsApy : undefined
+  const ratesApy = proj ? netApy(proj.leverage, C.supplyApy, D.borrowApy) : undefined
+  const apy = ratesApy !== undefined ? ratesApy + rewardsApy : undefined
+
+  // one-off costs, and the yield once they are paid, over the planned holding time
+  const capitalBase = debouncedInitial !== undefined ? toBase(debouncedInitial, C.side) : 0n
+  const soldBase = toBase(debtAmount, D.side)
+  const costs =
+    q && debouncedInitial !== undefined
+      ? loopCosts({
+          entrySoldBase: soldBase,
+          entrySwapBase: swapCostBase(debtAmount, D.side, q.buyAmount, C.side),
+          debtBase: soldBase,
+          premiumBps: reserves.premiumBps,
+          gasPriceWei: gasPrice.data,
+          nativePriceBase: reserves.nativePrice,
+        })
+      : undefined
+  // the APYs above are on the equity left after the swap; over the horizon everything is measured against the
+  // capital put in, so the swap loss counts once, as a cost
+  const toCapital = proj && capitalBase > 0n ? (Number(toBase(debouncedInitial! + q!.buyAmount, C.side)) - Number(soldBase)) / Number(capitalBase) : 0
+  const horizonYield =
+    costs && ratesApy !== undefined && capitalBase > 0n
+      ? horizonApy({ equityBase: capitalBase, ratesApy: ratesApy * toCapital, rewardsApy: rewardsApy * toCapital, costsBase: costs.total, days: horizon })
+      : undefined
+  const breakEven = costs && apy !== undefined ? breakEvenDays(capitalBase, apy * toCapital, costs.total) : undefined
   for (const c of [...pairCampaigns.supply, ...pairCampaigns.borrow].filter((c) => c.conditional))
     warnings.push(`Rewards Merkl « ${c.name} » comptés dans l’APY, mais soumis à des conditions (par exemple health factor maximum ou actifs empruntés) : vérifie-les sur Merkl.`)
 
@@ -220,6 +250,11 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
         <input type="range" min={1.1} max={sliderMax} step={0.05} value={lev} onChange={(e) => setLeverage(Number(e.target.value))} />
       </label>
 
+      <div className="field">
+        <span>Durée prévue de la position (pour amortir les coûts)</span>
+        <Segmented value={horizonText} onChange={setHorizon} options={HORIZONS.map((h) => ({ value: String(h), label: HORIZON_LABELS[h] }))} />
+      </div>
+
       <div className="metrics">
         <Metric label="Emprunt (flash loan)" value={`${fmtAmount(debtAmount, D.token.decimals)} ${D.token.symbol}`} sub={proj && fmtUsd(proj.debtBase - account0.debtBase)} />
         <Metric
@@ -239,7 +274,21 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           value={proj && Number.isFinite(proj.healthFactor) ? fmtPrice(BigInt(Math.round(Number(C.price) * (1 - proj.dropToLiquidation)))) : '…'}
           sub={proj && `baisse de ${fmtPct(proj.dropToLiquidation, 1)} face à ${D.token.symbol}`}
         />
-        <Metric label="APY net sur le capital" value={apy !== undefined ? fmtPct(apy) : '…'} sub={rewardsApy !== 0 ? `dont ${fmtPct(rewardsApy)} de rewards Merkl, hors coût du swap` : "taux variables, hors coût du swap"} tone={apy !== undefined && apy < 0 ? 'warn' : undefined} />
+        <Metric label="APY net (taux actuels)" value={apy !== undefined ? fmtPct(apy) : '…'} sub={rewardsApy !== 0 ? `dont ${fmtPct(rewardsApy)} de rewards Merkl, hors coûts` : 'taux variables, hors coûts'} tone={apy !== undefined && apy < 0 ? 'warn' : undefined} />
+        <Metric
+          label="Coûts estimés"
+          value={costs ? fmtUsd(costs.total) : '…'}
+          sub={
+            costs &&
+            `swap ${fmtUsd(costs.entrySwap)} + sortie ${fmtUsd(costs.exitPremium + costs.exitSwap)}${costs.gas !== undefined ? ` + gas ${fmtUsd(costs.gas)}` : ' (gas non estimé)'}`
+          }
+        />
+        <Metric
+          label={`APY tout compris sur ${HORIZON_LABELS[horizon as (typeof HORIZONS)[number]]}`}
+          value={horizonYield !== undefined ? fmtPct(horizonYield) : '…'}
+          sub={breakEven === undefined ? undefined : Number.isFinite(breakEven) ? `rentable après ${Math.ceil(breakEven)} jours` : 'jamais rentable aux taux actuels'}
+          tone={horizonYield !== undefined && horizonYield < 0 ? 'warn' : undefined}
+        />
       </div>
 
       {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}

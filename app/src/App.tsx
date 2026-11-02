@@ -15,6 +15,7 @@ import {
   savedExecutors,
   storeExecutors,
   supportsChain,
+  wrappedNative,
   type AggregatorId,
   type Market,
   type Token,
@@ -224,7 +225,16 @@ export function App() {
       {QUOTE_MODE === 'mock' && <Notice tone="info">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</Notice>}
 
       {pair ? (
-        <PairView key={market.id} market={market} collateral={pair.collateral} debt={pair.debt} account={address} aggregator={aggregator} selectors={selectors} />
+        <PairView
+          key={market.id}
+          market={market}
+          collateral={pair.collateral}
+          debt={pair.debt}
+          nativeToken={wrappedNative(tokens, market.chain)?.address}
+          account={address}
+          aggregator={aggregator}
+          selectors={selectors}
+        />
       ) : (
         <Card title="Marché">
           {selectors}
@@ -247,14 +257,15 @@ type PairViewProps = {
   market: Market
   collateral: Token
   debt: Token
+  nativeToken?: Address
   account?: Address
   aggregator: AggregatorId
   selectors: ReactNode
 }
 
-function PairView({ market: m, collateral, debt, account, aggregator, selectors }: PairViewProps) {
+function PairView({ market: m, collateral, debt, nativeToken, account, aggregator, selectors }: PairViewProps) {
   const [tab, setTab] = useState<'open' | 'close'>('open')
-  const market = useMarket(m, collateral, debt, account)
+  const market = useMarket(m, collateral, debt, account, nativeToken)
   const emodes = useEModeCategories(m)
   const incentives = useCampaigns(m)
   const r = market.reserves && withIncentives(market.reserves, incentives.data)

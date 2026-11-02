@@ -65,7 +65,7 @@ export function useReserveTokens(market: Market) {
 }
 
 /** Reads both reserves of the pair, oracle prices, the flash loan premium and, when connected, the user's state. */
-export function useMarket(market: Market, collateral: Token, debt: Token, user?: Address) {
+export function useMarket(market: Market, collateral: Token, debt: Token, user?: Address, nativeToken?: Address) {
   const chainId = market.chain.id
   const pool = { chainId, address: market.pool, abi: poolAbi } as const
   const provider = useReadContract({ ...pool, functionName: 'ADDRESSES_PROVIDER', query: { enabled: !DEMO } })
@@ -87,7 +87,7 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
         address: oracle.data ?? zeroAddress,
         abi: oracleAbi,
         functionName: 'getAssetsPrices',
-        args: [[collateral.address, debt.address]],
+        args: [nativeToken ? [collateral.address, debt.address, nativeToken] : [collateral.address, debt.address]],
       },
     ],
     allowFailure: false,
@@ -95,7 +95,7 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
   })
 
   const reserves = useMemo(() => {
-    if (DEMO) return { market, collateral: demoReserve(collateral), debt: demoReserve(debt), premiumBps: 5n }
+    if (DEMO) return { market, collateral: demoReserve(collateral), debt: demoReserve(debt), premiumBps: 5n, nativePrice: undefined }
     if (!reads.data) return undefined
     const [rc, rd, premium, prices] = reads.data
     const build = (token: Token, r: typeof rc, price: bigint): Reserve => {
@@ -115,8 +115,14 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
       }
     }
     if (rc.aTokenAddress === zeroAddress || rd.aTokenAddress === zeroAddress) return null // not listed
-    return { market, collateral: build(collateral, rc, prices[0]), debt: build(debt, rd, prices[1]), premiumBps: BigInt(premium) }
-  }, [reads.data, market, collateral, debt])
+    return {
+      market,
+      collateral: build(collateral, rc, prices[0]),
+      debt: build(debt, rd, prices[1]),
+      premiumBps: BigInt(premium),
+      nativePrice: nativeToken ? prices[2] : undefined,
+    }
+  }, [reads.data, market, collateral, debt, nativeToken])
 
   const executor = market.executor
   const spender = executor ?? zeroAddress
@@ -168,7 +174,16 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
   }
 }
 
-export type Reserves = { market: Market; emode?: EModeCategory; campaigns?: Campaign[]; collateral: Reserve; debt: Reserve; premiumBps: bigint }
+export type Reserves = {
+  market: Market
+  emode?: EModeCategory
+  campaigns?: Campaign[]
+  collateral: Reserve
+  debt: Reserve
+  premiumBps: bigint
+  /** oracle price of the chain's wrapped native token (gas), when Aave lists it */
+  nativePrice?: bigint
+}
 
 /** Aave eMode category (v3.2+ layout): higher LTV for its collateral assets, borrowing limited to its list. */
 export type EModeCategory = {
