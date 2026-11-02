@@ -5,12 +5,12 @@ import { executorAbi } from '../abi'
 import type { Reserves, UserState } from '../lib/useMarket'
 import { useQuote } from '../lib/useQuote'
 import { getQuote } from '../lib/quotes'
-import { collateralToSellForRepay, flashLoanOwed, toBase } from '../lib/math'
+import { collateralToSellForRepay, flashLoanOwed, positionLeverage, repayForTarget, roundSignificant, toBase } from '../lib/math'
+import { useDebounced } from '../lib/useDebounced'
 import { closeArgs, executeClose, explainError, type ClosePlan } from '../lib/execute'
-import { fmtAmount, fmtHf, fmtPct, fmtUsd } from '../lib/format'
+import { fmtAmount, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/format'
 import { Card, QuoteCompare, Metric, Notice, Segmented, Steps, TxLink, hfTone } from './ui'
 
-const FRACTIONS = ['25', '50', '75', '100'] as const
 const SLIPPAGES = ['30', '50', '100'] as const
 
 type Props = {
@@ -23,7 +23,8 @@ type Props = {
 
 export function ClosePanel({ reserves, user, account, aggregator, onDone }: Props) {
   const { market, collateral: C, debt: D, premiumBps } = reserves
-  const [fraction, setFraction] = useState<(typeof FRACTIONS)[number]>('100')
+  // target leverage of the pair's position; 1 = close everything
+  const [target, setTarget] = useState(1)
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('50')
   const [busy, setBusy] = useState<string>()
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash }>()
@@ -31,7 +32,9 @@ export function ClosePanel({ reserves, user, account, aggregator, onDone }: Prop
   if (!user) {
     return (
       <Card title="Fermer une position">
-        <p className="muted">Connecte ton portefeuille pour voir ta position {C.token.symbol} / {D.token.symbol}.</p>
+        <p className="muted">
+          Connecte ton portefeuille pour voir ta position {C.token.symbol} / {D.token.symbol}.
+        </p>
       </Card>
     )
   }
@@ -43,14 +46,18 @@ export function ClosePanel({ reserves, user, account, aggregator, onDone }: Prop
           {C.token.symbol}, dette {fmtAmount(user.debtBalance, D.token.decimals)} {D.token.symbol}).
         </p>
         {/* a full close lands here: keep its confirmation visible */}
-        {result?.ok && <Notice tone="info">{result.text} {result.hash && <TxLink market={market} hash={result.hash} />}</Notice>}
+        {result?.ok && (
+          <Notice tone="info">
+            {result.text} {result.hash && <TxLink market={market} hash={result.hash} />}
+          </Notice>
+        )}
       </Card>
     )
   }
 
   return (
     <ClosePanelInner
-      {...{ market, C, D, premiumBps, user, account, aggregator, onDone, fraction, setFraction, slippage, setSlippage, busy, setBusy, result, setResult }}
+      {...{ market, C, D, premiumBps, user, account, aggregator, onDone, target, setTarget, slippage, setSlippage, busy, setBusy, result, setResult }}
     />
   )
 }
@@ -64,8 +71,8 @@ function ClosePanelInner(p: {
   account?: Address
   aggregator: AggregatorChoice
   onDone: () => void
-  fraction: (typeof FRACTIONS)[number]
-  setFraction: (f: (typeof FRACTIONS)[number]) => void
+  target: number
+  setTarget: (x: number) => void
   slippage: (typeof SLIPPAGES)[number]
   setSlippage: (s: (typeof SLIPPAGES)[number]) => void
   busy?: string
@@ -73,23 +80,32 @@ function ClosePanelInner(p: {
   result?: { ok: boolean; text: string; hash?: Hash }
   setResult: (r?: { ok: boolean; text: string; hash?: Hash }) => void
 }) {
-  const { market, C, D, premiumBps, user, account, aggregator, fraction, slippage, busy, setBusy, result, setResult } = p
-  const full = fraction === '100'
-  const repay = (user.debtBalance * BigInt(fraction)) / 100n
+  const { market, C, D, premiumBps, user, account, aggregator, slippage, busy, setBusy, result, setResult } = p
+  const position = { collateralBase: toBase(user.aTokenBalance, C.side), debtBase: toBase(user.debtBalance, D.side) }
+  const currentLev = positionLeverage(position)
+  const sliderMax = Number.isFinite(currentLev) ? Math.max(1, Math.floor(currentLev * 20) / 20) : 15
+  const lev = Math.max(1, Math.min(p.target, sliderMax))
+  const debouncedLev = useDebounced(lev)
+  const full = debouncedLev <= 1
+  // rounded so that interest accruing on the debt does not re-quote at every block
+  const repay = full ? user.debtBalance : roundSignificant(repayForTarget(position, BigInt(Math.round(debouncedLev * 10_000)), D.side), 5)
   const owed = flashLoanOwed(repay, premiumBps)
   let toSell = collateralToSellForRepay(repay, premiumBps, BigInt(slippage), C.side, D.side)
   if (toSell > user.aTokenBalance) toSell = user.aTokenBalance
 
-  const quoteReq = {
-    aggregator,
-    chainId: market.chain.id,
-    sell: C.token,
-    buy: D.token,
-    sellAmount: toSell,
-    taker: market.quoteTaker,
-    slippageBps: BigInt(slippage),
-    oracle: { sell: C.side, buy: D.side },
-  }
+  const quoteReq =
+    repay > 0n
+      ? {
+          aggregator,
+          chainId: market.chain.id,
+          sell: C.token,
+          buy: D.token,
+          sellAmount: toSell,
+          taker: market.quoteTaker,
+          slippageBps: BigInt(slippage),
+          oracle: { sell: C.side, buy: D.side },
+        }
+      : undefined
   const quote = useQuote(quoteReq)
   const q = quote.data
 
@@ -106,11 +122,18 @@ function ClosePanelInner(p: {
         10_000 /
         Number(remainingDebtBase)
 
+  const levAfter = full
+    ? 1
+    : positionLeverage({ collateralBase: position.collateralBase - toBase(toSell, C.side), debtBase: position.debtBase - toBase(repay, D.side) })
   const collatBack = full ? user.aTokenBalance - toSell : 0n
   const debtBack = q && q.buyAmount > owed ? q.buyAmount - owed : 0n
 
   const problems: string[] = []
-  if (q && coversDebt === false) problems.push(`Le minimum garanti du swap (${fmtAmount(q.minOut, D.token.decimals)} ${D.token.symbol}) ne couvre pas le remboursement (${fmtAmount(required, D.token.decimals)}). Baisse le slippage ou réessaie.`)
+  if (q && coversDebt === false)
+    problems.push(
+      `Le minimum garanti du swap (${fmtAmount(q.minOut, D.token.decimals)} ${D.token.symbol}) ne couvre pas le remboursement (${fmtAmount(required, D.token.decimals)}). Baisse le slippage ou réessaie.`,
+    )
+  if (repay === 0n) problems.push(`Le levier visé n’est pas sous ton levier actuel (${fmtX(currentLev)}) : pour l’augmenter, passe par « Ouvrir / augmenter ».`)
   if (D.config.paused || C.config.paused) problems.push('Marché en pause sur Aave.')
   if (!D.config.flashLoanEnabled) problems.push(`Flash loan désactivé sur ${D.token.symbol}.`)
 
@@ -160,14 +183,20 @@ function ClosePanelInner(p: {
       })
     : undefined
 
-  const canSign = !!market.executor && !!account && !!q && !q.simulated && problems.length === 0 && !quote.isFetching && !busy
-  const disabledReason = !market.executor ? 'Contrat pas encore déployé' : q?.simulated ? 'Devis simulé' : problems.length ? 'Corrige les points ci-dessus' : undefined
+  const canSign = !!market.executor && !!account && !!q && !q.simulated && problems.length === 0 && !quote.isFetching && !busy && lev === debouncedLev
+  const disabledReason = !market.executor
+    ? 'Contrat pas encore déployé'
+    : q?.simulated
+      ? 'Devis simulé'
+      : problems.length
+        ? 'Corrige les points ci-dessus'
+        : undefined
 
   async function onClose() {
     setResult(undefined)
     try {
       setBusy('Nouvelle cotation…')
-      const fresh = await getQuote(quoteReq)
+      const fresh = await getQuote(quoteReq!)
       if (fresh.simulated) throw new Error('Plus de devis réel disponible')
       if (fresh.minOut < required) throw new Error('Le nouveau devis ne couvre plus le remboursement')
       const hash = await executeClose(makePlan(fresh)!, setBusy)
@@ -183,16 +212,23 @@ function ClosePanelInner(p: {
   return (
     <Card title="Fermer ou réduire">
       <div className="metrics">
-        <Metric label="Collatéral" value={`${fmtAmount(user.aTokenBalance, C.token.decimals)} ${C.token.symbol}`} sub={fmtUsd(toBase(user.aTokenBalance, C.side))} />
+        <Metric
+          label="Collatéral"
+          value={`${fmtAmount(user.aTokenBalance, C.token.decimals)} ${C.token.symbol}`}
+          sub={fmtUsd(toBase(user.aTokenBalance, C.side))}
+        />
         <Metric label="Dette" value={`${fmtAmount(user.debtBalance, D.token.decimals)} ${D.token.symbol}`} sub={fmtUsd(toBase(user.debtBalance, D.side))} />
         <Metric label="Health factor actuel" value={fmtHf(user.healthFactor)} tone={hfTone(user.healthFactor, TARGET_MIN_HF)} />
       </div>
 
       <div className="grid2">
-        <div className="field">
-          <span>Part de la dette à rembourser</span>
-          <Segmented value={p.fraction} onChange={p.setFraction} options={FRACTIONS.map((f) => ({ value: f, label: f === '100' ? 'Tout' : `${f} %` }))} />
-        </div>
+        <label className="field">
+          <span>
+            Levier visé <strong className="lev">{lev <= 1 ? 'tout fermer' : fmtX(lev)}</strong>
+            <small className="muted"> aujourd’hui {fmtX(currentLev)}</small>
+          </span>
+          <input type="range" min={1} max={sliderMax} step={0.05} value={lev} onChange={(e) => p.setTarget(Number(e.target.value))} />
+        </label>
         <div className="field">
           <span>Slippage max</span>
           <Segmented value={slippage} onChange={p.setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000, 1) }))} />
@@ -200,19 +236,38 @@ function ClosePanelInner(p: {
       </div>
 
       <div className="metrics">
-        <Metric label="Remboursé" value={`${fmtAmount(repay, D.token.decimals)} ${D.token.symbol}`} sub={`+ prime flash loan ${fmtPct(Number(premiumBps) / 10_000)}`} />
-        <Metric label="Collatéral vendu" value={`${fmtAmount(toSell, C.token.decimals)} ${C.token.symbol}`} sub={q && `→ ${fmtAmount(q.buyAmount, D.token.decimals)} ${D.token.symbol}`} />
+        <Metric
+          label="Remboursé"
+          value={`${fmtAmount(repay, D.token.decimals)} ${D.token.symbol}`}
+          sub={`+ prime flash loan ${fmtPct(Number(premiumBps) / 10_000)}`}
+        />
+        <Metric
+          label="Collatéral vendu"
+          value={`${fmtAmount(toSell, C.token.decimals)} ${C.token.symbol}`}
+          sub={q && `→ ${fmtAmount(q.buyAmount, D.token.decimals)} ${D.token.symbol}`}
+        />
         {full ? (
-          <Metric label="Tu récupères" value={`${fmtAmount(collatBack, C.token.decimals)} ${C.token.symbol}`} sub={q && `+ ≈ ${fmtAmount(debtBack, D.token.decimals)} ${D.token.symbol}`} />
+          <Metric
+            label="Tu récupères"
+            value={`${fmtAmount(collatBack, C.token.decimals)} ${C.token.symbol}`}
+            sub={q && `+ ≈ ${fmtAmount(debtBack, D.token.decimals)} ${D.token.symbol}`}
+          />
         ) : (
-          <Metric label="Health factor après" value={fmtHf(hfAfter)} tone={hfTone(hfAfter, TARGET_MIN_HF)} sub={q && `+ ≈ ${fmtAmount(debtBack, D.token.decimals)} ${D.token.symbol} rendus`} />
+          <Metric
+            label="Health factor après"
+            value={fmtHf(hfAfter)}
+            tone={hfTone(hfAfter, TARGET_MIN_HF)}
+            sub={`levier ${fmtX(levAfter)}${q ? ` · + ≈ ${fmtAmount(debtBack, D.token.decimals)} ${D.token.symbol} rendus` : ''}`}
+          />
         )}
       </div>
 
       <QuoteCompare quote={q} token={D.token} />
       {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
       {problems.map((x) => (
-        <Notice key={x} tone="bad">{x}</Notice>
+        <Notice key={x} tone="bad">
+          {x}
+        </Notice>
       ))}
       {warnings.map((w) => (
         <Notice key={w}>{w}</Notice>
@@ -231,7 +286,11 @@ function ClosePanelInner(p: {
         </button>
         {disabledReason && !busy && <span className="muted small">{disabledReason}</span>}
       </div>
-      {result && <Notice tone={result.ok ? 'info' : 'bad'}>{result.text} {result.hash && <TxLink market={market} hash={result.hash} />}</Notice>}
+      {result && (
+        <Notice tone={result.ok ? 'info' : 'bad'}>
+          {result.text} {result.hash && <TxLink market={market} hash={result.hash} />}
+        </Notice>
+      )}
 
       {preview && (
         <details className="preview">

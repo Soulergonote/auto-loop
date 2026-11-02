@@ -67,7 +67,7 @@ VITE_QUOTE_MODE=live
 VITE_VELORA_INCLUDE_DEXS=UniswapV3,UniswapV4,AerodromeSlipstream,AerodromeSlipstreamFactory3,PancakeswapV3
 ENV
 npm run dev                                                   # terminal 2
-NODE_PATH=$(npm root -g) node e2e/run.cjs open ouvrir         # puis close50 / close
+NODE_PATH=$(npm root -g) node e2e/run.cjs open ouvrir         # puis reduce / close
 ```
 
 Résultats (1 WETH de capital, levier 3x, dette USDC, slippage 0,5 %) :

@@ -47,6 +47,18 @@ export function extraDebtForTarget(position: PairPosition, addedBase: bigint, le
   return targetDebt > position.debtBase ? fromBase(targetDebt - position.debtBase, debt) : 0n
 }
 
+/**
+ * Debt to repay (selling the same value of collateral) so that the position on the pair drops to
+ * `leverageBps / 10000`, before swap costs: the equity stays, collateral and debt shrink together, so
+ * repaid = debt - (target - 1) x equity. The whole debt at 1x or below, 0 when already at or below the target.
+ */
+export function repayForTarget(position: PairPosition, leverageBps: bigint, debt: Side): bigint {
+  const equity = position.collateralBase - position.debtBase
+  if (equity <= 0n || leverageBps <= BPS) return fromBase(position.debtBase, debt)
+  const targetDebt = (equity * (leverageBps - BPS)) / BPS
+  return targetDebt < position.debtBase ? fromBase(position.debtBase - targetDebt, debt) : 0n
+}
+
 /** Theoretical maximum leverage allowed by the borrow LTV: 1 / (1 - LTV). */
 export function maxLeverage(ltvBps: number): number {
   return ltvBps >= 10_000 ? Infinity : 1 / (1 - ltvBps / 10_000)
@@ -87,14 +99,7 @@ export type Projection = {
  * Account state after adding `addCollat` collateral (liq. threshold `ltBps`) and `addDebt` debt,
  * merged with the user's existing Aave account.
  */
-export function project(
-  account: Account,
-  addCollat: bigint,
-  collat: Side,
-  ltBps: number,
-  addDebt: bigint,
-  debt: Side,
-): Projection {
+export function project(account: Account, addCollat: bigint, collat: Side, ltBps: number, addDebt: bigint, debt: Side): Projection {
   const addedCollatBase = toBase(addCollat, collat)
   const addedDebtBase = toBase(addDebt, debt)
   const collateralBase = account.collateralBase + addedCollatBase
@@ -123,14 +128,7 @@ export function netApy(leverage: number, supplyApy: number, borrowApy: number): 
  * Collateral to sell (exact input) to repay `debtAmount` plus the flash loan premium,
  * with a margin for slippage and interest accrued before execution.
  */
-export function collateralToSellForRepay(
-  debtAmount: bigint,
-  premiumBps: bigint,
-  slippageBps: bigint,
-  collat: Side,
-  debt: Side,
-  extraMarginBps = 30n,
-): bigint {
+export function collateralToSellForRepay(debtAmount: bigint, premiumBps: bigint, slippageBps: bigint, collat: Side, debt: Side, extraMarginBps = 30n): bigint {
   const owed = (debtAmount * (BPS + premiumBps)) / BPS
   const withMargin = (owed * BPS) / (BPS - slippageBps - extraMarginBps)
   return fromBase(toBase(withMargin, debt), collat) + 1n

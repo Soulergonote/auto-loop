@@ -1,7 +1,7 @@
 // Drives the app in headless Chromium with a test wallet that forwards to anvil (account 1, unlocked).
 //   node e2e/run.cjs open ouvrir     open 1 WETH at 3x against USDC
 //   node e2e/run.cjs increase aug   lever the existing position to 4x without new capital
-//   node e2e/run.cjs close50 f50    repay 50 %
+//   node e2e/run.cjs reduce r2      reduce the position to 2x (target leverage slider)
 //   node e2e/run.cjs close fermer   close everything
 //   node e2e/run.cjs deploy deployer deploy the contract from the test wallet with the app's button
 // EXECUTOR=0x… preloads an executor as if deployed from this browser (app built without VITE_EXECUTORS).
@@ -49,8 +49,8 @@ const U = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
   }
   // AGG=Velora|KyberSwap forces one aggregator instead of the best-price comparison
   if (process.env.AGG) await page.getByRole('radio', { name: process.env.AGG }).click()
-  if (mode.startsWith('close')) await page.getByRole('radio', { name: 'Fermer / réduire' }).click()
-  if (mode === 'close50') { await page.waitForTimeout(3000); await page.locator('button', { hasText: /^50\s*%$/ }).first().click() }
+  if (mode.startsWith('close') || mode === 'reduce') await page.getByRole('radio', { name: 'Fermer / réduire' }).click()
+  if (mode === 'reduce') { await page.waitForTimeout(3000); await page.locator('input[type=range]').first().fill('2') }
   if (mode === 'open') {
     await page.locator('input[inputmode=decimal]').fill('1')
     await page.locator('input[type=range]').fill('3')
@@ -65,13 +65,14 @@ const U = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
   const btn = page.locator('button.btn.primary')
   console.log('button:', await btn.textContent(), 'enabled:', await btn.isEnabled(), 'title:', await btn.getAttribute('title'))
   console.log('notices:', (await page.locator('.notice').allTextContents()).join(' | '))
+  console.log('metrics:', (await page.locator('.metric').allInnerTexts()).map((t) => t.replace(/\n/g, ' ')).join(' | '))
   console.log('quotes:', (await page.locator('p:has-text("Devis comparés")').allTextContents()).join(' | '))
   if (await btn.isEnabled()) {
     await btn.click()
     for (let i = 0; i < 60; i++) {
       await page.waitForTimeout(1000)
       const t = await page.locator('main, .page').first().innerText()
-      if (/Position ouverte|Position augmentée|Position fermée|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(t) && i > 3) break
+      if (/Position ouverte|Position augmentée|Position réduite|Position fermée|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(t) && i > 3) break
     }
     await page.screenshot({ path: `${outPrefix}-apres.png`, fullPage: true })
     console.log('wallet calls:', [...new Set(await page.evaluate(() => window.__calls))].join(','))

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseUnits, toFunctionSelector, toFunctionSignature } from 'viem'
 import {
+  repayForTarget,
   collateralToSellForRepay,
   debtForLeverage,
   extraDebtForTarget,
@@ -63,8 +64,7 @@ describe('leverage maths', () => {
 
 describe('Aave decoding', () => {
   it('decodes a reserve configuration bitmap', () => {
-    const data =
-      8000n | (8300n << 16n) | (10500n << 32n) | (18n << 48n) | (1n << 56n) | (1n << 58n) | (1n << 63n)
+    const data = 8000n | (8300n << 16n) | (10500n << 32n) | (18n << 48n) | (1n << 56n) | (1n << 58n) | (1n << 63n)
     const c = decodeReserveConfig(data)
     expect(c).toMatchObject({
       ltvBps: 8000,
@@ -119,5 +119,13 @@ describe('increasing an existing position', () => {
     const initial = parseUnits('1', 18)
     expect(extraDebtForTarget({ collateralBase: 0n, debtBase: 0n }, toBase(initial, WETH), 30_000n, USDC)).toBe(debtForLeverage(initial, 30_000n, WETH, USDC))
   })
-})
 
+  it('repays what brings the position down to the target leverage', () => {
+    const usd = { price: 100_000_000n, decimals: 6 }
+    // 7x on 1 000 $: 7 000 $ of collateral, 6 000 $ of debt
+    const pos = { collateralBase: 7000n * 10n ** 8n, debtBase: 6000n * 10n ** 8n }
+    expect(repayForTarget(pos, 30_000n, usd)).toBe(4000n * 10n ** 6n) // 3x: debt 2 000 $
+    expect(repayForTarget(pos, 10_000n, usd)).toBe(6000n * 10n ** 6n) // 1x: everything
+    expect(repayForTarget(pos, 80_000n, usd)).toBe(0n) // already below
+  })
+})
