@@ -1,9 +1,9 @@
 import { getAddress, hexToBigInt, isAddress, isHex, slice, type Address, type Hex } from 'viem'
-import { AGGREGATORS, KYBER_CHAIN_SLUGS, KYBER_CLIENT_ID, QUOTE_MODE, VELORA_EXCLUDE_DEXS, VELORA_INCLUDE_DEXS, VELORA_PARTNER, type AggregatorId, type Token } from '../config'
+import { AGGREGATORS, KYBER_CHAIN_SLUGS, KYBER_CLIENT_ID, KYBER_INCLUDED_SOURCES, QUOTE_MODE, VELORA_EXCLUDE_DEXS, VELORA_INCLUDE_DEXS, VELORA_PARTNER, aggregatorsFor, type AggregatorChoice, type AggregatorId, type Token } from '../config'
 import { applySlippage, oracleSwapOut, type Side } from './math'
 
 export type QuoteRequest = {
-  aggregator: AggregatorId
+  aggregator: AggregatorChoice
   chainId: number
   sell: Token
   buy: Token
@@ -27,7 +27,11 @@ export type Quote = {
   /** why the live quote was not used, when simulated */
   fallbackReason?: string
   fetchedAt: number
+  /** 'best' mode: what each aggregator offered (or why it could not quote) */
+  alternatives?: { aggregator: AggregatorId; buyAmount?: bigint; error?: string }[]
 }
+
+type SingleRequest = QuoteRequest & { aggregator: AggregatorId }
 
 export class QuoteError extends Error {}
 
@@ -35,16 +39,39 @@ export class QuoteError extends Error {}
 const SIMULATED_COST_BPS = 15n
 
 export async function getQuote(req: QuoteRequest, signal?: AbortSignal): Promise<Quote> {
+  if (req.aggregator === 'best') return bestQuote(req, signal)
+  return singleQuote(req as SingleRequest, signal)
+}
+
+/** Asks every aggregator that quotes on the chain in parallel and keeps the one that gives the most. */
+async function bestQuote(req: QuoteRequest, signal?: AbortSignal): Promise<Quote> {
+  const ids = aggregatorsFor(req.chainId)
+  if (ids.length === 0) throw new QuoteError('aucun agrégateur ne cote sur ce réseau')
+  if (QUOTE_MODE === 'mock') return simulatedQuote({ ...req, aggregator: ids[0] })
+  const settled = await Promise.allSettled(ids.map((aggregator) => liveQuote({ ...req, aggregator }, signal)))
+  const alternatives = settled.map((r, i) =>
+    r.status === 'fulfilled'
+      ? { aggregator: ids[i], buyAmount: r.value.buyAmount }
+      : { aggregator: ids[i], error: r.reason instanceof Error ? r.reason.message : String(r.reason) },
+  )
+  const quotes = settled.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+  if (quotes.length) return { ...quotes.reduce((a, b) => (b.buyAmount > a.buyAmount ? b : a)), alternatives }
+  const reason = alternatives.map((a) => `${AGGREGATORS[a.aggregator].label} : ${a.error}`).join(' ; ')
+  if (QUOTE_MODE === 'live' || signal?.aborted) throw new QuoteError(reason)
+  return { ...simulatedQuote({ ...req, aggregator: ids[0] }, reason), alternatives }
+}
+
+async function singleQuote(req: SingleRequest, signal?: AbortSignal): Promise<Quote> {
   if (QUOTE_MODE === 'mock') return simulatedQuote(req)
   try {
     return await liveQuote(req, signal)
   } catch (e) {
     if (QUOTE_MODE === 'live' || signal?.aborted) throw e
-    return simulatedQuote(req, e instanceof Error ? e.message : String(e))
+    return simulatedQuote(req, `${AGGREGATORS[req.aggregator].label} : ${e instanceof Error ? e.message : String(e)}`)
   }
 }
 
-export function simulatedQuote(req: QuoteRequest, fallbackReason?: string): Quote {
+export function simulatedQuote(req: SingleRequest, fallbackReason?: string): Quote {
   const buyAmount = oracleSwapOut(req.sellAmount, req.oracle.sell, req.oracle.buy, SIMULATED_COST_BPS)
   return {
     aggregator: req.aggregator,
@@ -59,7 +86,7 @@ export function simulatedQuote(req: QuoteRequest, fallbackReason?: string): Quot
   }
 }
 
-async function liveQuote(req: QuoteRequest, signal?: AbortSignal): Promise<Quote> {
+async function liveQuote(req: SingleRequest, signal?: AbortSignal): Promise<Quote> {
   const raw = await LIVE[req.aggregator](req, signal)
   const expected = AGGREGATORS[req.aggregator].router
   if (!isAddress(raw.to) || getAddress(raw.to) !== expected) {
@@ -156,6 +183,7 @@ const LIVE: Record<AggregatorId, (req: QuoteRequest, signal?: AbortSignal) => Pr
       amountIn: req.sellAmount.toString(),
       gasInclude: 'true',
     })
+    if (KYBER_INCLUDED_SOURCES) q.set('includedSources', KYBER_INCLUDED_SOURCES)
     const route = await fetchJson(`${KYBER_API}/${chain}/api/v1/routes?${q}`, { headers, signal })
     const summary = route?.data?.routeSummary
     if (!summary) throw new QuoteError(`KyberSwap : pas de route${route?.message ? ` (${route.message})` : ''}`)

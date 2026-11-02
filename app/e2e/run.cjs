@@ -47,6 +47,8 @@ const U = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
     console.log('saved:', await page.evaluate(() => localStorage.getItem('auto-loop.executors')))
     return browser.close()
   }
+  // AGG=Velora|KyberSwap forces one aggregator instead of the best-price comparison
+  if (process.env.AGG) await page.getByRole('radio', { name: process.env.AGG }).click()
   if (mode.startsWith('close')) await page.getByRole('radio', { name: 'Fermer / réduire' }).click()
   if (mode === 'close50') { await page.waitForTimeout(3000); await page.locator('button', { hasText: /^50\s*%$/ }).first().click() }
   if (mode === 'open') {
@@ -63,6 +65,7 @@ const U = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
   const btn = page.locator('button.btn.primary')
   console.log('button:', await btn.textContent(), 'enabled:', await btn.isEnabled(), 'title:', await btn.getAttribute('title'))
   console.log('notices:', (await page.locator('.notice').allTextContents()).join(' | '))
+  console.log('quotes:', (await page.locator('p:has-text("Devis comparés")').allTextContents()).join(' | '))
   if (await btn.isEnabled()) {
     await btn.click()
     for (let i = 0; i < 60; i++) {

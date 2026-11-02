@@ -1,4 +1,6 @@
-import type { Market } from '../config'
+import { AGGREGATORS, type Market } from '../config'
+import type { Quote } from '../lib/quotes'
+import { fmtAmount } from '../lib/format'
 import type { ReactNode } from 'react'
 
 export function Card({ title, children, aside }: { title?: string; children: ReactNode; aside?: ReactNode }) {
@@ -87,5 +89,23 @@ export function TxLink({ market, hash }: { market: Market; hash: string }) {
     <a href={`${explorer.url}/tx/${hash}`} target="_blank" rel="noreferrer">
       Voir sur {explorer.name}
     </a>
+  )
+}
+
+/** "Meilleur prix" mode: what each aggregator offered, the chosen one first. */
+export function QuoteCompare({ quote, token }: { quote?: Quote; token: { symbol: string; decimals: number } }) {
+  if (!quote?.alternatives || quote.alternatives.length < 2) return null
+  const sorted = [...quote.alternatives].sort((a, b) => (a.aggregator === quote.aggregator ? -1 : b.aggregator === quote.aggregator ? 1 : 0))
+  return (
+    <p className="muted small">
+      Devis comparés :{' '}
+      {sorted.map((a, i) => (
+        <span key={a.aggregator}>
+          {i > 0 && ' · '}
+          {a.aggregator === quote.aggregator && !quote.simulated ? <strong>{AGGREGATORS[a.aggregator].label}</strong> : AGGREGATORS[a.aggregator].label}{' '}
+          {a.buyAmount !== undefined ? `${fmtAmount(a.buyAmount, token.decimals)} ${token.symbol}` : `indisponible (${a.error})`}
+        </span>
+      ))}
+    </p>
   )
 }

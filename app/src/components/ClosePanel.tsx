@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { encodeFunctionData, type Address, type Hash } from 'viem'
-import { AGGREGATORS, TARGET_MIN_HF, type AggregatorId } from '../config'
+import { TARGET_MIN_HF, type AggregatorChoice } from '../config'
 import { executorAbi } from '../abi'
 import type { Reserves, UserState } from '../lib/useMarket'
 import { useQuote } from '../lib/useQuote'
@@ -8,7 +8,7 @@ import { getQuote } from '../lib/quotes'
 import { collateralToSellForRepay, flashLoanOwed, toBase } from '../lib/math'
 import { closeArgs, executeClose, explainError, type ClosePlan } from '../lib/execute'
 import { fmtAmount, fmtHf, fmtPct, fmtUsd } from '../lib/format'
-import { Card, Metric, Notice, Segmented, Steps, TxLink, hfTone } from './ui'
+import { Card, QuoteCompare, Metric, Notice, Segmented, Steps, TxLink, hfTone } from './ui'
 
 const FRACTIONS = ['25', '50', '75', '100'] as const
 const SLIPPAGES = ['30', '50', '100'] as const
@@ -17,7 +17,7 @@ type Props = {
   reserves: Reserves
   user?: UserState
   account?: Address
-  aggregator: AggregatorId
+  aggregator: AggregatorChoice
   onDone: () => void
 }
 
@@ -62,7 +62,7 @@ function ClosePanelInner(p: {
   premiumBps: bigint
   user: UserState
   account?: Address
-  aggregator: AggregatorId
+  aggregator: AggregatorChoice
   onDone: () => void
   fraction: (typeof FRACTIONS)[number]
   setFraction: (f: (typeof FRACTIONS)[number]) => void
@@ -115,7 +115,7 @@ function ClosePanelInner(p: {
   if (!D.config.flashLoanEnabled) problems.push(`Flash loan désactivé sur ${D.token.symbol}.`)
 
   const warnings: string[] = []
-  if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${AGGREGATORS[aggregator].label} : ${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
+  if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
   if (!full && hfAfter < TARGET_MIN_HF) warnings.push(`Health factor après réduction : ${fmtHf(hfAfter)}.`)
   if (user.account.collateralBase > toBase(user.aTokenBalance, C.side) + 100n * 10n ** 8n)
     warnings.push('Ton compte Aave a d’autres collatéraux : le health factor affiché tient compte de tout le compte.')
@@ -209,6 +209,7 @@ function ClosePanelInner(p: {
         )}
       </div>
 
+      <QuoteCompare quote={q} token={D.token} />
       {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
       {problems.map((x) => (
         <Notice key={x} tone="bad">{x}</Notice>

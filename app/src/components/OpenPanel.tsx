@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useGasPrice } from 'wagmi'
 import { encodeFunctionData, parseUnits, type Address, type Hash } from 'viem'
-import { AGGREGATORS, TARGET_MIN_HF, type AggregatorId } from '../config'
+import { AGGREGATORS, TARGET_MIN_HF, type AggregatorChoice } from '../config'
 import { executorAbi } from '../abi'
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../lib/merkl'
 import { CampaignTable } from './CampaignTable'
@@ -13,7 +13,7 @@ import { extraDebtForTarget, maxLeverage, netApy, positionLeverage, project, rou
 import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase } from '../lib/economics'
 import { executeOpen, explainError, openArgs, type OpenPlan } from '../lib/execute'
 import { fmtAmount, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX } from '../lib/format'
-import { Card, Metric, Notice, Segmented, Steps, TxLink, hfTone } from './ui'
+import { Card, QuoteCompare, Metric, Notice, Segmented, Steps, TxLink, hfTone } from './ui'
 
 const SLIPPAGES = ['30', '50', '100'] as const
 const HORIZON_LABELS: Record<(typeof HORIZONS)[number], string> = { 30: '30 j', 90: '90 j', 180: '6 mois', 365: '1 an' }
@@ -24,7 +24,7 @@ type Props = {
   emodes: EModeCategory[]
   user?: UserState
   account?: Address
-  aggregator: AggregatorId
+  aggregator: AggregatorChoice
   onDone: () => void
 }
 
@@ -121,7 +121,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const switchEMode = !!user && currentEMode !== emodeId
   if (switchEMode && currentEMode !== 0 && (user.account.debtBase > 0n || user.account.collateralBase > 0n))
     warnings.push(`Ton compte Aave est en eMode « ${emodes.find((c) => c.id === currentEMode)?.label ?? currentEMode} » : le changer s’applique à toutes tes positions sur ce marché.`)
-  if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${AGGREGATORS[aggregator].label} : ${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
+  if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
 
   const needsApprove = !!user && !!initial && user.collateralAllowance < initial
   const needsDelegation = !user || user.borrowAllowance < debtAmount
@@ -297,7 +297,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
         <Metric
           label="Collatéral déposé"
           value={q && debouncedInitial !== undefined ? `${fmtAmount(debouncedInitial + q.buyAmount, C.token.decimals)} ${C.token.symbol}` : '…'}
-          sub={q && `dont ${fmtAmount(q.buyAmount, C.token.decimals)} via ${AGGREGATORS[aggregator].label}`}
+          sub={q && `dont ${fmtAmount(q.buyAmount, C.token.decimals)} via ${AGGREGATORS[q.aggregator].label}`}
         />
         <Metric label="Levier effectif" value={loopLev !== undefined ? fmtX(loopLev) : '…'} sub={hasPosition ? 'de toute la position, après swap' : 'après coût du swap'} />
         <Metric
@@ -334,6 +334,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
 
       <CampaignTable campaigns={[...pairCampaigns.supply, ...pairCampaigns.borrow]} yields={yields} excluded={eligibility?.excluded ?? []} borrowed={D} />
 
+      <QuoteCompare quote={q} token={C.token} />
       {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
       {problems.map((p) => (
         <Notice key={p} tone="bad">{p}</Notice>

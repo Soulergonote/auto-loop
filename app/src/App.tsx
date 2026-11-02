@@ -16,6 +16,7 @@ import {
   storeExecutors,
   supportsChain,
   wrappedNative,
+  type AggregatorChoice,
   type AggregatorId,
   type Market,
   type Token,
@@ -57,7 +58,13 @@ function WalletButton({ market }: { market: Market }) {
   )
 }
 
-type TokenSelectProps = { tokens: Token[]; value: Token; onChange: (t: Token) => void; exclude: Token; label: string }
+type TokenSelectProps = {
+  tokens: Token[]
+  value: Token
+  onChange: (t: Token) => void
+  exclude: Token
+  label: string
+}
 
 function TokenSelect({ tokens, value, onChange, exclude, label }: TokenSelectProps) {
   return (
@@ -86,8 +93,7 @@ function savedMarketId(): string {
 
 /** Default pair of a market: WETH-like against USDC-like when listed. */
 function defaultPair(tokens: Token[]) {
-  const bySymbol = (symbols: string[], not?: Token) =>
-    symbols.map((s) => tokens.find((t) => t.symbol === s)).find((t): t is Token => !!t && t !== not)
+  const bySymbol = (symbols: string[], not?: Token) => symbols.map((s) => tokens.find((t) => t.symbol === s)).find((t): t is Token => !!t && t !== not)
   const collateral = bySymbol(DEFAULT_COLLATERAL_SYMBOLS) ?? tokens[0]
   const debt = bySymbol(DEFAULT_DEBT_SYMBOLS, collateral) ?? tokens.find((t) => t !== collateral)!
   return { collateral, debt }
@@ -100,10 +106,7 @@ export function App() {
   const declared = useMemo(() => getMarket(marketId, localExecutors), [marketId, localExecutors])
   // an executor is only offered for signing once its on-chain code is checked to be exactly this contract
   const check = useExecutorCheck(declared)
-  const market = useMemo(
-    () => (declared.executor && check.data !== true ? { ...declared, executor: undefined } : declared),
-    [declared, check.data],
-  )
+  const market = useMemo(() => (declared.executor && check.data !== true ? { ...declared, executor: undefined } : declared), [declared, check.data])
   function setLocalExecutor(id: string, a?: Address) {
     const next = { ...localExecutors }
     if (a) next[id] = a
@@ -114,10 +117,14 @@ export function App() {
   const reserveTokens = useReserveTokens(market)
   const tokens = reserveTokens.tokens
   const [platform, setPlatform] = useState<string>('aave-v3')
-  const [preferredAggregator, setAggregator] = useState<AggregatorId>('velora')
-  // keep the choice when it quotes on this chain, otherwise fall back to the first one that does
-  const aggregator = supportsChain(preferredAggregator, market.chain.id) ? preferredAggregator : (aggregatorsFor(market.chain.id)[0] ?? preferredAggregator)
-  const [picked, setPicked] = useState<{ market: string; collateral: Address; debt: Address }>()
+  const [preferredAggregator, setAggregator] = useState<AggregatorChoice>('best')
+  // keep the choice when it quotes on this chain, otherwise compare all those that do
+  const aggregator: AggregatorChoice = preferredAggregator === 'best' || supportsChain(preferredAggregator, market.chain.id) ? preferredAggregator : 'best'
+  const [picked, setPicked] = useState<{
+    market: string
+    collateral: Address
+    debt: Address
+  }>()
 
   const pair = useMemo(() => {
     if (!tokens || tokens.length < 2) return undefined
@@ -137,7 +144,12 @@ export function App() {
       // private window: the choice just isn't remembered
     }
   }
-  const setPair = (collateral: Token, debt: Token) => setPicked({ market: market.id, collateral: collateral.address, debt: debt.address })
+  const setPair = (collateral: Token, debt: Token) =>
+    setPicked({
+      market: market.id,
+      collateral: collateral.address,
+      debt: debt.address,
+    })
 
   const selectors = (
     <>
@@ -158,7 +170,12 @@ export function App() {
           <Segmented
             value={platform}
             onChange={setPlatform}
-            options={PLATFORMS.map((p) => ({ value: p.id, label: p.label, disabled: !p.available, hint: p.available ? undefined : 'bientôt' }))}
+            options={PLATFORMS.map((p) => ({
+              value: p.id,
+              label: p.label,
+              disabled: !p.available,
+              hint: p.available ? undefined : 'bientôt',
+            }))}
           />
         </div>
       </div>
@@ -167,20 +184,34 @@ export function App() {
         <Segmented
           value={aggregator}
           onChange={setAggregator}
-          options={(Object.keys(AGGREGATORS) as AggregatorId[]).map((id) => {
-            const usable = AGGREGATORS[id].available && supportsChain(id, market.chain.id)
-            return {
-              value: id,
-              label: AGGREGATORS[id].label,
-              disabled: !usable,
-              hint: !AGGREGATORS[id].available ? 'bientôt' : usable ? undefined : `pas sur ${market.chain.name}`,
-            }
-          })}
+          options={[
+            {
+              value: 'best' as AggregatorChoice,
+              label: 'Meilleur prix',
+              disabled: aggregatorsFor(market.chain.id).length === 0,
+              hint: 'aucun agrégateur sur ce réseau',
+            },
+            ...(Object.keys(AGGREGATORS) as AggregatorId[]).map((id) => {
+              const usable = AGGREGATORS[id].available && supportsChain(id, market.chain.id)
+              return {
+                value: id,
+                label: AGGREGATORS[id].label,
+                disabled: !usable,
+                hint: !AGGREGATORS[id].available ? 'bientôt' : usable ? undefined : `pas sur ${market.chain.name}`,
+              }
+            }),
+          ]}
         />
       </div>
       {tokens && pair && (
         <div className="pair">
-          <TokenSelect tokens={tokens} label="Collatéral (on prend le risque sur)" value={pair.collateral} onChange={(t) => setPair(t, pair.debt)} exclude={pair.debt} />
+          <TokenSelect
+            tokens={tokens}
+            label="Collatéral (on prend le risque sur)"
+            value={pair.collateral}
+            onChange={(t) => setPair(t, pair.debt)}
+            exclude={pair.debt}
+          />
           <button className="btn ghost swap" title="Inverser" onClick={() => setPair(pair.debt, pair.collateral)}>
             ⇄
           </button>
@@ -239,7 +270,9 @@ export function App() {
         <Card title="Marché">
           {selectors}
           {reserveTokens.error ? (
-            <Notice tone="bad">Lecture d’Aave sur {market.label} impossible : {reserveTokens.error.message.split('\n')[0]}</Notice>
+            <Notice tone="bad">
+              Lecture d’Aave sur {market.label} impossible : {reserveTokens.error.message.split('\n')[0]}
+            </Notice>
           ) : (
             <p className="muted">Lecture des actifs Aave v3 sur {market.label}…</p>
           )}
@@ -259,7 +292,7 @@ type PairViewProps = {
   debt: Token
   nativeToken?: Address
   account?: Address
-  aggregator: AggregatorId
+  aggregator: AggregatorChoice
   selectors: ReactNode
 }
 

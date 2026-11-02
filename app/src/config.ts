@@ -45,6 +45,8 @@ export const DEMO_TOKENS: Token[] = [
 ]
 
 export type AggregatorId = '0x' | '1inch' | 'velora' | 'kyber'
+/** An aggregator, or 'best': every aggregator that quotes on the chain is asked and the highest output wins. */
+export type AggregatorChoice = AggregatorId | 'best'
 
 type Aggregator = {
   label: string
@@ -122,6 +124,9 @@ export const VELORA_PARTNER = 'auto-loop'
  */
 export const VELORA_INCLUDE_DEXS = ((import.meta.env.VITE_VELORA_INCLUDE_DEXS as string | undefined) ?? '').trim()
 export const VELORA_EXCLUDE_DEXS = ((import.meta.env.VITE_VELORA_EXCLUDE_DEXS as string | undefined) ?? '').trim()
+
+/** Same for KyberSwap (its source ids, e.g. uniswapv3,aerodrome-cl,pancake-v3): prop AMMs such as kipseli-prop revert on a fork. */
+export const KYBER_INCLUDED_SOURCES = ((import.meta.env.VITE_KYBER_INCLUDED_SOURCES as string | undefined) ?? '').trim()
 
 export const PLATFORMS = [
   { id: 'aave-v3', label: 'Aave v3', available: true },
