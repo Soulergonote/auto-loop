@@ -3,7 +3,8 @@ import { useGasPrice } from 'wagmi'
 import { encodeFunctionData, parseUnits, type Address, type Hash } from 'viem'
 import { AGGREGATORS, TARGET_MIN_HF, type AggregatorId } from '../config'
 import { executorAbi } from '../abi'
-import { campaignsForPair, rewardsOnEquity } from '../lib/merkl'
+import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../lib/merkl'
+import { CampaignTable } from './CampaignTable'
 import { eligibleEModes, withEMode, type EModeCategory, type Reserves, type UserState } from '../lib/useMarket'
 import { useQuote } from '../lib/useQuote'
 import { useDebounced } from '../lib/useDebounced'
@@ -113,8 +114,11 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
 
   const needsApprove = !!user && !!initial && user.collateralAllowance < initial
   const needsDelegation = !user || user.borrowAllowance < debtAmount
+  // Merkl: only the campaigns whose rules the projected position meets count in the APY
   const pairCampaigns = campaignsForPair(reserves.campaigns, C, D)
-  const rewardsApy = proj ? rewardsOnEquity(pairCampaigns, proj.leverage, C.token.symbol, D.token.symbol) : 0
+  const eligibility = proj ? eligibleForPosition(pairCampaigns, { healthFactor: proj.healthFactor, debtToken: D.variableDebtToken }) : undefined
+  const yields = proj && eligibility ? campaignYields(eligibility.pair, proj.leverage, C, D) : []
+  const rewardsApy = yields.reduce((sum, y) => sum + y.apy, 0)
   const ratesApy = proj ? netApy(proj.leverage, C.supplyApy, D.borrowApy) : undefined
   const apy = ratesApy !== undefined ? ratesApy + rewardsApy : undefined
 
@@ -137,11 +141,15 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const toCapital = proj && capitalBase > 0n ? (Number(toBase(debouncedInitial! + q!.buyAmount, C.side)) - Number(soldBase)) / Number(capitalBase) : 0
   const horizonYield =
     costs && ratesApy !== undefined && capitalBase > 0n
-      ? horizonApy({ equityBase: capitalBase, ratesApy: ratesApy * toCapital, rewardsApy: rewardsApy * toCapital, costsBase: costs.total, days: horizon })
+      ? horizonApy({ equityBase: capitalBase, ratesApy: ratesApy * toCapital, rewardsApy: rewardsOverHorizon(yields, horizon) * toCapital, costsBase: costs.total, days: horizon })
       : undefined
-  const breakEven = costs && apy !== undefined ? breakEvenDays(capitalBase, apy * toCapital, costs.total) : undefined
+  const breakEven =
+    costs && ratesApy !== undefined
+      ? breakEvenDays(capitalBase, ratesApy * toCapital, costs.total, yields.map((y) => ({ apy: y.apy * toCapital, days: daysLeft(y.campaign) })))
+      : undefined
   for (const c of [...pairCampaigns.supply, ...pairCampaigns.borrow].filter((c) => c.conditional))
-    warnings.push(`Rewards Merkl « ${c.name} » comptés dans l’APY, mais soumis à des conditions (par exemple health factor maximum ou actifs empruntés) : vérifie-les sur Merkl.`)
+    warnings.push(`Bonus Merkl « ${c.name} » : certaines conditions ne sont pas lisibles par l’app, vérifie la description sur Merkl.`)
+  for (const x of eligibility?.excluded ?? []) warnings.push(`Bonus Merkl « ${x.campaign.name} » non compté : ${x.reasons.join(', ')}.`)
 
   const plan = (quoteOverride = q): OpenPlan | undefined =>
     quoteOverride && account && initial !== undefined
@@ -274,7 +282,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           value={proj && Number.isFinite(proj.healthFactor) ? fmtPrice(BigInt(Math.round(Number(C.price) * (1 - proj.dropToLiquidation)))) : '…'}
           sub={proj && `baisse de ${fmtPct(proj.dropToLiquidation, 1)} face à ${D.token.symbol}`}
         />
-        <Metric label="APY net (taux actuels)" value={apy !== undefined ? fmtPct(apy) : '…'} sub={rewardsApy !== 0 ? `dont ${fmtPct(rewardsApy)} de rewards Merkl, hors coûts` : 'taux variables, hors coûts'} tone={apy !== undefined && apy < 0 ? 'warn' : undefined} />
+        <Metric label="APY net (taux actuels)" value={apy !== undefined ? fmtPct(apy) : '…'} sub={rewardsApy !== 0 && ratesApy !== undefined ? `dont ${fmtPct(rewardsApy)} Merkl · sans Merkl ${fmtPct(ratesApy)}` : 'taux variables, hors coûts'} tone={apy !== undefined && apy < 0 ? 'warn' : undefined} />
         <Metric
           label="Coûts estimés"
           value={costs ? fmtUsd(costs.total) : '…'}
@@ -286,10 +294,16 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
         <Metric
           label={`APY tout compris sur ${HORIZON_LABELS[horizon as (typeof HORIZONS)[number]]}`}
           value={horizonYield !== undefined ? fmtPct(horizonYield) : '…'}
-          sub={breakEven === undefined ? undefined : Number.isFinite(breakEven) ? `rentable après ${Math.ceil(breakEven)} jours` : 'jamais rentable aux taux actuels'}
+          sub={
+            breakEven === undefined
+              ? undefined
+              : `${Number.isFinite(breakEven) ? `rentable après ${Math.ceil(breakEven)} jours` : 'pas rentable aux taux actuels'}${yields.length ? ', bonus Merkl compté jusqu’à sa fin annoncée' : ''}`
+          }
           tone={horizonYield !== undefined && horizonYield < 0 ? 'warn' : undefined}
         />
       </div>
+
+      <CampaignTable campaigns={[...pairCampaigns.supply, ...pairCampaigns.borrow]} yields={yields} excluded={eligibility?.excluded ?? []} borrowed={D} />
 
       {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
       {problems.map((p) => (

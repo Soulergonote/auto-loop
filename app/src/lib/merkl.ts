@@ -30,10 +30,24 @@ export type Campaign = {
   netOf?: string[]
   /** borrowFromCollateral: addresses of the campaign's tokens (borrowed and collateral underlyings), lowercase */
   tokens: string[]
-  /** eligibility rules beyond the position itself */
+  /**
+   * net kinds, exact list from the campaign parameters: variable debt tokens subtracted (net lending) or aTokens
+   * subtracted (net borrowing), lowercase. Preferred over `netOf` when present.
+   */
+  netOfTokens?: string[]
+  /** reward only while the account's health factor is at or below this (e.g. Ethena looping campaigns) */
+  maxHealthFactor?: number
+  /** variable debt tokens that must not be borrowed (lowercase) */
+  forbiddenBorrows: string[]
+  /** eligibility rules the app could not read: the description has to be checked by hand */
   conditional: boolean
+  /** end of the last live campaign, unix seconds */
+  endsAt?: number
+  description?: string
   url?: string
 }
+
+type Hook = { healthFactorThreshold?: string; borrowBytesLike?: string[]; [k: string]: unknown }
 
 type Opportunity = {
   type: string
@@ -45,6 +59,8 @@ type Opportunity = {
   apr?: number
   depositUrl?: string
   tokens?: { address?: string }[]
+  latestCampaignEnd?: string | number
+  campaigns?: { params?: { hooks?: Hook[]; borrowTokens?: string[]; supplyTokens?: string[] } }[]
 }
 
 const KINDS: Record<string, CampaignKind> = {
@@ -61,6 +77,8 @@ export function parseNetOf(description: string | undefined): string[] | undefine
   return m ? m[1].split(',').map((s) => s.trim().toLowerCase()) : undefined
 }
 
+const lower = (xs: string[] | undefined) => (xs ?? []).filter((x) => isAddress(x)).map((x) => x.toLowerCase())
+
 export function toCampaign(o: Opportunity): Campaign | undefined {
   const kind = KINDS[o.type]
   if (!kind || !o.apr || o.apr <= 0 || !o.explorerAddress || !isAddress(o.explorerAddress)) return undefined
@@ -70,14 +88,30 @@ export function toCampaign(o: Opportunity): Campaign | undefined {
     if (suffix === 'BORROW_BL') conditional = true
     else if (suffix) return undefined // restricted audience
   }
+  // conditions and netted tokens, merged over the opportunity's live campaigns
+  const params = (o.campaigns ?? []).map((c) => c.params ?? {})
+  const hooks = params.flatMap((p) => p.hooks ?? [])
+  const thresholds = hooks.map((h) => Number(h.healthFactorThreshold)).filter((x) => x > 0)
+  const forbiddenBorrows = [...new Set(hooks.flatMap((h) => lower(h.borrowBytesLike)))]
+  const known = (h: Hook) => h.healthFactorThreshold !== undefined || h.borrowBytesLike !== undefined
+  // a rule we read is checked by the app; one we cannot read keeps the campaign flagged
+  if (hooks.some((h) => !known(h))) conditional = true
+  else if (hooks.length) conditional = false
+  const nettedLists = params.map((p) => (kind === 'netLending' ? p.borrowTokens : kind === 'netBorrowing' ? p.supplyTokens : undefined)).filter((l) => !!l)
+  const end = Number(o.latestCampaignEnd)
   return {
     name: o.name,
     kind,
     apr: o.apr / 100,
     token: o.explorerAddress.toLowerCase(),
     netOf: kind === 'netLending' || kind === 'netBorrowing' ? parseNetOf(o.description) : undefined,
+    netOfTokens: nettedLists.length ? [...new Set(nettedLists.flatMap(lower))] : undefined,
     tokens: (o.tokens ?? []).map((t) => t.address?.toLowerCase()).filter((a): a is string => !!a),
+    maxHealthFactor: thresholds.length ? Math.min(...thresholds) : undefined,
+    forbiddenBorrows,
     conditional,
+    endsAt: end > 0 ? end : undefined,
+    description: o.description,
     url: o.depositUrl,
   }
 }
@@ -85,7 +119,7 @@ export function toCampaign(o: Opportunity): Campaign | undefined {
 export async function fetchCampaigns(chainId: number, signal: AbortSignal): Promise<Campaign[]> {
   const out: Campaign[] = []
   for (let page = 0; page < 5; page++) {
-    const q = new URLSearchParams({ chainId: String(chainId), mainProtocolId: 'aave', status: 'LIVE', items: String(PAGE), page: String(page) })
+    const q = new URLSearchParams({ chainId: String(chainId), mainProtocolId: 'aave', status: 'LIVE', items: String(PAGE), page: String(page), campaigns: 'true' })
     const res = await fetch(`${MERKL_API}?${q}`, { signal })
     if (!res.ok) throw new Error(`Merkl : HTTP ${res.status}`)
     const list = (await res.json()) as Opportunity[]
@@ -125,18 +159,56 @@ export function campaignsForPair(all: Campaign[] | undefined, collateral: Side, 
 
 export type PairCampaigns = ReturnType<typeof campaignsForPair>
 
+/** Rules of a campaign the position breaks (empty = eligible as far as the app can tell). */
+export function unmetConditions(c: Campaign, position: { healthFactor: number; debtToken: Address }): string[] {
+  const out: string[] = []
+  if (c.maxHealthFactor !== undefined && !(position.healthFactor <= c.maxHealthFactor))
+    out.push(`health factor ${Number.isFinite(position.healthFactor) ? position.healthFactor.toFixed(2) : '∞'} au-dessus du maximum ${c.maxHealthFactor}`)
+  if (c.forbiddenBorrows.includes(position.debtToken.toLowerCase())) out.push('l’actif emprunté est exclu par la campagne')
+  return out
+}
+
+/** Splits the pair's campaigns into those the position qualifies for and those it does not, with the reasons. */
+export function eligibleForPosition(p: PairCampaigns, position: { healthFactor: number; debtToken: Address }) {
+  const excluded: { campaign: Campaign; reasons: string[] }[] = []
+  const keep = (c: Campaign) => {
+    const reasons = unmetConditions(c, position)
+    if (reasons.length) excluded.push({ campaign: c, reasons })
+    return reasons.length === 0
+  }
+  return { pair: { supply: p.supply.filter(keep), borrow: p.borrow.filter(keep) }, excluded }
+}
+
 /**
- * Reward yield on the equity of a loop at `leverage` (collateral = leverage x equity, debt = (leverage - 1) x
- * equity, in value). A net campaign that subtracts the other leg of the loop only pays on the difference.
+ * Reward yield of each campaign on the equity of a loop at `leverage` (collateral = leverage x equity, debt =
+ * (leverage - 1) x equity, in value). A net campaign that subtracts the other leg of the loop only pays on the
+ * difference.
  */
-export function rewardsOnEquity(p: PairCampaigns, leverage: number, collateralSymbol: string, debtSymbol: string): number {
+export function campaignYields(p: PairCampaigns, leverage: number, collateral: Side, debt: Side): { campaign: Campaign; apy: number }[] {
   const supplied = leverage
   const borrowed = leverage - 1
-  const nets = (c: Campaign, symbol: string) => c.netOf === undefined || c.netOf.includes(symbol.toLowerCase())
-  let total = 0
-  for (const c of p.supply) total += c.apr * (c.kind === 'netLending' && nets(c, debtSymbol) ? Math.max(0, supplied - borrowed) : supplied)
-  for (const c of p.borrow) total += c.apr * (c.kind === 'netBorrowing' && nets(c, collateralSymbol) ? Math.max(0, borrowed - supplied) : borrowed)
-  return total
+  const netted = (c: Campaign, other: Side) =>
+    c.netOfTokens !== undefined
+      ? c.netOfTokens.includes((c.kind === 'netLending' ? other.variableDebtToken : other.aToken).toLowerCase())
+      : c.netOf === undefined || c.netOf.includes(other.token.symbol.toLowerCase())
+  return [
+    ...p.supply.map((c) => ({ campaign: c, apy: c.apr * (c.kind === 'netLending' && netted(c, debt) ? Math.max(0, supplied - borrowed) : supplied) })),
+    ...p.borrow.map((c) => ({ campaign: c, apy: c.apr * (c.kind === 'netBorrowing' && netted(c, collateral) ? Math.max(0, borrowed - supplied) : borrowed) })),
+  ]
+}
+
+export function rewardsOnEquity(p: PairCampaigns, leverage: number, collateral: Side, debt: Side): number {
+  return campaignYields(p, leverage, collateral, debt).reduce((s, y) => s + y.apy, 0)
+}
+
+/** Days until the campaign's last known end (Infinity when the API gives none). */
+export function daysLeft(c: Campaign, nowMs = Date.now()): number {
+  return c.endsAt === undefined ? Infinity : Math.max(0, (c.endsAt * 1000 - nowMs) / 86_400_000)
+}
+
+/** Average reward yield over the next `days`, each campaign counted only until its known end. */
+export function rewardsOverHorizon(yields: { campaign: Campaign; apy: number }[], days: number, nowMs = Date.now()): number {
+  return yields.reduce((s, y) => s + (y.apy * Math.min(days, daysLeft(y.campaign, nowMs))) / days, 0)
 }
 
 /** Headline reward APRs of one reserve, as Merkl shows them (not pair-specific campaigns). */

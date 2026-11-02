@@ -104,6 +104,11 @@ footer { text-align: center; }
 @media (max-width: 640px) {
   .grid2 { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: 1fr 1fr; }
-  .reserves th:nth-child(4), .reserves td:nth-child(4) { display: none; }
+  .reserves:not(.campaigns) th:nth-child(4), .reserves:not(.campaigns) td:nth-child(4) { display: none; }
+  .campaigns th:nth-child(2), .campaigns td:nth-child(2) { display: none; }
 }
 .reward { color: var(--good); font-weight: 500; }
+.reserves td.bad { color: var(--bad); }
+.reserves td.warn { color: var(--warn); }
+.campaigns { margin-top: 4px; }
+.campaigns td:last-child { color: var(--muted); font-size: 13px; }

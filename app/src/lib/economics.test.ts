@@ -33,5 +33,10 @@ describe('loop economics', () => {
     expect(breakEvenDays(usd(1000), 0.1, usd(10))).toBeCloseTo(36.5)
     expect(breakEvenDays(usd(1000), -0.01, usd(10))).toBe(Infinity)
     expect(breakEvenDays(usd(1000), 0.1, 0n)).toBe(0)
+    // -30 % rates + 36.5 % rewards ending in 3 days: never pays back once the bonus stops
+    expect(breakEvenDays(usd(1000), -0.3, usd(5), [{ apy: 0.365, days: 3 }])).toBe(Infinity)
+    // 1 % rates + 36.5 % rewards for 10 days, 2 % of costs: 1.03 % gained by day 10, the rest at 1 %/year
+    expect(breakEvenDays(usd(1000), 0.01, usd(20), [{ apy: 0.365, days: 10 }])).toBeCloseTo(10 + ((0.02 - 0.375 * 10 / 365) / 0.01) * 365)
+    expect(breakEvenDays(usd(1000), 0.01, usd(5), [{ apy: 0.365, days: 10 }])).toBeCloseTo(0.005 / (0.375 / 365))
   })
 })

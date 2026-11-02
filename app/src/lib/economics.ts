@@ -60,9 +60,26 @@ export function horizonApy(p: { equityBase: bigint; ratesApy: number; rewardsApy
   return (gain - Number(p.costsBase) / Number(p.equityBase)) * (365 / p.days)
 }
 
-/** Days of holding needed for the yield to pay back the costs (Infinity when the yield is not positive). */
-export function breakEvenDays(equityBase: bigint, apy: number, costsBase: bigint): number {
+/**
+ * Days of holding needed for the yield to pay back the costs (Infinity if it never does). `rewards` lists reward
+ * yields with the days they still run: the cumulative gain is piecewise linear, flattening as campaigns end.
+ */
+export function breakEvenDays(equityBase: bigint, ratesApy: number, costsBase: bigint, rewards: { apy: number; days: number }[] = []): number {
   if (costsBase <= 0n) return 0
-  if (!(apy > 0) || equityBase <= 0n) return Infinity
-  return (Number(costsBase) / Number(equityBase) / apy) * 365
+  if (equityBase <= 0n) return Infinity
+  const target = Number(costsBase) / Number(equityBase)
+  const ends = [...new Set(rewards.map((r) => r.days).filter((d) => Number.isFinite(d) && d > 0))].sort((a, b) => a - b)
+  let t = 0
+  let gained = 0
+  for (const end of [...ends, Infinity]) {
+    const slope = (ratesApy + rewards.filter((r) => r.days > t).reduce((s, r) => s + r.apy, 0)) / 365
+    if (slope > 0) {
+      const reach = t + (target - gained) / slope
+      if (reach <= end) return reach
+    }
+    if (!Number.isFinite(end)) return Infinity
+    gained += slope * (end - t)
+    t = end
+  }
+  return Infinity
 }
