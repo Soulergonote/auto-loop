@@ -54,7 +54,6 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
       out.push(...scanMarket(q.data, campaigns, { targetHf, minCapacityBase: LOW_CAPACITY }))
     }
     return out.sort((a, b) => b.apy - a.apy)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version, targetHf])
 
   const shown = rows.filter(

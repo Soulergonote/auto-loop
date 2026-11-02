@@ -30,8 +30,9 @@ import { ClosePanel } from './components/ClosePanel'
 import { DeployPanel } from './components/DeployPanel'
 import { useExecutorCheck } from './lib/deploy'
 import { Scanner, type Pick } from './components/Scanner'
+import { Positions } from './components/Positions'
 
-type View = 'loop' | 'scan'
+type View = 'loop' | 'scan' | 'positions'
 
 function WalletButton({ market }: { market: Market }) {
   const { address, chainId, isConnected } = useAccount()
@@ -157,7 +158,7 @@ export function App() {
       // private window: the choice just isn't remembered
     }
   }
-  function pickFromScanner(p: Pick) {
+  function openPick(p: Pick) {
     chooseMarket(p.marketId)
     setPicked({ market: p.marketId, collateral: p.collateral, debt: p.debt, seed: { emode: p.emode, leverage: p.leverage, nonce: Date.now() } })
     setView('loop')
@@ -258,11 +259,13 @@ export function App() {
           options={[
             { value: 'loop' as View, label: 'Boucle' },
             { value: 'scan' as View, label: 'Scanner' },
+            { value: 'positions' as View, label: 'Positions' },
           ]}
         />
       </nav>
 
-      {view === 'scan' && !DEMO && <Scanner onPick={pickFromScanner} />}
+      {view === 'scan' && !DEMO && <Scanner onPick={openPick} />}
+      {view === 'positions' && !DEMO && <Positions account={address} onManage={openPick} />}
       {view === 'loop' && (
         <>
           {DEMO && <Notice tone="info">Mode démo : prix et paramètres de marché fictifs, rien n’est lu sur la chaîne.</Notice>}

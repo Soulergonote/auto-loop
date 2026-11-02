@@ -10,6 +10,7 @@ import type { Market, Token } from '../config'
 import { decodeReserveConfig, rayAprToApy } from './aave'
 import { toBase } from './math'
 import type { EModeCategory, Reserve } from './useMarket'
+import type { Holding } from './positions'
 
 export type SnapReserve = Reserve & {
   /** underlying held by the aToken: what can be borrowed or withdrawn right now (base units) */
@@ -131,5 +132,46 @@ export const snapshotQuery = (market: Market) => ({
   queryKey: ['snapshot', market.id],
   queryFn: () => loadSnapshot(market),
   staleTime: 60_000,
+  retry: 1,
+})
+
+export type UserPosition = { holdings: Holding[]; healthFactor: number; eModeCategory: number }
+
+/** An account's balances on every reserve of the market, its health factor and eMode. */
+export async function loadUserPosition(snapshot: Snapshot, user: Address): Promise<UserPosition> {
+  const chainId = snapshot.market.chain.id
+  const pool = { chainId, address: snapshot.market.pool, abi: poolAbi } as const
+  const [[account, emode], balances] = await Promise.all([
+    readContracts(wagmiConfig, {
+      contracts: [
+        { ...pool, functionName: 'getUserAccountData', args: [user] },
+        { ...pool, functionName: 'getUserEMode', args: [user] },
+      ],
+      allowFailure: false,
+    }),
+    readContracts(wagmiConfig, {
+      contracts: snapshot.reserves.flatMap((r) => [
+        { chainId, address: r.aToken, abi: erc20Abi, functionName: 'balanceOf', args: [user] } as const,
+        { chainId, address: r.variableDebtToken, abi: erc20Abi, functionName: 'balanceOf', args: [user] } as const,
+      ]),
+      allowFailure: false,
+    }),
+  ])
+  const holdings = snapshot.reserves
+    .map((reserve, i) => {
+      const supplied = balances[2 * i]
+      const borrowed = balances[2 * i + 1]
+      return { reserve, supplied, borrowed, suppliedBase: toBase(supplied, reserve.side), borrowedBase: toBase(borrowed, reserve.side) }
+    })
+    .filter((h) => h.supplied > 0n || h.borrowed > 0n)
+  return { holdings, healthFactor: account[1] === 0n ? Infinity : Number(account[5]) / 1e18, eModeCategory: Number(emode) }
+}
+
+export const userPositionQuery = (snapshot: Snapshot | undefined, user: Address | undefined) => ({
+  queryKey: ['position', snapshot?.market.id, user],
+  queryFn: () => loadUserPosition(snapshot!, user!),
+  enabled: !!snapshot && !!user,
+  staleTime: 15_000,
+  refetchInterval: 60_000,
   retry: 1,
 })
