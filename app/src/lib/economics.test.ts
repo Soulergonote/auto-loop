@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { breakEvenDays, horizonApy, loopCosts, swapCostBase } from './economics'
+import { breakEvenBorrowApy, breakEvenDays, daysToLiquidationByInterest, hfAfterDays, hfAfterDrop, horizonApy, loopCosts, swapCostBase } from './economics'
 
 const usd = (x: number) => BigInt(Math.round(x * 1e8))
 const USDC = { price: usd(1), decimals: 6 }
@@ -38,5 +38,22 @@ describe('loop economics', () => {
     // 1 % rates + 36.5 % rewards for 10 days, 2 % of costs: 1.03 % gained by day 10, the rest at 1 %/year
     expect(breakEvenDays(usd(1000), 0.01, usd(20), [{ apy: 0.365, days: 10 }])).toBeCloseTo(10 + ((0.02 - 0.375 * 10 / 365) / 0.01) * 365)
     expect(breakEvenDays(usd(1000), 0.01, usd(5), [{ apy: 0.365, days: 10 }])).toBeCloseTo(0.005 / (0.375 / 365))
+  })
+})
+
+describe('risk', () => {
+  it('scales the health factor with a collateral drop', () => {
+    expect(hfAfterDrop(1.25, 0.1)).toBeCloseTo(1.125)
+  })
+  it('finds the borrow rate that cancels the yield', () => {
+    // 5x, 5 % supply, 4 % rewards: (25 + 4) / 4 = 7.25 %
+    expect(breakEvenBorrowApy(5, 0.05, 0.04)).toBeCloseTo(0.0725)
+    expect(breakEvenBorrowApy(1, 0.05)).toBe(Infinity)
+  })
+  it('lets interest erode the health factor over time', () => {
+    expect(hfAfterDays(1.1, 0.01, 0.05, 365)).toBeCloseTo((1.1 * 1.01) / 1.05)
+    const d = daysToLiquidationByInterest(1.1, 0.01, 0.05)
+    expect(hfAfterDays(1.1, 0.01, 0.05, d)).toBeCloseTo(1)
+    expect(daysToLiquidationByInterest(1.1, 0.05, 0.01)).toBe(Infinity)
   })
 })

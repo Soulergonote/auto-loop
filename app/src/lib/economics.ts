@@ -83,3 +83,28 @@ export function breakEvenDays(equityBase: bigint, ratesApy: number, costsBase: b
   }
   return Infinity
 }
+
+/** Health factor if the collateral loses `drop` (fraction) against the debt asset. */
+export function hfAfterDrop(healthFactor: number, drop: number): number {
+  return healthFactor * (1 - drop)
+}
+
+/** Borrow APY at which the loop's yield falls to zero: L x supply + rewards = (L - 1) x borrow. */
+export function breakEvenBorrowApy(leverage: number, supplyApy: number, rewardsApy = 0): number {
+  return leverage <= 1 ? Infinity : (leverage * supplyApy + rewardsApy) / (leverage - 1)
+}
+
+/**
+ * Health factor after `days` at today's rates, rewards left unclaimed: the debt grows at the borrow APY, the
+ * collateral at the supply APY, prices unchanged.
+ */
+export function hfAfterDays(healthFactor: number, supplyApy: number, borrowApy: number, days: number): number {
+  return healthFactor * Math.pow((1 + supplyApy) / (1 + borrowApy), days / 365)
+}
+
+/** Days until interest alone brings the health factor to 1 (Infinity if the collateral grows faster than the debt). */
+export function daysToLiquidationByInterest(healthFactor: number, supplyApy: number, borrowApy: number): number {
+  if (!(healthFactor > 1)) return 0
+  if (borrowApy <= supplyApy) return Infinity
+  return (365 * Math.log(healthFactor)) / Math.log((1 + borrowApy) / (1 + supplyApy))
+}

@@ -5,6 +5,7 @@ import { AGGREGATORS, TARGET_MIN_HF, type AggregatorChoice } from '../config'
 import { executorAbi } from '../abi'
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../lib/merkl'
 import { CampaignTable } from './CampaignTable'
+import { RiskPanel } from './RiskPanel'
 import { eligibleEModes, withEMode, type EModeCategory, type Reserves, type UserState } from '../lib/useMarket'
 import { useQuote } from '../lib/useQuote'
 import { useDebounced } from '../lib/useDebounced'
@@ -331,6 +332,18 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           tone={horizonYield !== undefined && horizonYield < 0 ? 'warn' : undefined}
         />
       </div>
+
+      {proj && loopLev !== undefined && (
+        <RiskPanel
+          collateral={C.token.symbol}
+          debt={D.token.symbol}
+          healthFactor={proj.healthFactor}
+          leverage={loopLev}
+          supplyApy={C.supplyApy}
+          borrowApy={D.borrowApy}
+          rewardsApy={rewardsApy}
+        />
+      )}
 
       <CampaignTable campaigns={[...pairCampaigns.supply, ...pairCampaigns.borrow]} yields={yields} excluded={eligibility?.excluded ?? []} borrowed={D} />
 

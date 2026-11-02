@@ -112,3 +112,5 @@ footer { text-align: center; }
 .reserves td.warn { color: var(--warn); }
 .campaigns { margin-top: 4px; }
 .campaigns td:last-child { color: var(--muted); font-size: 13px; }
+.risk summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }
+.risk th { padding-top: 10px; }
