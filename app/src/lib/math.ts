@@ -24,6 +24,29 @@ export function debtForLeverage(initial: bigint, leverageBps: bigint, collat: Si
   return fromBase(value, debt)
 }
 
+/** A position on the pair, in oracle base units. */
+export type PairPosition = { collateralBase: bigint; debtBase: bigint }
+
+export const NO_POSITION: PairPosition = { collateralBase: 0n, debtBase: 0n }
+
+/** collateral / equity of a position, Infinity when the debt eats all of it, 1 without debt. */
+export function positionLeverage(p: PairPosition): number {
+  const equity = p.collateralBase - p.debtBase
+  if (p.collateralBase === 0n) return 1
+  return equity > 0n ? Number(p.collateralBase) / Number(equity) : Infinity
+}
+
+/**
+ * Extra debt to flash-borrow so that the whole position on the pair (existing one + `addedBase` of new capital)
+ * reaches `leverageBps / 10000`, before swap costs. 0 when the position is already at or above the target.
+ */
+export function extraDebtForTarget(position: PairPosition, addedBase: bigint, leverageBps: bigint, debt: Side): bigint {
+  const equity = position.collateralBase - position.debtBase + addedBase
+  if (equity <= 0n || leverageBps <= BPS) return 0n
+  const targetDebt = (equity * (leverageBps - BPS)) / BPS
+  return targetDebt > position.debtBase ? fromBase(targetDebt - position.debtBase, debt) : 0n
+}
+
 /** Theoretical maximum leverage allowed by the borrow LTV: 1 / (1 - LTV). */
 export function maxLeverage(ltvBps: number): number {
   return ltvBps >= 10_000 ? Infinity : 1 / (1 - ltvBps / 10_000)
@@ -116,4 +139,12 @@ export function collateralToSellForRepay(
 /** Amount owed to the flash loan for a repayment of `debtAmount` (premium rounded up like Aave). */
 export function flashLoanOwed(debtAmount: bigint, premiumBps: bigint): bigint {
   return debtAmount + (debtAmount * premiumBps + BPS / 2n) / BPS
+}
+
+/** `x` rounded down to `digits` significant digits (keeps quotes stable while a balance accrues interest). */
+export function roundSignificant(x: bigint, digits: number): bigint {
+  const len = x.toString().length
+  if (len <= digits) return x
+  const unit = 10n ** BigInt(len - digits)
+  return (x / unit) * unit
 }

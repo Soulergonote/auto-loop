@@ -9,7 +9,7 @@ import { eligibleEModes, withEMode, type EModeCategory, type Reserves, type User
 import { useQuote } from '../lib/useQuote'
 import { useDebounced } from '../lib/useDebounced'
 import { getQuote } from '../lib/quotes'
-import { debtForLeverage, maxLeverage, netApy, project, toBase, EMPTY_ACCOUNT } from '../lib/math'
+import { extraDebtForTarget, maxLeverage, netApy, positionLeverage, project, roundSignificant, toBase, EMPTY_ACCOUNT, NO_POSITION } from '../lib/math'
 import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase } from '../lib/economics'
 import { executeOpen, explainError, openArgs, type OpenPlan } from '../lib/execute'
 import { fmtAmount, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX } from '../lib/format'
@@ -51,9 +51,15 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const [busy, setBusy] = useState<string>()
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash }>()
 
+  // an existing position on the pair is levered further: the slider then sets the leverage of the whole position
+  const position = user ? { collateralBase: toBase(user.aTokenBalance, C.side), debtBase: toBase(user.debtBalance, D.side) } : NO_POSITION
+  const hasPosition = position.collateralBase > 0n
+  const currentLev = positionLeverage(position)
+
   const maxLev = maxLeverage(C.config.ltvBps)
   const sliderMax = Math.max(1.1, Math.min(Math.floor(maxLev * 0.95 * 20) / 20, 15))
-  const lev = Math.min(leverage, sliderMax)
+  const sliderMin = hasPosition && Number.isFinite(currentLev) ? Math.min(sliderMax, Math.max(1.1, Math.ceil(currentLev * 20) / 20)) : 1.1
+  const lev = Math.max(sliderMin, Math.min(leverage, sliderMax))
 
   const initial = useMemo(() => {
     try {
@@ -65,7 +71,9 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
 
   const debouncedInitial = useDebounced(initial)
   const debouncedLevBps = useDebounced(BigInt(Math.round(lev * 10_000)))
-  const debtAmount = debouncedInitial ? debtForLeverage(debouncedInitial, debouncedLevBps, C.side, D.side) : 0n
+  // rounded so that interest accruing on the existing debt does not re-quote at every block
+  const debtAmount =
+    debouncedInitial !== undefined ? roundSignificant(extraDebtForTarget(position, toBase(debouncedInitial, C.side), debouncedLevBps, D.side), 5) : 0n
 
   const quoteReq =
     debtAmount > 0n
@@ -97,6 +105,9 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
 
   const problems: string[] = []
   if (initial === undefined) problems.push('Montant invalide.')
+  else if (initial === 0n && !hasPosition) problems.push('Entre le capital à déposer.')
+  else if (hasPosition && debtAmount === 0n && initial === debouncedInitial && BigInt(Math.round(lev * 10_000)) === debouncedLevBps)
+    problems.push('Le levier visé ne dépasse pas ton levier actuel : pour le réduire, passe par « Fermer / réduire ».')
   if (!C.config.active || C.config.paused || C.config.frozen) problems.push(`${C.token.symbol} est gelé ou en pause sur Aave.`)
   if (!D.config.borrowingEnabled || D.config.paused || D.config.frozen) problems.push(`${D.token.symbol} ne peut pas être emprunté.`)
   if (!D.config.flashLoanEnabled) problems.push(`Flash loan désactivé sur ${D.token.symbol}.`)
@@ -114,17 +125,25 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
 
   const needsApprove = !!user && !!initial && user.collateralAllowance < initial
   const needsDelegation = !user || user.borrowAllowance < debtAmount
+  const soldBase = toBase(debtAmount, D.side)
+  const addedCollBase = q && debouncedInitial !== undefined ? toBase(debouncedInitial + q.buyAmount, C.side) : 0n
+  // leverage of the whole position on the pair once this transaction is done (existing position included)
+  const loopLev = proj
+    ? hasPosition
+      ? positionLeverage({ collateralBase: position.collateralBase + addedCollBase, debtBase: position.debtBase + soldBase })
+      : proj.leverage
+    : undefined
+
   // Merkl: only the campaigns whose rules the projected position meets count in the APY
   const pairCampaigns = campaignsForPair(reserves.campaigns, C, D)
   const eligibility = proj ? eligibleForPosition(pairCampaigns, { healthFactor: proj.healthFactor, debtToken: D.variableDebtToken }) : undefined
-  const yields = proj && eligibility ? campaignYields(eligibility.pair, proj.leverage, C, D) : []
+  const yields = loopLev !== undefined && eligibility ? campaignYields(eligibility.pair, loopLev, C, D) : []
   const rewardsApy = yields.reduce((sum, y) => sum + y.apy, 0)
-  const ratesApy = proj ? netApy(proj.leverage, C.supplyApy, D.borrowApy) : undefined
+  const ratesApy = loopLev !== undefined ? netApy(loopLev, C.supplyApy, D.borrowApy) : undefined
   const apy = ratesApy !== undefined ? ratesApy + rewardsApy : undefined
 
   // one-off costs, and the yield once they are paid, over the planned holding time
-  const capitalBase = debouncedInitial !== undefined ? toBase(debouncedInitial, C.side) : 0n
-  const soldBase = toBase(debtAmount, D.side)
+  const capitalBase = (debouncedInitial !== undefined ? toBase(debouncedInitial, C.side) : 0n) + position.collateralBase - position.debtBase
   const costs =
     q && debouncedInitial !== undefined
       ? loopCosts({
@@ -138,7 +157,10 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       : undefined
   // the APYs above are on the equity left after the swap; over the horizon everything is measured against the
   // capital put in, so the swap loss counts once, as a cost
-  const toCapital = proj && capitalBase > 0n ? (Number(toBase(debouncedInitial! + q!.buyAmount, C.side)) - Number(soldBase)) / Number(capitalBase) : 0
+  const toCapital =
+    proj && capitalBase > 0n
+      ? (Number(position.collateralBase + addedCollBase) - Number(position.debtBase + soldBase)) / Number(capitalBase)
+      : 0
   const horizonYield =
     costs && ratesApy !== undefined && capitalBase > 0n
       ? horizonApy({ equityBase: capitalBase, ratesApy: ratesApy * toCapital, rewardsApy: rewardsOverHorizon(yields, horizon) * toCapital, costsBase: costs.total, days: horizon })
@@ -206,7 +228,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       const fresh = await getQuote(quoteReq!)
       if (fresh.simulated) throw new Error('Plus de devis réel disponible')
       const hash = await executeOpen(plan(fresh)!, setBusy)
-      setResult({ ok: true, text: 'Position ouverte.', hash })
+      setResult({ ok: true, text: hasPosition ? 'Position augmentée.' : 'Position ouverte.', hash })
       onDone()
     } catch (e) {
       setResult({ ok: false, text: explainError(e) })
@@ -216,11 +238,18 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   }
 
   return (
-    <Card title="Ouvrir une position">
+    <Card title={hasPosition ? 'Augmenter ta position' : 'Ouvrir une position'}>
+      {hasPosition && user && (
+        <Notice tone="info">
+          Position actuelle : {fmtAmount(user.aTokenBalance, C.token.decimals)} {C.token.symbol} déposés, {fmtAmount(user.debtBalance, D.token.decimals)}{' '}
+          {D.token.symbol} empruntés, levier {fmtX(currentLev)}, health factor {fmtHf(user.healthFactor)}. Le levier choisi s’applique à toute la position ; le
+          capital ajouté peut être 0.
+        </Notice>
+      )}
       <div className="grid2">
         <label className="field">
           <span>
-            Capital initial en {C.token.symbol}
+            {hasPosition ? 'Capital ajouté' : 'Capital initial'} en {C.token.symbol}
             {user && (
               <button className="link" onClick={() => setAmountText(fmtAmount(user.collateralBalance, C.token.decimals, 8).replace(/\s/g, '').replace(',', '.'))}>
                 solde {fmtAmount(user.collateralBalance, C.token.decimals)}
@@ -255,7 +284,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           Levier <strong className="lev">{fmtX(lev)}</strong>
           <small className="muted"> max théorique {fmtX(maxLev)} (LTV {fmtPct(maxLtv, 0)})</small>
         </span>
-        <input type="range" min={1.1} max={sliderMax} step={0.05} value={lev} onChange={(e) => setLeverage(Number(e.target.value))} />
+        <input type="range" min={sliderMin} max={sliderMax} step={0.05} value={lev} onChange={(e) => setLeverage(Number(e.target.value))} />
       </label>
 
       <div className="field">
@@ -270,7 +299,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           value={q && debouncedInitial !== undefined ? `${fmtAmount(debouncedInitial + q.buyAmount, C.token.decimals)} ${C.token.symbol}` : '…'}
           sub={q && `dont ${fmtAmount(q.buyAmount, C.token.decimals)} via ${AGGREGATORS[aggregator].label}`}
         />
-        <Metric label="Levier effectif" value={proj ? fmtX(proj.leverage) : '…'} sub="après coût du swap" />
+        <Metric label="Levier effectif" value={loopLev !== undefined ? fmtX(loopLev) : '…'} sub={hasPosition ? 'de toute la position, après swap' : 'après coût du swap'} />
         <Metric
           label="Health factor"
           value={proj ? fmtHf(proj.healthFactor) : '…'}
@@ -326,7 +355,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
 
       <div className="actions">
         <button className="btn primary" disabled={!canSign} onClick={onOpen} title={disabledReason}>
-          {busy ?? (stale ? 'Cotation…' : 'Ouvrir la position')}
+          {busy ?? (stale ? 'Cotation…' : hasPosition ? 'Augmenter la position' : 'Ouvrir la position')}
         </button>
         {disabledReason && !busy && <span className="muted small">{disabledReason}</span>}
       </div>

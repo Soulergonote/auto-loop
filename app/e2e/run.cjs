@@ -1,5 +1,6 @@
 // Drives the app in headless Chromium with a test wallet that forwards to anvil (account 1, unlocked).
 //   node e2e/run.cjs open ouvrir     open 1 WETH at 3x against USDC
+//   node e2e/run.cjs increase aug   lever the existing position to 4x without new capital
 //   node e2e/run.cjs close50 f50    repay 50 %
 //   node e2e/run.cjs close fermer   close everything
 //   node e2e/run.cjs deploy deployer deploy the contract from the test wallet with the app's button
@@ -46,11 +47,16 @@ const U = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
     console.log('saved:', await page.evaluate(() => localStorage.getItem('auto-loop.executors')))
     return browser.close()
   }
-  if (mode.startsWith('close')) await page.getByText('Fermer / réduire').click()
+  if (mode.startsWith('close')) await page.getByRole('radio', { name: 'Fermer / réduire' }).click()
   if (mode === 'close50') { await page.waitForTimeout(3000); await page.locator('button', { hasText: /^50\s*%$/ }).first().click() }
   if (mode === 'open') {
     await page.locator('input[inputmode=decimal]').fill('1')
     await page.locator('input[type=range]').fill('3')
+  }
+  if (mode === 'increase') {
+    await page.waitForSelector('text=Augmenter ta position', { timeout: 30000 })
+    await page.locator('input[inputmode=decimal]').fill('0')
+    await page.locator('input[type=range]').fill('4')
   }
   await page.waitForTimeout(8000)
   await page.screenshot({ path: `${outPrefix}-avant.png`, fullPage: true })
@@ -62,7 +68,7 @@ const U = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
     for (let i = 0; i < 60; i++) {
       await page.waitForTimeout(1000)
       const t = await page.locator('main, .page').first().innerText()
-      if (/Position ouverte|Position fermée|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(t) && i > 3) break
+      if (/Position ouverte|Position augmentée|Position fermée|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(t) && i > 3) break
     }
     await page.screenshot({ path: `${outPrefix}-apres.png`, fullPage: true })
     console.log('wallet calls:', [...new Set(await page.evaluate(() => window.__calls))].join(','))

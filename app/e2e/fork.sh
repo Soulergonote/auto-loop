@@ -12,7 +12,7 @@ DEPLOYER_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 
 cast rpc --rpc-url $R anvil_reset '{"forking":{"jsonRpcUrl":"https://mainnet.base.org"}}' >/dev/null
 cd "$(dirname "$0")/../../contracts"
 if [ -n "${NO_DEPLOY:-}" ]; then cd - >/dev/null; else
-# same deployer, same nonce after each reset: the address stays 0x33dd750d10F53475A1FbF5e079a02BF0F74C3646
+# the address depends on the deployer's nonce on Base at the fork block: pass the printed one to the app (VITE_EXECUTORS)
 forge create ${SOLC:+--use $SOLC} --broadcast --rpc-url $R --private-key $DEPLOYER_KEY \
   src/LeverageExecutor.sol:LeverageExecutor \
   --constructor-args 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5 "[0x6A000F20005980200259B80c5102003040001068,0x6131B5fae19EA4f9D964eAc0408E4408b66337b5]" | grep Deployed

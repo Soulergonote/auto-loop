@@ -3,6 +3,9 @@ import { parseUnits, toFunctionSelector, toFunctionSignature } from 'viem'
 import {
   collateralToSellForRepay,
   debtForLeverage,
+  extraDebtForTarget,
+  positionLeverage,
+  toBase,
   flashLoanOwed,
   maxLeverage,
   oracleSwapOut,
@@ -99,3 +102,22 @@ describe('executor ABI', () => {
     expect(toFunctionSelector(sigs[1])).toMatch(/^0x[0-9a-f]{8}$/)
   })
 })
+
+describe('increasing an existing position', () => {
+  const usd = (x: number) => BigInt(Math.round(x * 1e8))
+  it('borrows only what is missing to reach the target leverage', () => {
+    // 2x position: 6000 $ of WETH, 3000 $ of USDC debt, equity 3000 $. Target 3x with no new capital: debt 6000 $
+    const pos = { collateralBase: usd(6000), debtBase: usd(3000) }
+    expect(positionLeverage(pos)).toBe(2)
+    expect(extraDebtForTarget(pos, 0n, 30_000n, USDC)).toBe(parseUnits('3000', 6))
+    // adding 1 WETH (3000 $) at the same time: equity 6000 $, 3x = 12000 $ of debt, 9000 $ more
+    expect(extraDebtForTarget(pos, usd(3000), 30_000n, USDC)).toBe(parseUnits('9000', 6))
+    // already above the target: nothing to borrow
+    expect(extraDebtForTarget(pos, 0n, 15_000n, USDC)).toBe(0n)
+  })
+  it('matches the fresh-position formula without a position', () => {
+    const initial = parseUnits('1', 18)
+    expect(extraDebtForTarget({ collateralBase: 0n, debtBase: 0n }, toBase(initial, WETH), 30_000n, USDC)).toBe(debtForLeverage(initial, 30_000n, WETH, USDC))
+  })
+})
+
