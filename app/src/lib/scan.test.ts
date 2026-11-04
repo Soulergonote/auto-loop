@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hfAtLeverage, isUsdStable, leverageAtHf, loopCapacity, scanMarket } from './scan'
+import { hfAtLeverage, isCorrelated, isUsdStable, leverageAtHf, loopCapacity, scanMarket } from './scan'
 import { toCampaign } from './merkl'
 import type { Snapshot, SnapReserve } from './snapshot'
 import type { EModeCategory } from './useMarket'
@@ -95,6 +95,18 @@ describe('scanMarket', () => {
     const lst = rows.find((r) => r.collateral.token.symbol === 'wstETH' && r.debt.token.symbol === 'WETH')!
     expect(lst.correlated).toBe(true)
     expect(lst.flags).toContain('yieldBearing')
+  })
+
+  it('does not take EURC / USDC for a correlated, yield-bearing pair (the euro is not a yield)', () => {
+    const eurc = reserve(0, 'EURC', { price: 116_000_000n })
+    const usdc = reserve(1, 'USDC')
+    const rows = scanMarket(snapshot([eurc, usdc], [emode(1, [0, 1], [0, 1])]), [], { targetHf: 1.5 })
+    const row = rows.find((r) => r.collateral.token.symbol === 'EURC')!
+    expect(row.correlated).toBe(false)
+    expect(row.flags).not.toContain('yieldBearing')
+    expect(isCorrelated(reserve(0, 'cbBTC', { price: 70_000n * USD }), reserve(1, 'WBTC', { price: 70_100n * USD }))).toBe(true)
+    expect(isCorrelated(reserve(0, 'sUSDe', { price: 120_000_000n }), reserve(1, 'USDC'))).toBe(true)
+    expect(isCorrelated(reserve(0, 'WETH', { price: 3000n * USD }), reserve(1, 'USDC'))).toBe(false)
   })
 
   it('skips what the open panel would refuse: frozen, isolated, LTV 0, no flash loan', () => {

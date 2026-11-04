@@ -38,6 +38,24 @@ export function isUsdStable(r: Pick<SnapReserve, 'price' | 'token'>): boolean {
   return usd >= 0.95 && usd <= 1.35 && !NOT_USD.test(r.token.symbol)
 }
 
+/** What an asset follows, from its symbol: USD stablecoins (by price), EUR, BTC and ETH with their derivatives. */
+export function assetFamily(r: Pick<SnapReserve, 'price' | 'token'>): string {
+  if (isUsdStable(r)) return 'USD'
+  const sym = r.token.symbol.toUpperCase()
+  for (const f of ['EUR', 'BTC', 'ETH']) if (sym.includes(f)) return f
+  return sym
+}
+
+/**
+ * Both legs move together: two USD stablecoins, or the same family priced alike (wstETH / WETH, cbBTC / WBTC):
+ * a staked derivative is worth a bit more than its base, up to 1.6x. EURC / USDC is not correlated.
+ */
+export function isCorrelated(C: Pick<SnapReserve, 'price' | 'token'>, D: Pick<SnapReserve, 'price' | 'token'>): boolean {
+  if (isUsdStable(C) && isUsdStable(D)) return true
+  const ratio = Number(C.price) / Number(D.price)
+  return assetFamily(C) === assetFamily(D) && ratio >= 0.97 && ratio <= 1.6
+}
+
 export type ScanFlag = 'conditional' | 'yieldBearing' | 'lowCapacity'
 
 export type ScanRow = {
@@ -58,7 +76,7 @@ export type ScanRow = {
   /** equity that can still be looped, oracle base units: limited by the debt asset's cash and caps */
   capacityBase: bigint
   stable: boolean
-  /** both legs move together: two USD stablecoins, or an eMode pair priced alike (wstETH / WETH, sUSDe / USDT…) */
+  /** both legs move together (see isCorrelated) */
   correlated: boolean
   flags: ScanFlag[]
 }
@@ -100,10 +118,7 @@ export function scanMarket(snapshot: Snapshot, campaigns: Campaign[] | undefined
       if (D.token.address === C0.token.address) continue
       const configs = [undefined, ...eligibleEModes(emodes, C0, D)]
       const stable = isUsdStable(C0) && isUsdStable(D)
-      // a pair sharing an eMode category moves together, but not always (Ethereum has LINK against USDC / USDT):
-      // the prices must also be close
-      const ratio = Number(C0.price) / Number(D.price)
-      const correlated = stable || (configs.length > 1 && ratio >= 0.97 && ratio <= 1.6)
+      const correlated = isCorrelated(C0, D)
       let best: ScanRow | undefined
       for (const emode of configs) {
         const C: SnapReserve = emode
