@@ -229,8 +229,6 @@ export type QuoteMode = 'auto' | 'live' | 'mock'
 const rawMode = import.meta.env.VITE_QUOTE_MODE as string | undefined
 export const QUOTE_MODE: QuoteMode = rawMode === 'live' || rawMode === 'mock' ? rawMode : 'auto'
 
-/** Default health factor floor the UI aims for on uncorrelated pairs. */
-export const TARGET_MIN_HF = 1.3
 
 /** Static illustrative market data instead of on-chain reads (screenshots, offline work). Never for real use. */
 export const DEMO = import.meta.env.VITE_DEMO === 'true'

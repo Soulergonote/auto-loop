@@ -2,29 +2,25 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
 import type { Address } from 'viem'
 import {
-  AGGREGATORS,
   DEFAULT_COLLATERAL_SYMBOLS,
   DEFAULT_DEBT_SYMBOLS,
   DEFAULT_MARKET_ID,
   DEMO,
   MARKETS,
-  PLATFORMS,
   QUOTE_MODE,
-  aggregatorsFor,
   getMarket,
   savedExecutors,
   storeExecutors,
   supportsChain,
   wrappedNative,
   type AggregatorChoice,
-  type AggregatorId,
   type Market,
   type Token,
 } from './config'
 import { eligibleEModes, useEModeCategories, useMarket, useReserveTokens, withEMode, withIncentives } from './lib/useMarket'
 import { useCampaigns } from './lib/merkl'
-import { fmtPct, fmtPrice } from './lib/format'
-import { Card, Notice, Segmented } from './components/ui'
+import { fmtAddress, fmtPct, fmtPrice } from './lib/format'
+import { AggregatorPicker, Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary } from './components/ui'
 import { OpenPanel } from './components/OpenPanel'
 import { ClosePanel } from './components/ClosePanel'
 import { DeployPanel } from './components/DeployPanel'
@@ -50,14 +46,14 @@ function WalletButton({ market }: { market: Market }) {
   }
   if (chainId !== market.chain.id) {
     return (
-      <button className="btn warn" onClick={() => switchChain({ chainId: market.chain.id })}>
+      <button className="btn" onClick={() => switchChain({ chainId: market.chain.id })}>
         Passer sur {market.chain.name}
       </button>
     )
   }
   return (
-    <button className="btn ghost" onClick={() => disconnect()} title="Déconnecter">
-      {address!.slice(0, 6)}…{address!.slice(-4)}
+    <button className="btn" onClick={() => disconnect()} title="Déconnecter">
+      {fmtAddress(address!)}
     </button>
   )
 }
@@ -127,7 +123,6 @@ export function App() {
     return () => clearTimeout(t)
   }, [market.id])
   const tokens = reserveTokens.tokens
-  const [platform, setPlatform] = useState<string>('aave-v3')
   const [preferredAggregator, setAggregator] = useState<AggregatorChoice>('best')
   // keep the choice when it quotes on this chain, otherwise compare all those that do
   const aggregator: AggregatorChoice = preferredAggregator === 'best' || supportsChain(preferredAggregator, market.chain.id) ? preferredAggregator : 'best'
@@ -174,164 +169,161 @@ export function App() {
     })
 
   const selectors = (
-    <>
-      <div className="grid2">
-        <label className="field">
-          <span>Réseau</span>
-          <select value={market.id} onChange={(e) => chooseMarket(e.target.value)}>
-            {MARKETS.map((m) => (
-              <option key={m.id} value={m.id} disabled={!!m.soon}>
-                {m.label}
-                {m.soon ? ` (bientôt : ${m.soon})` : ''}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="field">
-          <span>Plateforme de prêt</span>
-          <Segmented
-            value={platform}
-            onChange={setPlatform}
-            options={PLATFORMS.map((p) => ({
-              value: p.id,
-              label: p.label,
-              disabled: !p.available,
-              hint: p.available ? undefined : 'bientôt',
-            }))}
-          />
-        </div>
-      </div>
-      <div className="field">
-        <span>Agrégateur</span>
-        <Segmented
-          value={aggregator}
-          onChange={setAggregator}
-          options={[
-            {
-              value: 'best' as AggregatorChoice,
-              label: 'Meilleur prix',
-              disabled: aggregatorsFor(market.chain.id).length === 0,
-              hint: 'aucun agrégateur sur ce réseau',
-            },
-            ...(Object.keys(AGGREGATORS) as AggregatorId[]).map((id) => {
-              const usable = AGGREGATORS[id].available && supportsChain(id, market.chain.id)
-              return {
-                value: id,
-                label: AGGREGATORS[id].label,
-                disabled: !usable,
-                hint: !AGGREGATORS[id].available ? 'bientôt' : usable ? undefined : `pas sur ${market.chain.name}`,
-              }
-            }),
-          ]}
-        />
-      </div>
-      {tokens && pair && (
+    <div className="market-row">
+      <label className="field">
+        <span>Réseau</span>
+        <select value={market.id} onChange={(e) => chooseMarket(e.target.value)}>
+          {MARKETS.filter((m) => !m.soon).map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {tokens && pair ? (
         <div className="pair">
-          <TokenSelect
-            tokens={tokens}
-            label="Collatéral (on prend le risque sur)"
-            value={pair.collateral}
-            onChange={(t) => setPair(t, pair.debt)}
-            exclude={pair.debt}
-          />
-          <button className="btn ghost swap" title="Inverser" onClick={() => setPair(pair.debt, pair.collateral)}>
+          <TokenSelect tokens={tokens} label="Collatéral" value={pair.collateral} onChange={(t) => setPair(t, pair.debt)} exclude={pair.debt} />
+          <button
+            className="btn swap"
+            title="Inverser collatéral et dette"
+            aria-label="Inverser collatéral et dette"
+            onClick={() => setPair(pair.debt, pair.collateral)}
+          >
             ⇄
           </button>
-          <TokenSelect tokens={tokens} label="Dette (on emprunte)" value={pair.debt} onChange={(t) => setPair(pair.collateral, t)} exclude={pair.collateral} />
+          <TokenSelect tokens={tokens} label="Dette" value={pair.debt} onChange={(t) => setPair(pair.collateral, t)} exclude={pair.collateral} />
+        </div>
+      ) : (
+        <div className="field" style={{ gridColumn: 'span 3' }}>
+          <span>Paire</span>
+          <Skel w={12} />
         </div>
       )}
+    </div>
+  )
+
+  // settings shared by both panels, shown in their collapsed "Réglages" block
+  const common = (
+    <>
+      <AggregatorPicker chainId={market.chain.id} value={aggregator} onChange={setAggregator} />
+      <p className="muted small">
+        Plateforme : Aave v3.{' '}
+        {market.executor && (
+          <>
+            Contrat Auto-loop vérifié :{' '}
+            <a href={`${market.chain.blockExplorers?.default.url}/address/${market.executor}`} target="_blank" rel="noreferrer" title={market.executor}>
+              {fmtAddress(market.executor)}
+            </a>
+            {market.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
+          </>
+        )}
+      </p>
+    </>
+  )
+
+  const notes = (
+    <>
+      {DEMO && <p className="muted small">Mode démo : prix et paramètres de marché fictifs, rien n’est lu sur la chaîne.</p>}
+      {QUOTE_MODE === 'mock' && <p className="muted small">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</p>}
+      {!DEMO && declared.executor && check.isPending && <p className="muted small">Vérification du contrat Auto-loop sur {market.label}…</p>}
+      {!DEMO && declared.executor && check.isError && (
+        <Notice tone="bad">
+          <span>
+            Contrat {fmtAddress(declared.executor)} refusé : {check.error.message}. Aucune transaction ne sera proposée avec lui.
+          </span>
+          {declared.executorSource === 'wallet' && (
+            <button className="btn" onClick={() => setLocalExecutor(market.id)}>
+              Oublier cette adresse
+            </button>
+          )}
+        </Notice>
+      )}
+      {!DEMO && !declared.executor && <DeployPanel market={market} onReady={(a) => setLocalExecutor(market.id, a)} />}
     </>
   )
 
   return (
-    <div className="page">
+    <div className={`page ${view === 'positions' ? 'narrow' : ''}`}>
       <header className="top">
-        <div>
-          <h1>Auto-loop</h1>
-          <p className="tagline">Position à levier en une transaction : flash loan, swap, dépôt.</p>
-        </div>
+        <h1>Auto-loop</h1>
         <WalletButton market={market} />
       </header>
       <nav className="nav">
-        <Segmented
-          value={view}
-          onChange={setView}
-          options={[
-            { value: 'loop' as View, label: 'Boucle' },
-            { value: 'scan' as View, label: 'Scanner' },
-            { value: 'positions' as View, label: 'Positions' },
-          ]}
-        />
+        {(
+          [
+            ['loop', 'Boucle'],
+            ['scan', 'Scanner'],
+            ['positions', 'Positions'],
+          ] as const
+        ).map(([v, label]) => (
+          <button key={v} aria-current={view === v ? 'page' : undefined} onClick={() => setView(v)}>
+            {label}
+          </button>
+        ))}
       </nav>
 
       {view === 'scan' && !DEMO && <Scanner onPick={openPick} />}
-      {view === 'positions' && !DEMO && <Positions account={address} onManage={openPick} />}
-      {view === 'loop' && (
-        <>
-          {DEMO && <Notice tone="info">Mode démo : prix et paramètres de marché fictifs, rien n’est lu sur la chaîne.</Notice>}
-          {!DEMO && declared.executor && check.isPending && <Notice tone="info">Vérification du contrat Auto-loop sur {market.label}…</Notice>}
-          {!DEMO && declared.executor && check.isError && (
-            <Notice tone="bad">
-              Contrat {declared.executor} refusé : {check.error.message}. Rien ne sera proposé à la signature avec lui.{' '}
-              {declared.executorSource === 'wallet' && (
-                <button className="btn ghost" onClick={() => setLocalExecutor(market.id)}>
-                  Oublier cette adresse
-                </button>
-              )}
-            </Notice>
-          )}
-          {!DEMO && market.executor && (
-            <p className="muted small">
-              Contrat Auto-loop vérifié sur {market.label} :{' '}
-              <a href={`${market.chain.blockExplorers?.default.url}/address/${market.executor}`} target="_blank" rel="noreferrer">
-                {market.executor}
-              </a>
-              {market.executorSource === 'wallet' && ' (déployé ou ajouté depuis ce navigateur)'}
-            </p>
-          )}
-          {!DEMO && !declared.executor && <DeployPanel market={market} onReady={(a) => setLocalExecutor(market.id, a)} />}
-          {QUOTE_MODE === 'mock' && <Notice tone="info">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</Notice>}
-
-          {pair ? (
-            <PairView
-              key={`${market.id}-${seed?.nonce ?? ''}`}
-              market={market}
-              collateral={pair.collateral}
-              debt={pair.debt}
-              nativeToken={wrappedNative(tokens, market.chain)?.address}
-              account={address}
-              aggregator={aggregator}
-              selectors={selectors}
-              seed={seed}
-            />
-          ) : (
+      {view === 'positions' && !DEMO && <Positions account={address} onManage={openPick} onScan={() => setView('scan')} />}
+      {view === 'loop' &&
+        (pair ? (
+          <PairView
+            key={`${market.id}-${seed?.nonce ?? ''}`}
+            market={market}
+            collateral={pair.collateral}
+            debt={pair.debt}
+            nativeToken={wrappedNative(tokens, market.chain)?.address}
+            account={address}
+            aggregator={aggregator}
+            selectors={selectors}
+            common={common}
+            notes={notes}
+            seed={seed}
+          />
+        ) : (
+          <LoopLayout
+            summary={
+              <Summary
+                items={[
+                  { label: 'Health factor', key: true },
+                  { label: 'APY net', key: true },
+                ]}
+                action={
+                  <button className="btn primary" disabled>
+                    Ouvrir la position
+                  </button>
+                }
+              />
+            }
+          >
+            {notes}
             <Card title="Marché">
               {selectors}
               {reserveTokens.error ? (
-                <Notice tone="bad">
-                  Lecture d’Aave sur {market.label} impossible : {reserveTokens.error.message.split('\n')[0]} Les RPC publics de ce réseau ne répondent pas (ou
-                  sont bloqués par ton réseau).{' '}
-                  <button className="btn ghost" onClick={reserveTokens.refetch}>
-                    Réessayer
-                  </button>
-                </Notice>
-              ) : slow ? (
                 <Notice>
-                  La lecture d’Aave sur {market.label} prend plus de temps que prévu : le RPC public répond lentement.{' '}
-                  <button className="btn ghost" onClick={reserveTokens.refetch}>
+                  <span>
+                    Lecture d’Aave sur {market.label} impossible : {reserveTokens.error.message.split('\n')[0]} Le RPC public du réseau ne répond pas ou est
+                    bloqué.
+                  </span>
+                  <button className="btn" onClick={reserveTokens.refetch}>
                     Réessayer
                   </button>
                 </Notice>
               ) : (
-                <p className="muted">Lecture des actifs Aave v3 sur {market.label}…</p>
+                slow && (
+                  <Notice>
+                    <span>Le RPC public de {market.label} répond lentement.</span>
+                    <button className="btn" onClick={reserveTokens.refetch}>
+                      Réessayer
+                    </button>
+                  </Notice>
+                )
               )}
             </Card>
-          )}
-        </>
-      )}
+          </LoopLayout>
+        ))}
 
       <footer className="muted small">
-        Non audité. Vérifie toujours la transaction dans ton portefeuille. Le contrat n’agit que pour l’adresse qui signe.
+        Contrat non audité. Vérifier chaque transaction dans le portefeuille ; le contrat n’agit que pour l’adresse qui signe.
       </footer>
     </div>
   )
@@ -345,10 +337,12 @@ type PairViewProps = {
   account?: Address
   aggregator: AggregatorChoice
   selectors: ReactNode
+  common: ReactNode
+  notes: ReactNode
   seed?: { emode: number; leverage: number }
 }
 
-function PairView({ market: m, collateral, debt, nativeToken, account, aggregator, selectors, seed }: PairViewProps) {
+function PairView({ market: m, collateral, debt, nativeToken, account, aggregator, selectors, common, notes, seed }: PairViewProps) {
   const [tab, setTab] = useState<'open' | 'close'>('open')
   const market = useMarket(m, collateral, debt, account, nativeToken)
   const emodes = useEModeCategories(m)
@@ -357,48 +351,52 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
   // closing works inside the account's current eMode, if it applies to the pair
   const currentEMode = r && market.user ? eligibleEModes(emodes, r.collateral, r.debt).find((c) => c.id === market.user!.eModeCategory) : undefined
 
-  return (
+  const head = (
     <>
+      {notes}
       <Card title="Marché">
         {selectors}
-        {market.error && <Notice tone="bad">Lecture d’Aave impossible : {market.error.message.split('\n')[0]}</Notice>}
-        {market.loading && <p className="muted">Lecture du marché Aave v3…</p>}
+        {market.error && <Notice>Lecture d’Aave impossible : {market.error.message.split('\n')[0]}</Notice>}
         {r === null && <Notice tone="bad">Cette paire n’est pas listée sur Aave v3 {m.label}.</Notice>}
         {r && (
-          <table className="reserves">
-            <thead>
-              <tr>
-                <th></th>
-                <th>Prix oracle</th>
-                <th>LTV / seuil liq.</th>
-                <th>APY dépôt</th>
-                <th>APY emprunt</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[r.collateral, r.debt].map((x) => (
-                <tr key={x.token.address}>
-                  <td>{x.token.symbol}</td>
-                  <td>{fmtPrice(x.price)}</td>
-                  <td>
-                    {fmtPct(x.config.ltvBps / 10_000, 0)} / {fmtPct(x.config.liquidationThresholdBps / 10_000, 0)}
-                  </td>
-                  <td>
-                    {fmtPct(x.supplyApy)}
-                    {x.supplyRewardApr > 0 && <small className="reward"> + {fmtPct(x.supplyRewardApr)} Merkl</small>}
-                  </td>
-                  <td>
-                    {fmtPct(x.borrowApy)}
-                    {x.borrowRewardApr > 0 && <small className="reward"> − {fmtPct(x.borrowRewardApr)} Merkl</small>}
-                  </td>
+          <Fold
+            title="Taux Aave"
+            value={`${r.collateral.token.symbol} dépôt ${fmtPct(r.collateral.supplyApy)} · ${r.debt.token.symbol} emprunt ${fmtPct(r.debt.borrowApy)}`}
+          >
+            <table className="reserves cards">
+              <thead>
+                <tr>
+                  <th>Actif</th>
+                  <th>Prix oracle</th>
+                  <th>LTV / seuil liq.</th>
+                  <th>APY dépôt</th>
+                  <th>APY emprunt</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {[r.collateral, r.debt].map((x) => (
+                  <tr key={x.token.address}>
+                    <td className="lead">{x.token.symbol}</td>
+                    <td data-label="Prix oracle">{fmtPrice(x.price)}</td>
+                    <td data-label="LTV / seuil liq.">
+                      {fmtPct(x.config.ltvBps / 10_000, 0)} / {fmtPct(x.config.liquidationThresholdBps / 10_000, 0)}
+                    </td>
+                    <td data-label="APY dépôt">
+                      {fmtPct(x.supplyApy)}
+                      {x.supplyRewardApr > 0 && <span className="reward"> + {fmtPct(x.supplyRewardApr)} Merkl</span>}
+                    </td>
+                    <td data-label="APY emprunt">
+                      {fmtPct(x.borrowApy)}
+                      {x.borrowRewardApr > 0 && <span className="reward"> − {fmtPct(x.borrowRewardApr)} Merkl</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {incentives.isError && <p className="muted small">Merkl indisponible : APY sans bonus.</p>}
+          </Fold>
         )}
-        {r && incentives.isError && <p className="muted small">Rewards Merkl indisponibles : APY sans bonus.</p>}
       </Card>
-
       <div className="tabs">
         <Segmented
           value={tab}
@@ -409,13 +407,47 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
           ]}
         />
       </div>
-
-      {r &&
-        (tab === 'open' ? (
-          <OpenPanel reserves={r} emodes={emodes} seed={seed} user={market.user} account={account} aggregator={aggregator} onDone={market.refetchUser} />
-        ) : (
-          <ClosePanel reserves={withEMode(r, currentEMode)} user={market.user} account={account} aggregator={aggregator} onDone={market.refetchUser} />
-        ))}
     </>
+  )
+
+  if (!r)
+    return (
+      <LoopLayout
+        summary={
+          <Summary
+            items={[{ label: 'Health factor', key: true }, { label: 'Prix de liquidation' }, { label: 'APY net', key: true }, { label: 'Coût total' }]}
+            action={
+              <button className="btn primary" disabled>
+                Ouvrir la position
+              </button>
+            }
+          />
+        }
+      >
+        {head}
+      </LoopLayout>
+    )
+  return tab === 'open' ? (
+    <OpenPanel
+      reserves={r}
+      emodes={emodes}
+      seed={seed}
+      user={market.user}
+      account={account}
+      aggregator={aggregator}
+      common={common}
+      head={head}
+      onDone={market.refetchUser}
+    />
+  ) : (
+    <ClosePanel
+      reserves={withEMode(r, currentEMode)}
+      user={market.user}
+      account={account}
+      aggregator={aggregator}
+      common={common}
+      head={head}
+      onDone={market.refetchUser}
+    />
   )
 }

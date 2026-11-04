@@ -1,5 +1,7 @@
 import { breakEvenBorrowApy, daysToLiquidationByInterest, hfAfterDays, hfAfterDrop } from '../lib/economics'
 import { fmtHf, fmtPct } from '../lib/format'
+import { hfTone } from '../lib/tone'
+import { Fold } from './ui'
 
 const DROPS = [0.01, 0.02, 0.05, 0.1]
 
@@ -11,20 +13,22 @@ type Props = {
   supplyApy: number
   borrowApy: number
   rewardsApy: number
+  correlated: boolean
 }
 
-const hfClass = (hf: number) => (hf < 1 ? 'bad' : hf < 1.1 ? 'warn' : undefined)
-
 /** What would hurt the loop: a price move, a rate rise, or simply time while interest accrues. */
-export function RiskPanel({ collateral, debt, healthFactor, leverage, supplyApy, borrowApy, rewardsApy }: Props) {
+export function RiskPanel({ collateral, debt, healthFactor, leverage, supplyApy, borrowApy, rewardsApy, correlated }: Props) {
+  const hfClass = (hf: number) => hfTone(hf, correlated)
   if (!Number.isFinite(healthFactor)) return null
   const zeroWith = breakEvenBorrowApy(leverage, supplyApy, rewardsApy)
   const zeroWithout = breakEvenBorrowApy(leverage, supplyApy)
   const liqDays = daysToLiquidationByInterest(healthFactor, supplyApy, borrowApy)
   return (
-    <details className="risk" open>
-      <summary>Risques</summary>
-      <table className="reserves">
+    <Fold
+      title="Risques"
+      value={`${collateral} −5 % : ${hfAfterDrop(healthFactor, 0.05) < 1 ? 'liquidé' : `HF ${fmtHf(hfAfterDrop(healthFactor, 0.05))}`} · APY nul si emprunt à ${fmtPct(zeroWith)}`}
+    >
+      <table className="reserves risk">
         <tbody>
           <tr>
             <th colSpan={DROPS.length + 1}>
@@ -43,7 +47,9 @@ export function RiskPanel({ collateral, debt, healthFactor, leverage, supplyApy,
             <td />
           </tr>
           <tr>
-            <th colSpan={DROPS.length + 1}>Taux d’emprunt {debt} qui rend l’APY nul (aujourd’hui {fmtPct(borrowApy)})</th>
+            <th colSpan={DROPS.length + 1}>
+              Taux d’emprunt {debt} qui rend l’APY nul (aujourd’hui {fmtPct(borrowApy)})
+            </th>
           </tr>
           <tr>
             <td colSpan={2} className={zeroWith <= borrowApy ? 'bad' : undefined}>
@@ -70,9 +76,9 @@ export function RiskPanel({ collateral, debt, healthFactor, leverage, supplyApy,
         </tbody>
       </table>
       <p className="muted small">
-        Le health factor ne tient compte que des prix oracle d’Aave. Sur une paire de stablecoins, l’oracle peut ignorer une baisse du prix de marché :
-        le risque est alors celui de l’émetteur du token, pas la liquidation.
+        Le health factor ne suit que les prix oracle d’Aave. Sur une paire de stablecoins, l’oracle peut ignorer une baisse du prix de marché : le risque est
+        alors celui de l’émetteur du token.
       </p>
-    </details>
+    </Fold>
   )
 }

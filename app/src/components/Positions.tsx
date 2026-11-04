@@ -4,19 +4,21 @@ import { getAddress, isAddress, type Address } from 'viem'
 import { MARKETS, getMarket, type Market } from '../config'
 import { daysLeft, merklQuery, type Campaign } from '../lib/merkl'
 import { snapshotQuery, userPositionQuery, type Snapshot, type UserPosition } from '../lib/snapshot'
-import { merklBalances, summarizePosition, userRewardsQuery } from '../lib/positions'
-import { fmtAmount, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/format'
-import { Card, Metric, Notice, hfTone } from './ui'
+import { merklBalances, summarizePosition, userRewardsQuery, type PositionSummary } from '../lib/positions'
+import { isCorrelated } from '../lib/scan'
+import { apyTone, hfTone } from '../lib/tone'
+import { fmtAmount, fmtDate, fmtDollars, fmtHf, fmtNum, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { Card, Fold, Metric, Notice, useSlow } from './ui'
 import type { Pick } from './Scanner'
 
 const READABLE = MARKETS.filter((m) => !m.soon)
 /** Balances under a cent (leftover interest after a close) are not a position. */
 const DUST = 1_000_000n
-const fmtDate = (s: number) => new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short' }).format(new Date(s * 1000))
-const fmtNum = (x: number) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: x >= 100 ? 0 : 4 }).format(x)
 
-/** Every Aave v3 position of an address across the app's networks: value, leverage, health factor, yield, Merkl rewards. */
-export function Positions({ account, onManage }: { account?: Address; onManage: (p: Pick) => void }) {
+type Open = { market: Market; snapshot: Snapshot; position: UserPosition; campaigns?: Campaign[]; summary: PositionSummary; correlated: boolean }
+
+/** Every Aave v3 position of an address across the app's networks: total first, then one card per network. */
+export function Positions({ account, onManage, onScan }: { account?: Address; onManage: (p: Pick) => void; onScan: () => void }) {
   const [typed, setTyped] = useState('')
   const user: Address | undefined = isAddress(typed.trim()) ? getAddress(typed.trim()) : account
   const markets: Market[] = useMemo(() => READABLE.map((m) => getMarket(m.id)), [])
@@ -28,48 +30,94 @@ export function Positions({ account, onManage }: { account?: Address; onManage: 
 
   const pending = markets.filter((_, i) => snapshots[i].isPending || positions[i].isPending).length
   const failed = markets.filter((_, i) => snapshots[i].isError || positions[i].isError)
-  const open = markets
-    .map((m, i) => {
-      const position = positions[i].data
-      return {
-        market: m,
-        snapshot: snapshots[i].data,
-        position: position && { ...position, holdings: position.holdings.filter((h) => h.suppliedBase + h.borrowedBase >= DUST) },
-        campaigns: campaigns[chainIds.indexOf(m.chain.id)]?.data,
-      }
-    })
-    .filter((x): x is typeof x & { snapshot: Snapshot; position: UserPosition } => !!x.snapshot && !!x.position && x.position.holdings.length > 0)
+  const slow = useSlow(!!user && pending > 0)
+  const retry = () => {
+    snapshots.forEach((q) => q.isError && void q.refetch())
+    positions.forEach((q) => q.isError && void q.refetch())
+  }
+
+  const open: Open[] = markets.flatMap((market, i) => {
+    const snapshot = snapshots[i].data
+    const raw = positions[i].data
+    if (!snapshot || !raw) return []
+    const holdings = raw.holdings.filter((h) => h.suppliedBase + h.borrowedBase >= DUST)
+    if (holdings.length === 0) return []
+    const position = { ...raw, holdings }
+    const marketCampaigns = campaigns[chainIds.indexOf(market.chain.id)]?.data
+    const summary = summarizePosition(holdings, marketCampaigns, raw.healthFactor)
+    const collateral = biggest(holdings, 'suppliedBase')
+    const debt = biggest(holdings, 'borrowedBase')
+    const correlated = summary.debtBase > 0n && isCorrelated(collateral.reserve, debt.reserve)
+    return [{ market, snapshot, position, campaigns: marketCampaigns, summary, correlated }]
+  })
   const claim = chainIds
     .map((id, i) => ({ chain: markets.find((m) => m.chain.id === id)!.chain, balances: merklBalances(rewards[i].data) }))
     .filter((c) => c.balances.length > 0)
 
+  // total over every network: net value, APY weighted by net value, lowest health factor
+  const equity = open.reduce((s, x) => s + x.summary.equityBase, 0n)
+  const weighted = open.reduce((s, x) => s + (Number.isFinite(x.summary.apy) ? x.summary.apy * Number(x.summary.equityBase) : 0), 0)
+  const levered = open.filter((x) => x.summary.debtBase > 0n)
+  const lowest = levered.reduce<Open | undefined>((m, x) => (!m || x.position.healthFactor < m.position.healthFactor ? x : m), undefined)
+  const claimUsd = claim.reduce((s, c) => s + c.balances.reduce((t, b) => t + b.usd, 0), 0)
+  // the total shows as soon as one network is read; unreachable networks are named in a banner
+  const read = markets.length - pending
+  const done = !!user && (pending === 0 || open.length > 0)
+  const avgApy = done && equity > 0n ? weighted / Number(equity) : undefined
+
   return (
     <>
-      <Card title="Mes positions">
+      <Card title="Positions">
         <label className="field">
           <span>Adresse {account && !typed ? '(portefeuille connecté)' : '(lecture seule)'}</span>
-          <input placeholder={account ?? '0x… (ou connecte ton portefeuille)'} value={typed} onChange={(e) => setTyped(e.target.value)} spellCheck={false} />
+          <input placeholder={account ?? '0x…'} value={typed} onChange={(e) => setTyped(e.target.value)} spellCheck={false} />
         </label>
         {typed.trim() && !isAddress(typed.trim()) && <Notice>Adresse invalide.</Notice>}
-        {!user ? (
-          <p className="muted">Connecte ton portefeuille ou colle une adresse pour voir ses positions Aave v3 sur tous les réseaux.</p>
-        ) : (
-          <p className="muted small">
-            {pending > 0 ? `Lecture de ${pending} réseau${pending > 1 ? 'x' : ''} sur ${markets.length}… ` : `${markets.length - failed.length} réseaux lus. `}
-            {pending === 0 && open.length === 0 && failed.length < markets.length && 'Aucune position Aave v3 sur ces réseaux. '}
-            Actualisé toutes les minutes.
-          </p>
+        {!user && <p className="muted">Connecter le portefeuille ou coller une adresse : ses positions Aave v3 s’affichent pour tous les réseaux.</p>}
+        {user && (open.length > 0 || pending > 0) && (
+          <div className="metrics">
+            <Metric
+              label="Valeur nette"
+              value={done ? fmtUsd(equity) : undefined}
+              sub={done ? (pending > 0 ? `${read} réseaux lus sur ${markets.length}` : `${open.length} réseau${open.length > 1 ? 'x' : ''}`) : undefined}
+            />
+            <Metric
+              label="APY moyen"
+              value={avgApy !== undefined ? fmtPct(avgApy) : undefined}
+              tone={apyTone(avgApy)}
+              sub={done ? 'pondéré par valeur nette' : undefined}
+            />
+            <Metric
+              label="Health factor minimum"
+              value={done ? (lowest ? fmtHf(lowest.position.healthFactor) : '∞') : undefined}
+              tone={lowest && hfTone(lowest.position.healthFactor, lowest.correlated)}
+              sub={lowest?.market.label}
+            />
+            <Metric label="Merkl à réclamer" value={done ? fmtDollars(claimUsd) : undefined} sub={done ? 'réclamable et en cours' : undefined} />
+          </div>
+        )}
+        {done && open.length === 0 && failed.length < markets.length && (
+          <div className="actions">
+            <span className="muted">Aucune position Aave v3 sur ces réseaux. Le Scanner liste les boucles disponibles.</span>
+            <button className="btn" onClick={onScan}>
+              Ouvrir le Scanner
+            </button>
+          </div>
         )}
         {user && failed.length > 0 && pending === 0 && (
           <Notice>
-            Illisible depuis ton navigateur : {failed.map((m) => m.label).join(', ')} (RPC public qui ne répond pas).{' '}
-            <button
-              className="btn ghost"
-              onClick={() => {
-                snapshots.forEach((q) => q.isError && void q.refetch())
-                positions.forEach((q) => q.isError && void q.refetch())
-              }}
-            >
+            <span>Illisible depuis ce navigateur : {failed.map((m) => m.label).join(', ')} (RPC public qui ne répond pas).</span>
+            <button className="btn" onClick={retry}>
+              Réessayer
+            </button>
+          </Notice>
+        )}
+        {slow && (
+          <Notice>
+            <span>
+              {pending} réseau{pending > 1 ? 'x' : ''} encore en lecture : RPC publics lents.
+            </span>
+            <button className="btn" onClick={retry}>
               Réessayer
             </button>
           </Notice>
@@ -81,8 +129,15 @@ export function Positions({ account, onManage }: { account?: Address; onManage: 
       ))}
 
       {claim.length > 0 && user && (
-        <Card title="Rewards Merkl">
-          <table className="reserves">
+        <Card
+          title="Rewards Merkl"
+          aside={
+            <a href={`https://app.merkl.xyz/users/${user}`} target="_blank" rel="noreferrer">
+              Réclamer sur Merkl
+            </a>
+          }
+        >
+          <table className="reserves cards">
             <thead>
               <tr>
                 <th>Réseau</th>
@@ -96,45 +151,41 @@ export function Positions({ account, onManage }: { account?: Address; onManage: 
               {claim.flatMap((c) =>
                 c.balances.map((b) => (
                   <tr key={c.chain.id + b.symbol}>
-                    <td>{c.chain.name}</td>
-                    <td>{b.symbol}</td>
-                    <td>{fmtNum(b.claimable)}</td>
-                    <td>{fmtNum(b.pending)}</td>
-                    <td>{b.usd > 0 ? `${fmtNum(b.usd)} $` : '—'}</td>
+                    <td className="lead">{c.chain.name}</td>
+                    <td data-label="Token">{b.symbol}</td>
+                    <td data-label="À réclamer">{fmtNum(b.claimable)}</td>
+                    <td data-label="En cours">{fmtNum(b.pending)}</td>
+                    <td data-label="Valeur">{b.usd > 0 ? fmtDollars(b.usd) : '—'}</td>
                   </tr>
                 )),
               )}
             </tbody>
           </table>
-          <p className="muted small">
-            « En cours » devient réclamable à la prochaine mise à jour de Merkl (en général toutes les 8 h).{' '}
-            <a href={`https://app.merkl.xyz/users/${user}`} target="_blank" rel="noreferrer">
-              Réclamer sur Merkl
-            </a>
-          </p>
+          <p className="muted small">« En cours » devient réclamable à la prochaine mise à jour de Merkl, en général toutes les 8 h.</p>
         </Card>
       )}
     </>
   )
 }
 
-type MarketPositionProps = { market: Market; snapshot: Snapshot; position: UserPosition; campaigns?: Campaign[]; onManage: (p: Pick) => void }
+const biggest = (holdings: UserPosition['holdings'], key: 'suppliedBase' | 'borrowedBase') =>
+  [...holdings].sort((a, b) => (b[key] > a[key] ? 1 : b[key] < a[key] ? -1 : 0))[0]
 
-function MarketPosition({ market, snapshot, position, campaigns, onManage }: MarketPositionProps) {
+function MarketPosition({ market, snapshot, position, campaigns, summary: s, correlated, onManage }: Open & { onManage: (p: Pick) => void }) {
   const { holdings, healthFactor, eModeCategory } = position
-  const s = summarizePosition(holdings, campaigns, healthFactor)
   const emode = snapshot.emodes.find((c) => c.id === eModeCategory)
-  const biggest = (key: 'suppliedBase' | 'borrowedBase') => [...holdings].sort((a, b) => (b[key] > a[key] ? 1 : b[key] < a[key] ? -1 : 0))[0]
-  const collateral = biggest('suppliedBase')
-  const debt = biggest('borrowedBase')
+  const collateral = biggest(holdings, 'suppliedBase')
+  const debt = biggest(holdings, 'borrowedBase')
   const excluded = s.campaigns.filter((c) => c.reasons.length > 0)
+  const paying = s.campaigns.filter((c) => c.apy > 0)
+  const tone = s.debtBase > 0n ? hfTone(healthFactor, correlated) : undefined
   return (
     <Card
       title={market.label}
       aside={
         s.debtBase > 0n && (
           <button
-            className="btn ghost"
+            className="btn"
             onClick={() =>
               onManage({
                 marketId: market.id,
@@ -151,29 +202,22 @@ function MarketPosition({ market, snapshot, position, campaigns, onManage }: Mar
       }
     >
       <div className="metrics">
-        <Metric label="Valeur nette" value={fmtUsd(s.equityBase)} sub={`dépôts ${fmtUsd(s.collateralBase)} · dette ${fmtUsd(s.debtBase)}`} />
+        <Metric label="Valeur nette" value={fmtUsd(s.equityBase)} sub={`dette ${fmtUsd(s.debtBase, true)}`} />
         <Metric label="Levier" value={fmtX(s.leverage)} sub={emode ? `eMode ${emode.label}` : 'sans eMode'} />
-        <Metric label="Health factor" value={fmtHf(healthFactor)} tone={s.debtBase > 0n ? hfTone(healthFactor, 1.1) : undefined} />
+        <Metric label="Health factor" value={fmtHf(healthFactor)} tone={tone} sub={correlated ? 'paire corrélée' : undefined} />
         <Metric
-          label="APY net (taux actuels)"
+          label="APY net"
           value={fmtPct(s.apy)}
-          tone={s.apy < 0 ? 'bad' : 'good'}
-          sub={
-            s.rewardsApy > 0 ? `dont ${fmtPct(s.rewardsApy)} Merkl · sans Merkl ${fmtPct(s.ratesApy)}` : campaigns ? 'pas de bonus Merkl' : 'Merkl indisponible'
-          }
-        />
-        <Metric
-          label="Gain estimé par an"
-          value={fmtUsd(BigInt(Math.round(Number(s.equityBase) * (Number.isFinite(s.apy) ? s.apy : 0))))}
-          sub="aux taux et bonus actuels"
+          tone={apyTone(s.apy)}
+          sub={`${fmtDollars((Number(s.equityBase) / 1e8) * (Number.isFinite(s.apy) ? s.apy : 0))} par an`}
         />
       </div>
-      {healthFactor < 1.05 && (
-        <Notice tone="bad">Health factor sous 1,05 : une petite baisse du collatéral ou la hausse des intérêts suffit à liquider.</Notice>
+      {tone === 'bad' && (
+        <Notice tone="bad">Health factor {fmtHf(healthFactor)} : une petite baisse du collatéral ou la hausse des intérêts suffit à liquider.</Notice>
       )}
       {s.endingSoon.map((c) => (
         <Notice key={c.name + c.token}>
-          La campagne Merkl « {c.name} » se termine le {fmtDate(c.endsAt!)} ({Math.floor(daysLeft(c))} j) : sans renouvellement, l’APY tombe à{' '}
+          Campagne Merkl « {c.name} » : fin le {fmtDate(c.endsAt!)} ({Math.floor(daysLeft(c))} j) : sans renouvellement, l’APY tombe à{' '}
           {fmtPct(s.apy - (s.campaigns.find((x) => x.campaign === c)?.apy ?? 0))}.
         </Notice>
       ))}
@@ -182,53 +226,58 @@ function MarketPosition({ market, snapshot, position, campaigns, onManage }: Mar
           « {c.campaign.name} » ({fmtPct(c.campaign.apr)}) ne paie pas cette position : {c.reasons.join(', ')}.
         </Notice>
       ))}
-      <table className="reserves">
-        <thead>
-          <tr>
-            <th>Actif</th>
-            <th>Déposé</th>
-            <th>Emprunté</th>
-            <th>APY</th>
-          </tr>
-        </thead>
-        <tbody>
-          {holdings.map((h) => (
-            <tr key={h.reserve.token.address}>
-              <td>{h.reserve.token.symbol}</td>
-              <td>{h.supplied > 0n ? `${fmtAmount(h.supplied, h.reserve.config.decimals)} (${fmtUsd(h.suppliedBase)})` : '—'}</td>
-              <td>{h.borrowed > 0n ? `${fmtAmount(h.borrowed, h.reserve.config.decimals)} (${fmtUsd(h.borrowedBase)})` : '—'}</td>
-              <td>
-                {h.supplied > 0n && `dépôt ${fmtPct(h.reserve.supplyApy)}`}
-                {h.supplied > 0n && h.borrowed > 0n && ' · '}
-                {h.borrowed > 0n && `emprunt ${fmtPct(h.reserve.borrowApy)}`}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {s.campaigns.some((c) => c.apy > 0) && (
-        <table className="reserves campaigns">
+      {!campaigns && <p className="muted small">Merkl indisponible : APY sans bonus.</p>}
+      <Fold title="Actifs" value={holdings.map((h) => `${h.reserve.token.symbol} ${h.suppliedBase > 0n ? 'déposé' : 'emprunté'}`).join(' · ')}>
+        <table className="reserves cards">
           <thead>
             <tr>
-              <th>Bonus Merkl</th>
-              <th>APR affiché</th>
-              <th>Sur ta position</th>
-              <th>Fin</th>
+              <th>Actif</th>
+              <th>Déposé</th>
+              <th>Emprunté</th>
+              <th>APY</th>
             </tr>
           </thead>
           <tbody>
-            {s.campaigns
-              .filter((c) => c.apy > 0)
-              .map((c) => (
-                <tr key={c.campaign.name + c.campaign.token}>
-                  <td>{c.campaign.name}</td>
-                  <td>{fmtPct(c.campaign.apr)}</td>
-                  <td>{fmtPct(c.apy)}</td>
-                  <td className={daysLeft(c.campaign) < 7 ? 'warn' : undefined}>{c.campaign.endsAt ? fmtDate(c.campaign.endsAt) : 'non indiquée'}</td>
-                </tr>
-              ))}
+            {holdings.map((h) => (
+              <tr key={h.reserve.token.address}>
+                <td className="lead">{h.reserve.token.symbol}</td>
+                <td data-label="Déposé">{h.supplied > 0n ? `${fmtAmount(h.supplied, h.reserve.config.decimals)} (${fmtUsd(h.suppliedBase, true)})` : '—'}</td>
+                <td data-label="Emprunté">{h.borrowed > 0n ? `${fmtAmount(h.borrowed, h.reserve.config.decimals)} (${fmtUsd(h.borrowedBase, true)})` : '—'}</td>
+                <td data-label="APY">
+                  {h.supplied > 0n && `dépôt ${fmtPct(h.reserve.supplyApy)}`}
+                  {h.supplied > 0n && h.borrowed > 0n && ' · '}
+                  {h.borrowed > 0n && `emprunt ${fmtPct(h.reserve.borrowApy)}`}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
+      </Fold>
+      {paying.length > 0 && (
+        <Fold title="Bonus Merkl" value={`+ ${fmtPct(s.rewardsApy)} · ${paying.length} campagne${paying.length > 1 ? 's' : ''}`}>
+          <table className="reserves campaigns cards">
+            <thead>
+              <tr>
+                <th>Campagne</th>
+                <th>APR affiché</th>
+                <th>Sur la position</th>
+                <th>Fin</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paying.map((c) => (
+                <tr key={c.campaign.name + c.campaign.token}>
+                  <td className="lead">{c.campaign.name}</td>
+                  <td data-label="APR affiché">{fmtPct(c.campaign.apr)}</td>
+                  <td data-label="Sur la position">{fmtPct(c.apy)}</td>
+                  <td data-label="Fin" className={daysLeft(c.campaign) < 7 ? 'warn' : undefined}>
+                    {c.campaign.endsAt ? fmtDate(c.campaign.endsAt) : 'non indiquée'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Fold>
       )}
     </Card>
   )

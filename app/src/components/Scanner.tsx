@@ -5,28 +5,24 @@ import { MARKETS, aggregatorsFor, getMarket, type Market } from '../config'
 import { merklQuery } from '../lib/merkl'
 import { snapshotQuery } from '../lib/snapshot'
 import { scanMarket, type ScanFlag, type ScanRow } from '../lib/scan'
-import { fmtHf, fmtPct, fmtX } from '../lib/format'
-import { Card, Notice, Segmented } from './ui'
+import { fmtDate, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { Card, Fold, Notice, Segmented, Skel, Tag, useSlow } from './ui'
 
 export type Pick = { marketId: string; collateral: Address; debt: Address; emode: number; leverage: number }
 
 const HFS = ['1.05', '1.1', '1.2', '1.5'] as const
 type Filter = 'correlated' | 'stable' | 'all'
-const ROWS = 60
+const ROWS = 20
 /** Pairs where less than this can still be looped are hidden (borrow cap or cash used up). */
 const MIN_CAPACITY = 1_000n * 10n ** 8n
 /** Flagged as nearly full under this. */
 const LOW_CAPACITY = 50_000n * 10n ** 8n
 
-const FLAG_TEXT: Record<ScanFlag, string> = {
-  conditional: 'conditions Merkl à vérifier',
-  yieldBearing: 'rendement propre du token en plus',
-  lowCapacity: 'presque plein',
+const FLAG_TAG: Record<ScanFlag, { text: string; tone?: 'good' | 'warn' }> = {
+  conditional: { text: 'conditions Merkl' },
+  yieldBearing: { text: 'rendement du token en plus' },
+  lowCapacity: { text: 'presque plein', tone: 'warn' },
 }
-
-const fmtCapacity = (base: bigint) => `${new Intl.NumberFormat('fr-FR', { notation: 'compact', maximumFractionDigits: 1 }).format(Number(base) / 1e8)} $`
-
-const fmtDate = (s: number) => new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short' }).format(new Date(s * 1000))
 
 /** Markets the app can loop on: an aggregator quotes there. */
 const SCANNABLE = MARKETS.filter((m) => !m.soon && aggregatorsFor(m.chain.id).length > 0)
@@ -37,6 +33,7 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
   const [hfText, setHf] = useState<(typeof HFS)[number]>('1.1')
   const [filter, setFilter] = useState<Filter>('correlated')
   const [showNegative, setShowNegative] = useState(false)
+  const [all, setAll] = useState(false)
   const markets: Market[] = useMemo(() => (scope === 'all' ? SCANNABLE : SCANNABLE.filter((m) => m.id === scope)).map((m) => getMarket(m.id)), [scope])
   const snapshots = useQueries({ queries: markets.map((m) => snapshotQuery(m)) })
   // one Merkl query per chain (Ethereum Core and Prime share it)
@@ -63,13 +60,17 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
       r.capacityBase >= MIN_CAPACITY,
   )
   const loading = snapshots.filter((q) => q.isPending).length
+  const slow = useSlow(loading > 0)
   const failed = markets.filter((_, i) => snapshots[i].isError)
   const merklFailed = chainIds.filter((_, i) => merkl[i].isError)
   const label = (id: string) => MARKETS.find((m) => m.id === id)?.label ?? id
+  const retry = () => snapshots.forEach((q) => (q.isError || q.isPending) && void q.refetch())
+  const visible = all ? shown : shown.slice(0, ROWS)
+  const hf = hfText.replace('.', ',')
 
   return (
-    <Card title="Scanner d’opportunités">
-      <div className="grid2">
+    <Card title="Scanner">
+      <div className="scan-filters">
         <label className="field">
           <span>Réseau</span>
           <select value={scope} onChange={(e) => setScope(e.target.value)}>
@@ -85,30 +86,36 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
           <span>Health factor visé</span>
           <Segmented value={hfText} onChange={setHf} options={HFS.map((h) => ({ value: h, label: h.replace('.', ',') }))} />
         </div>
+        <div className="field">
+          <span>Type de paire</span>
+          <Segmented
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { value: 'correlated' as Filter, label: 'Corrélées' },
+              { value: 'stable' as Filter, label: 'Stables USD' },
+              { value: 'all' as Filter, label: 'Toutes' },
+            ]}
+          />
+        </div>
       </div>
-      <div className="actions">
-        <Segmented
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: 'correlated' as Filter, label: 'Paires corrélées' },
-            { value: 'stable' as Filter, label: 'Stablecoins USD' },
-            { value: 'all' as Filter, label: 'Toutes' },
-          ]}
-        />
-        <label className="check">
-          <input type="checkbox" checked={showNegative} onChange={(e) => setShowNegative(e.target.checked)} /> Afficher les APY négatifs
-        </label>
-      </div>
-      <p className="muted small">
-        {loading > 0 ? `Lecture de ${loading} marché${loading > 1 ? 's' : ''} sur ${markets.length}… ` : `${markets.length - failed.length} marché(s) lus. `}
-        Levier calculé pour un health factor de {hfText.replace('.', ',')} (plafonné comme le curseur de la boucle), meilleure configuration eMode de chaque
-        paire, rewards Merkl comptés seulement si la position y a droit à ce health factor. Taux variables : l’APY change avec l’utilisation du marché.
-      </p>
-      {failed.length > 0 && (
+      <label className="check">
+        <input type="checkbox" checked={showNegative} onChange={(e) => setShowNegative(e.target.checked)} /> Afficher les APY négatifs
+      </label>
+      {failed.length > 0 && loading === 0 && (
         <Notice>
-          Illisible depuis ton navigateur : {failed.map((m) => m.label).join(', ')} (RPC public qui ne répond pas).{' '}
-          <button className="btn ghost" onClick={() => snapshots.forEach((q) => q.isError && void q.refetch())}>
+          <span>Illisible depuis ce navigateur : {failed.map((m) => m.label).join(', ')} (RPC public qui ne répond pas).</span>
+          <button className="btn" onClick={retry}>
+            Réessayer
+          </button>
+        </Notice>
+      )}
+      {slow && (
+        <Notice>
+          <span>
+            {loading} marché{loading > 1 ? 's' : ''} encore en lecture : RPC publics lents.
+          </span>
+          <button className="btn" onClick={retry}>
             Réessayer
           </button>
         </Notice>
@@ -119,47 +126,53 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
         </Notice>
       )}
       {filter === 'all' && targetHf < 1.2 && (
-        <Notice tone="bad">Un health factor de {hfText.replace('.', ',')} sur une paire non corrélée se fait liquider au premier mouvement de prix.</Notice>
+        <Notice tone="bad">Un health factor de {hf} sur une paire non corrélée se fait liquider au premier mouvement de prix.</Notice>
       )}
-      {shown.length > 0 ? (
-        <table className="reserves scan">
+      {visible.length > 0 || loading > 0 ? (
+        <table className="reserves scan cards">
           <thead>
             <tr>
-              {scope === 'all' && <th>Réseau</th>}
               <th>Paire</th>
-              <th>Levier</th>
-              <th>APY net</th>
-              <th className="opt">dont Merkl</th>
-              <th className="opt">Capacité</th>
-              <th className="opt">Fin du bonus</th>
+              <th className="num">Levier</th>
+              <th className="num">APY net</th>
+              <th className="num">dont Merkl</th>
+              <th className="num">Capacité</th>
+              <th>Fin du bonus</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {shown.slice(0, ROWS).map((r) => (
+            {visible.map((r) => (
               <tr key={`${r.marketId}-${r.collateral.token.address}-${r.debt.token.address}`}>
-                {scope === 'all' && <td>{label(r.marketId)}</td>}
-                <td>
+                <td className="lead">
                   {r.collateral.token.symbol} / {r.debt.token.symbol}
-                  <div className="muted small">
-                    {r.emode ? `eMode ${r.emode.label}` : 'sans eMode'}
-                    {r.flags.map((f) => ` · ${FLAG_TEXT[f]}`).join('')}
+                  {scope === 'all' && <span className="muted"> · {label(r.marketId)}</span>}
+                  <div className="tags">
+                    {r.emode && <Tag>eMode {r.emode.label}</Tag>}
+                    {r.rewardsApy > 0 && <Tag tone="good">bonus</Tag>}
+                    {r.flags.map((f) => (
+                      <Tag key={f} tone={FLAG_TAG[f].tone}>
+                        {FLAG_TAG[f].text}
+                      </Tag>
+                    ))}
                   </div>
                 </td>
-                <td>
+                <td data-label="Levier" className="num">
                   {fmtX(r.leverage)}
-                  <div className="muted small">HF {fmtHf(r.healthFactor)}</div>
                 </td>
-                <td className={r.apy < 0 ? 'bad' : undefined}>
+                <td data-label="APY net" className={`num ${r.apy < 0 ? 'bad' : 'good'}`}>
                   <strong>{fmtPct(r.apy)}</strong>
-                  <div className="muted small">sans Merkl {fmtPct(r.ratesApy)}</div>
                 </td>
-                <td className="opt">{r.rewardsApy > 0 ? <span className="reward">{fmtPct(r.rewardsApy)}</span> : '—'}</td>
-                <td className="opt">{fmtCapacity(r.capacityBase)}</td>
-                <td className="opt">{r.rewardsEnd ? fmtDate(r.rewardsEnd) : r.rewardsApy > 0 ? 'non indiquée' : '—'}</td>
+                <td data-label="dont Merkl" className="num">
+                  {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : '—'}
+                </td>
+                <td data-label="Capacité" className="num">
+                  {fmtUsd(r.capacityBase, true)}
+                </td>
+                <td data-label="Fin du bonus">{r.rewardsEnd ? fmtDate(r.rewardsEnd) : r.rewardsApy > 0 ? 'non indiquée' : '—'}</td>
                 <td>
                   <button
-                    className="btn ghost"
+                    className="btn small"
                     onClick={() =>
                       onPick({
                         marketId: r.marketId,
@@ -175,20 +188,40 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
                 </td>
               </tr>
             ))}
+            {loading > 0 &&
+              visible.length < 5 &&
+              Array.from({ length: 5 - visible.length }, (_, i) => (
+                <tr key={`skel-${i}`}>
+                  <td className="lead" colSpan={7}>
+                    <Skel w={16} />
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       ) : (
-        loading === 0 && <p className="muted">Aucune paire ne correspond à ces filtres.</p>
+        <p className="muted">Aucune paire ne correspond à ces filtres. Changer de health factor ou de type de paire.</p>
       )}
       {shown.length > ROWS && (
-        <p className="muted small">
-          {ROWS} premières paires sur {shown.length}.
-        </p>
+        <div className="actions">
+          <span className="muted small">
+            {all ? shown.length : ROWS} paires sur {shown.length}.
+          </span>
+          <button className="btn small" onClick={() => setAll(!all)}>
+            {all ? `Afficher les ${ROWS} premières` : 'Afficher toutes les paires'}
+          </button>
+        </div>
       )}
-      <p className="muted small">
-        Non compté : le rendement propre des tokens à rendement (sUSDe, wstETH…), le coût d’entrée et de sortie (affiché dans la boucle), et les campagnes Merkl
-        à public restreint. La capacité est le capital encore « bouclable » avant que l’actif emprunté manque de liquidité ou atteigne un plafond.
-      </p>
+      <Fold title="Méthode" value={`levier à un health factor de ${hf}, meilleur eMode, Merkl si éligible`}>
+        <p className="muted small">
+          Le levier de chaque paire donne un health factor de {hf}, plafonné comme le curseur de la boucle, dans la configuration eMode qui rapporte le plus.
+          Les rewards Merkl ne comptent que si la position y a droit à ce health factor. Les taux sont variables : l’APY change avec l’utilisation du marché.
+        </p>
+        <p className="muted small">
+          Non compté : le rendement propre des tokens à rendement (sUSDe, wstETH…), le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes
+          Merkl à public restreint. La capacité est le capital encore « bouclable » avant que l’actif emprunté manque de liquidité ou atteigne un plafond.
+        </p>
+      </Fold>
     </Card>
   )
 }

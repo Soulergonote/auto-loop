@@ -1,6 +1,6 @@
 # Auto-loop : interface
 
-Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Plasma, Linea, Sonic et Monad, via le contrat `LeverageExecutor` (`../contracts`). On choisit la plateforme, la paire collatéral / dette et le levier ; le swap passe par Velora ou KyberSwap, au choix selon la chaîne (0x et 1inch sont codés mais affichés « bientôt ») ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
+Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Plasma, Linea, Sonic et Monad, via le contrat `LeverageExecutor` (`../contracts`). On choisit la paire collatéral / dette et le levier ; le swap passe par Velora ou KyberSwap selon la chaîne (0x et 1inch sont codés mais pas proposés) ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
 
 Stack : Vite + React + TypeScript, wagmi 2 / viem 2.
 
@@ -25,6 +25,10 @@ Le build ne dépend d'aucun serveur : le navigateur appelle directement l'API Ve
 | `ZEROX_API_KEY`, `ONEINCH_API_KEY` | Lues uniquement par le serveur de dev (proxy `/api/0x` et `/api/1inch` dans `vite.config.ts`), jamais envoyées au navigateur : 0x et 1inch ne marchent donc pas dans le build statique. Inutiles tant que 0x et 1inch sont désactivés ; Velora n’en demande pas. |
 | `VITE_VELORA_INCLUDE_DEXS`, `VITE_VELORA_EXCLUDE_DEXS` | Listes de DEX (noms Velora, séparés par des virgules) autorisés ou exclus des routes. Vide = toutes les routes. Sert surtout au test sur fork (voir plus bas). |
 | `VITE_DEMO` | `true` : prix et paramètres fictifs, pour voir l’interface sans réseau. |
+
+## Interface
+
+Les règles d’interface (agencement, couleurs, typographie, composants, ton, formats des nombres) sont fixées dans la charte UI/UX du projet ; tout écran la suit. En pratique : l’écran Boucle a les choix à gauche et un résumé fixe à droite avec l’unique bouton principal (barre collée en bas sur mobile) ; les réglages rares (agrégateur, slippage, durée, eMode) sont dans un bloc « Réglages » replié ; les formats passent tous par `src/lib/format.ts` et les couleurs des valeurs par `src/lib/tone.ts` (seuils du health factor propres aux paires corrélées : rouge sous 1,03, ambre sous 1,08, contre 1,1 et 1,3 sinon).
 
 ## Marchés
 
