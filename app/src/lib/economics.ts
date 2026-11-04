@@ -3,6 +3,7 @@
  * gas, spread over how long the position is held. Values are in oracle base units (USD, 8 decimals) or fractions.
  */
 import { toBase, type Side } from './math'
+import { fmtPct } from './format'
 
 const BPS = 10_000n
 
@@ -38,13 +39,13 @@ export function swapLossProblem(
   maxLoss = MAX_SWAP_LOSS,
 ): { block: boolean; text: string } | undefined {
   if (simulated || loss <= WARN_SWAP_LOSS) return undefined
-  const pct = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(loss * 100)
+  const pct = fmtPct(loss, 1)
   return loss > maxLoss
     ? {
         block: true,
-        text: `Le swap ${sell} → ${buy} perd ${pct} % de la valeur au prix de l’oracle : pas assez de liquidité pour ce montant. Réduis le montant ou le levier.`,
+        text: `Le swap ${sell} → ${buy} perd ${pct} de la valeur au prix de l’oracle : pas assez de liquidité pour ce montant. Réduire le montant ou le levier.`,
       }
-    : { block: false, text: `Le swap ${sell} → ${buy} perd ${pct} % de la valeur au prix de l’oracle (impact de prix).` }
+    : { block: false, text: `Le swap ${sell} → ${buy} perd ${pct} de la valeur au prix de l’oracle (impact de prix).` }
 }
 
 export type Costs = {

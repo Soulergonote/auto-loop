@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { isAddress, type Address } from 'viem'
 import { DEMO, type Market } from '../config'
+import { fmtHf } from './format'
 
 /**
  * Merkl incentive campaigns on Aave v3 (public API, no key). What each campaign type rewards, as the API
@@ -119,7 +120,14 @@ export function toCampaign(o: Opportunity): Campaign | undefined {
 export async function fetchCampaigns(chainId: number, signal: AbortSignal): Promise<Campaign[]> {
   const out: Campaign[] = []
   for (let page = 0; page < 5; page++) {
-    const q = new URLSearchParams({ chainId: String(chainId), mainProtocolId: 'aave', status: 'LIVE', items: String(PAGE), page: String(page), campaigns: 'true' })
+    const q = new URLSearchParams({
+      chainId: String(chainId),
+      mainProtocolId: 'aave',
+      status: 'LIVE',
+      items: String(PAGE),
+      page: String(page),
+      campaigns: 'true',
+    })
     const res = await fetch(`${MERKL_API}?${q}`, { signal })
     if (!res.ok) throw new Error(`Merkl : HTTP ${res.status}`)
     const list = (await res.json()) as Opportunity[]
@@ -166,7 +174,7 @@ export type PairCampaigns = ReturnType<typeof campaignsForPair>
 export function unmetConditions(c: Campaign, position: { healthFactor: number; debtToken: Address }): string[] {
   const out: string[] = []
   if (c.maxHealthFactor !== undefined && !(position.healthFactor <= c.maxHealthFactor))
-    out.push(`health factor ${Number.isFinite(position.healthFactor) ? position.healthFactor.toFixed(2) : '∞'} au-dessus du maximum ${c.maxHealthFactor}`)
+    out.push(`health factor ${fmtHf(position.healthFactor)} au-dessus du maximum ${fmtHf(c.maxHealthFactor)}`)
   if (c.forbiddenBorrows.includes(position.debtToken.toLowerCase())) out.push('l’actif emprunté est exclu par la campagne')
   return out
 }
