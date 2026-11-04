@@ -74,6 +74,8 @@ describe('positions', () => {
             token: { address: '0x1', symbol: 'USDe', decimals: 18, price: 1 },
           },
           { amount: '5', claimed: '5', pending: '0', token: { address: '0x2', symbol: 'X', decimals: 0 } },
+          // a few millionths of a dollar left: not a line
+          { amount: '3', claimed: '0', pending: '0', token: { address: '0x3', symbol: 'USDC', decimals: 6, price: 1 } },
         ],
       },
     ])

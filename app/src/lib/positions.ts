@@ -4,6 +4,7 @@
  */
 import { daysLeft, type Campaign } from './merkl'
 import type { SnapReserve } from './snapshot'
+import { fmtHf } from './format'
 
 export type Holding = {
   reserve: SnapReserve
@@ -70,7 +71,7 @@ export function positionRewards(campaigns: Campaign[] | undefined, holdings: Hol
     if (!touches) continue
     const reasons: string[] = []
     if (c.maxHealthFactor !== undefined && !(healthFactor <= c.maxHealthFactor))
-      reasons.push(`health factor ${Number.isFinite(healthFactor) ? healthFactor.toFixed(2) : '∞'} au-dessus du maximum ${c.maxHealthFactor}`)
+      reasons.push(`health factor ${fmtHf(healthFactor)} au-dessus du maximum ${fmtHf(c.maxHealthFactor)}`)
     const forbidden = holdings.filter((h) => h.borrowedBase > 0n && c.forbiddenBorrows.includes(lower(h.reserve.variableDebtToken)))
     if (forbidden.length) reasons.push(`emprunt de ${forbidden.map((h) => h.reserve.token.symbol).join(', ')} exclu par la campagne`)
     if (base === 0 && reasons.length === 0) reasons.push('rien d’éligible : la dette compense le dépôt')
@@ -123,17 +124,21 @@ export type MerklUserRewards = {
 
 /** Claimable now (earned minus claimed) and still accruing (pending, claimable after the next Merkl update), per token. */
 export function merklBalances(data: MerklUserRewards | undefined) {
-  return (data ?? [])
-    .flatMap((c) => c.rewards)
-    .map((r) => {
-      const unit = 10 ** r.token.decimals
-      const claimable = Math.max(0, Number(BigInt(r.amount) - BigInt(r.claimed)) / unit)
-      const pending = Number(BigInt(r.pending)) / unit
-      const price = r.token.price ?? 0
-      return { symbol: r.token.symbol, claimable, pending, usd: (claimable + pending) * price }
-    })
-    .filter((r) => r.claimable + r.pending > 0)
-    .sort((a, b) => b.usd - a.usd)
+  return (
+    (data ?? [])
+      .flatMap((c) => c.rewards)
+      .map((r) => {
+        const unit = 10 ** r.token.decimals
+        const claimable = Math.max(0, Number(BigInt(r.amount) - BigInt(r.claimed)) / unit)
+        const pending = Number(BigInt(r.pending)) / unit
+        const price = r.token.price ?? 0
+        return { symbol: r.token.symbol, claimable, pending, usd: (claimable + pending) * price, price }
+      })
+      // nothing worth a line: under a cent when the price is known, under 0.0001 token otherwise
+      .filter((r) => (r.price > 0 ? r.usd >= 0.01 : r.claimable + r.pending >= 1e-4))
+      .map(({ price: _, ...r }) => r)
+      .sort((a, b) => b.usd - a.usd)
+  )
 }
 
 const MERKL_USERS = 'https://api.merkl.xyz/v4/users'
