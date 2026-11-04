@@ -14,7 +14,8 @@ import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
 import { Card, Fold, LoopLayout, QuoteCompare, Metric, Notice, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 
-const SLIPPAGES = ['30', '50', '100'] as const
+/** slippage choices in bps; 1 (0,01 %) by default, Azerty's choice: a tighter swap reverts sooner when the price moves */
+const SLIPPAGES = ['1', '10', '50', '100'] as const
 
 type Props = {
   reserves: Reserves
@@ -47,7 +48,7 @@ export function ClosePanel({ reserves, user, account, aggregator, onDone, common
   const { market, collateral: C, debt: D, premiumBps } = reserves
   // target leverage of the pair's position; 1 = close everything
   const [target, setTarget] = useState(1)
-  const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('50')
+  const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
   const [busy, setBusy] = useState<string>()
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash }>()
 
@@ -326,12 +327,12 @@ function ClosePanelInner(p: {
 
         <Fold
           title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000, 1)} · prime flash loan ${fmtPct(Number(premiumBps) / 10_000)}`}
+          value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)} · prime flash loan ${fmtPct(Number(premiumBps) / 10_000)}`}
         >
           {p.common}
           <div className="field">
             <span>Slippage max</span>
-            <Segmented value={slippage} onChange={p.setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000, 1) }))} />
+            <Segmented value={slippage} onChange={p.setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000) }))} />
           </div>
         </Fold>
 
