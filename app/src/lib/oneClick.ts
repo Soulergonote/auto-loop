@@ -14,15 +14,15 @@
  *     the credit delegation are for the exact amounts and are put back to their previous values after it.
  */
 import { encodeFunctionData, getAddress, parseAbi, type Address, type Hash, type Hex } from 'viem'
-import { getPublicClient, sendCalls, waitForCallsStatus } from '@wagmi/core'
+import { getPublicClient, readContract, sendCalls, waitForCallsStatus } from '@wagmi/core'
 import { useCapabilities } from 'wagmi'
 import { wagmiConfig } from '../wagmi'
-import { debtTokenAbi, erc20Abi, executorAbi } from '../abi'
+import { debtTokenAbi, erc20Abi, executorAbi, poolAbi } from '../abi'
 import type { Token } from '../config'
 import { getQuote, QuoteError, type Quote, type QuoteRequest } from './quotes'
 import { distributorAbi, MERKL_DISTRIBUTOR, type Claimable } from './reinvest'
 import { walletSwapProblem, swapTerms } from './swapCalldata'
-import { openArgs, type OpenPlan, type Progress } from './execute'
+import { closeArgs, openArgs, type ClosePlan, type OpenPlan, type Progress } from './execute'
 
 const withdrawAbi = parseAbi(['function withdraw(address asset, uint256 amount, address to) returns (uint256)'])
 
@@ -177,7 +177,7 @@ export function useAtomicBatch(chainId: number, account: Address | undefined): b
  * Sends the batch: a simulation of all the calls first when the RPC can (a failing call stops here), then one
  * confirmation in the wallet. Returns the transaction hash once included.
  */
-export async function sendReinvestBatch(chainId: number, user: Address, calls: BatchCall[], onStep: Progress): Promise<Hash | undefined> {
+export async function sendBatch(chainId: number, user: Address, calls: BatchCall[], onStep: Progress): Promise<Hash | undefined> {
   onStep('Simulation du lot…')
   const failure = await simulate(chainId, user, calls)
   if (failure) throw new Error(failure)
@@ -193,6 +193,91 @@ export async function sendReinvestBatch(chainId: number, user: Address, calls: B
         : 'Le lot a échoué : aucune de ses opérations n’a eu lieu.',
     )
   return status.receipts?.at(-1)?.transactionHash
+}
+
+/**
+ * "Ouvrir" as one batch: eMode switch if needed, exact collateral approval, exact credit delegation, `open`, then
+ * the approval and the delegation back to their previous values. Same contract call as the step flow.
+ */
+export function openBatchCalls(p: OpenPlan, allowances: { collateral: bigint; borrow: bigint }): BatchCall[] {
+  if (p.quote.simulated) throw new Error('Devis simulé : impossible à exécuter')
+  if (p.quote.sellAmount !== p.debtAmount) throw new Error('Devis pour un autre montant que l’emprunt')
+  const col = allowanceCalls('erc20', p.collateral, p.executor, p.initialCollateral, allowances.collateral, {
+    set: 'Autoriser le contrat à prendre le capital (montant exact)',
+    reset: 'Remettre l’autorisation du capital à sa valeur',
+  })
+  const del = allowanceCalls('delegation', p.variableDebtToken, p.executor, p.debtAmount, allowances.borrow, {
+    set: 'Déléguer l’emprunt au contrat (montant exact)',
+    reset: 'Remettre la délégation d’emprunt à sa valeur',
+  })
+  const emode: BatchCall[] =
+    p.eModeTarget === undefined
+      ? []
+      : [
+          {
+            to: p.pool,
+            data: encodeFunctionData({ abi: poolAbi, functionName: 'setUserEMode', args: [p.eModeTarget] }),
+            label: p.eModeTarget === 0 ? 'Sortir de l’eMode sur le compte Aave' : 'Passer le compte Aave en eMode',
+          },
+        ]
+  return [
+    ...emode,
+    ...col.before,
+    ...del.before,
+    { to: p.executor, data: encodeFunctionData({ abi: executorAbi, functionName: 'open', args: [openArgs(p)] }), label: 'Ouvrir : flash loan, swap et dépôt' },
+    ...del.after,
+    ...col.after,
+  ]
+}
+
+/** "Fermer" as one batch: exact aToken approval (a little headroom on a full close), `close`, approval back after. */
+export function closeBatchCalls(p: ClosePlan, aTokenAllowance: bigint): BatchCall[] {
+  if (p.quote.simulated) throw new Error('Devis simulé : impossible à exécuter')
+  if (p.quote.sellAmount !== p.collateralToSell) throw new Error('Devis pour un autre montant que le collatéral vendu')
+  // aToken balances grow every block: a full close pulls the balance at inclusion
+  const need = p.full ? (p.aTokensNeeded * 1001n) / 1000n : p.aTokensNeeded
+  const a = allowanceCalls('erc20', p.aToken, p.executor, need, aTokenAllowance, {
+    set: 'Autoriser le contrat à prendre ces aTokens (montant exact)',
+    reset: 'Remettre l’autorisation des aTokens à sa valeur',
+  })
+  return [
+    ...a.before,
+    {
+      to: p.executor,
+      data: encodeFunctionData({ abi: executorAbi, functionName: 'close', args: [closeArgs(p)] }),
+      label: 'Fermer : flash loan, remboursement, retrait et swap',
+    },
+    ...a.after,
+  ]
+}
+
+/** Opens in one confirmation, with the allowances read now (not the ones the screen last polled). */
+export async function executeOpenBatch(p: OpenPlan, onStep: Progress): Promise<Hash | undefined> {
+  onStep('Lecture des autorisations…')
+  const [collateral, borrow] = await Promise.all([
+    readContract(wagmiConfig, { chainId: p.chainId, address: p.collateral, abi: erc20Abi, functionName: 'allowance', args: [p.user, p.executor] }),
+    readContract(wagmiConfig, {
+      chainId: p.chainId,
+      address: p.variableDebtToken,
+      abi: debtTokenAbi,
+      functionName: 'borrowAllowance',
+      args: [p.user, p.executor],
+    }),
+  ])
+  return sendBatch(p.chainId, p.user, openBatchCalls(p, { collateral, borrow }), onStep)
+}
+
+/** Closes in one confirmation, with the aToken allowance read now. */
+export async function executeCloseBatch(p: ClosePlan, onStep: Progress): Promise<Hash | undefined> {
+  onStep('Lecture des autorisations…')
+  const allowance = await readContract(wagmiConfig, {
+    chainId: p.chainId,
+    address: p.aToken,
+    abi: erc20Abi,
+    functionName: 'allowance',
+    args: [p.user, p.executor],
+  })
+  return sendBatch(p.chainId, p.user, closeBatchCalls(p, allowance), onStep)
 }
 
 /** First failing call of the batch, or undefined (also when the RPC cannot simulate a batch: the wallet still does). */

@@ -9,6 +9,7 @@ import { collateralToSellForRepay, flashLoanOwed, positionLeverage, repayForTarg
 import { useDebounced } from '../lib/useDebounced'
 import { swapLoss, swapLossProblem } from '../lib/economics'
 import { closeArgs, executeClose, explainError, type ClosePlan } from '../lib/execute'
+import { executeCloseBatch, useAtomicBatch } from '../lib/oneClick'
 import { fmtAmount, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
@@ -125,6 +126,8 @@ function ClosePanelInner(p: {
   setResult: (r?: { ok: boolean; text: string; hash?: Hash }) => void
 }) {
   const { market, C, D, premiumBps, user, account, aggregator, slippage, busy, setBusy, result, setResult } = p
+  // a wallet that sends atomic batches: approval, close and approval back in one confirmation
+  const batch = useAtomicBatch(market.chain.id, account) === true
   const position = { collateralBase: toBase(user.aTokenBalance, C.side), debtBase: toBase(user.debtBalance, D.side) }
   const currentLev = positionLeverage(position)
   const sliderMax = Number.isFinite(currentLev) ? Math.max(1, Math.floor(currentLev * 20) / 20) : 15
@@ -246,7 +249,7 @@ function ClosePanelInner(p: {
       const fresh = await getQuote(quoteReq!)
       if (fresh.simulated) throw new Error('Plus de devis réel disponible')
       if (fresh.minOut < required) throw new Error('Le nouveau devis ne couvre plus le remboursement')
-      const hash = await executeClose(makePlan(fresh)!, setBusy)
+      const hash = batch ? await executeCloseBatch(makePlan(fresh)!, setBusy) : await executeClose(makePlan(fresh)!, setBusy)
       setResult({ ok: true, text: full ? 'Position fermée.' : 'Position réduite.', hash })
       p.onDone()
     } catch (e) {
@@ -256,10 +259,16 @@ function ClosePanelInner(p: {
     }
   }
 
-  const steps = [
-    ...(needsPermit ? [{ label: `Signer l’autorisation sur les a${C.token.symbol} (signature, sans gas)` }] : []),
-    { label: 'Signer la transaction : flash loan, remboursement, retrait et swap en une fois' },
-  ]
+  const steps = batch
+    ? [
+        ...(needsPermit ? [{ label: `Autoriser le contrat à prendre ces a${C.token.symbol} (montant exact)` }] : []),
+        { label: 'Fermer : flash loan, remboursement, retrait et swap' },
+        ...(needsPermit ? [{ label: `Remettre l’autorisation des a${C.token.symbol} à sa valeur` }] : []),
+      ]
+    : [
+        ...(needsPermit ? [{ label: `Signer l’autorisation sur les a${C.token.symbol} (signature, sans gas)` }] : []),
+        { label: 'Signer la transaction : flash loan, remboursement, retrait et swap en une fois' },
+      ]
 
   const summary = (
     <Summary
@@ -350,8 +359,9 @@ function ClosePanelInner(p: {
           </Fold>
         )}
 
-        <Fold title="Étapes" value={`${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
+        <Fold title="Étapes" value={batch ? 'une seule confirmation' : `${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
           <Steps steps={steps} />
+          {batch && <p className="muted small">Le portefeuille envoie ces opérations en un seul lot : toutes passent ou aucune.</p>}
         </Fold>
       </Card>
     </LoopLayout>

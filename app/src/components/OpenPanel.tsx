@@ -15,6 +15,7 @@ import { WINDOWS, isRateSpike, useRateAverages } from '../lib/rateHistory'
 import { extraDebtForTarget, maxLeverage, netApy, positionLeverage, project, roundSignificant, toBase, EMPTY_ACCOUNT, NO_POSITION } from '../lib/math'
 import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
 import { executeOpen, explainError, openArgs, type OpenPlan } from '../lib/execute'
+import { executeOpenBatch, useAtomicBatch } from '../lib/oneClick'
 import { fmtAmount, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
@@ -66,6 +67,8 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const avgC = averages?.get(C.token.address.toLowerCase())
   const avgD = averages?.get(D.token.address.toLowerCase())
   const gasPrice = useGasPrice({ chainId: market.chain.id, query: { refetchInterval: 30_000 } })
+  // a wallet that sends atomic batches: eMode, approval, delegation, open and allowances back in one confirmation
+  const batch = useAtomicBatch(market.chain.id, account) === true
   const [busy, setBusy] = useState<string>()
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash }>()
 
@@ -282,7 +285,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       // quotes expire within a few blocks: always re-quote right before signing
       const fresh = await getQuote(quoteReq!)
       if (fresh.simulated) throw new Error('Plus de devis réel disponible')
-      const hash = await executeOpen(plan(fresh)!, setBusy)
+      const hash = batch ? await executeOpenBatch(plan(fresh)!, setBusy) : await executeOpen(plan(fresh)!, setBusy)
       setResult({ ok: true, text: hasPosition ? 'Position augmentée.' : 'Position ouverte.', hash })
       onDone()
     } catch (e) {
@@ -299,14 +302,23 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           {
             label:
               emodeId === 0
-                ? 'Sortir de l’eMode sur le compte Aave (transaction, une fois)'
-                : `Passer le compte Aave en eMode « ${reserves.emode!.label} » (transaction, une fois)`,
+                ? `Sortir de l’eMode sur le compte Aave${batch ? '' : ' (transaction, une fois)'}`
+                : `Passer le compte Aave en eMode « ${reserves.emode!.label} »${batch ? '' : ' (transaction, une fois)'}`,
           },
         ]
       : []),
-    ...(needsApprove || !user ? [{ label: `Autoriser le contrat à prendre ${amountText || 0} ${C.token.symbol} (transaction, une fois)` }] : []),
-    ...(needsDelegation ? [{ label: `Signer la délégation de crédit ${D.token.symbol} (signature, sans gas)` }] : []),
-    { label: 'Signer la transaction : flash loan, swap et dépôt en une fois' },
+    ...(batch
+      ? [
+          ...(needsApprove || !user ? [{ label: `Autoriser le contrat à prendre ${amountText || 0} ${C.token.symbol} (montant exact)` }] : []),
+          ...(needsDelegation ? [{ label: `Déléguer l’emprunt de ${D.token.symbol} au contrat (montant exact)` }] : []),
+          { label: 'Ouvrir : flash loan, swap et dépôt' },
+          ...(needsApprove || needsDelegation || !user ? [{ label: 'Remettre l’autorisation et la délégation à leur valeur' }] : []),
+        ]
+      : [
+          ...(needsApprove || !user ? [{ label: `Autoriser le contrat à prendre ${amountText || 0} ${C.token.symbol} (transaction, une fois)` }] : []),
+          ...(needsDelegation ? [{ label: `Signer la délégation de crédit ${D.token.symbol} (signature, sans gas)` }] : []),
+          { label: 'Signer la transaction : flash loan, swap et dépôt en une fois' },
+        ]),
   ]
   const liqPrice =
     proj && Number.isFinite(proj.healthFactor) ? fmtPrice(BigInt(Math.round(Number(C.price) * (1 - proj.dropToLiquidation)))) : proj ? '—' : undefined
@@ -488,8 +500,9 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           </Fold>
         )}
 
-        <Fold title="Étapes" value={`${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
+        <Fold title="Étapes" value={batch ? 'une seule confirmation' : `${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
           <Steps steps={steps} />
+          {batch && <p className="muted small">Le portefeuille envoie ces opérations en un seul lot : toutes passent ou aucune.</p>}
         </Fold>
       </Card>
     </LoopLayout>

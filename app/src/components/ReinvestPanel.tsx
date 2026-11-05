@@ -12,7 +12,7 @@ import { getQuote, type Quote } from '../lib/quotes'
 import { extraDebtForTarget, positionLeverage, project, roundSignificant, toBase, type Side } from '../lib/math'
 import { explainError } from '../lib/execute'
 import { claimRewards, rewardAction, swapFromWallet, usdValue, useClaimables, withdrawReward, type Claimable, type RewardAction } from '../lib/reinvest'
-import { buildReinvestBatch, sendReinvestBatch, swapCapital, useAtomicBatch, walletQuote, type BatchCall, type WalletSwap } from '../lib/oneClick'
+import { buildReinvestBatch, sendBatch, swapCapital, useAtomicBatch, walletQuote, type BatchCall, type WalletSwap } from '../lib/oneClick'
 import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
 import { fmtAmount, fmtDollars, fmtHf, fmtPct, fmtX } from '../lib/format'
@@ -271,7 +271,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
     setResult(undefined)
     try {
       const { calls, capital: cap } = await freshBatch()
-      const hash = await sendReinvestBatch(chainId, account, calls, setBusy)
+      const hash = await sendBatch(chainId, account, calls, setBusy)
       setResult({
         ok: true,
         text: `${plan.length} reward${plan.length > 1 ? 's' : ''} réinvesti${plan.length > 1 ? 's' : ''} : ${fmtAmount(cap + deposited, C.token.decimals)} ${C.token.symbol} ajoutés.`,

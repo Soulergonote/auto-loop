@@ -64,6 +64,14 @@ Sinon, le mode étape par étape ci-dessus reste disponible.
 
 Testé sur fork de Base le 05/11/2026 avec un compte réel qui avait 47 MORPHO à réclamer (`USER_ADDR=0x… node e2e/run.cjs reinvest r`) : réclamation, approbation, échange MORPHO → 0,0435 WETH, puis Augmenter prérempli. En un clic (portefeuille de test qui exécute le lot avec retour arrière en cas d'échec), sur une position WETH/USDC à 1,98x : réclamation, échange, levier en un lot ; collatéral +210 $, dette +103 USDC, levier inchangé, toutes les autorisations revenues à 0. Le Distributor n'a été vérifié que sur Base (même adresse annoncée par Merkl sur les autres réseaux).
 
+## Ouvrir et fermer en une confirmation
+
+Avec un portefeuille qui envoie des lots atomiques (EIP-5792, `forceAtomic` : MetaMask en compte intelligent, Ambire), « Ouvrir / augmenter » et « Fermer / réduire » partent en une seule confirmation (`openBatchCalls`, `closeBatchCalls` dans `src/lib/oneClick.ts`) :
+- ouvrir : eMode si besoin, autorisation du capital et délégation d'emprunt au contrat pour les montants exacts, `open`, puis autorisation et délégation remises à leur valeur d'avant ;
+- fermer : autorisation des aTokens exacte (0,1 % de marge sur une fermeture totale, les intérêts courent), `close`, puis autorisation remise à sa valeur.
+Les autorisations sont relues au moment du clic, le lot est simulé quand le RPC le permet, et c'est le même appel au contrat que le mode habituel. Les tests (`batchOpenClose.test.ts`) vérifient qu'aucun lot ne laisse une autorisation plus grande qu'avant, quelle que soit la valeur de départ. Sans lot atomique, le mode habituel (signature de délégation ou permit, puis transaction) reste.
+Testé sur fork de Base le 05/11/2026 : ouverture 3x de 1 WETH en un lot puis fermeture totale en un lot ; autorisation WETH, délégation USDC et autorisation aWETH à 0 après chaque lot, contrat sans solde.
+
 ## eMode
 
 Les catégories eMode du marché sont lues sur le pool (getters Aave v3.2+ : configuration, bitmaps collatéral, empruntable et LTV nulle). Pour une paire, l'interface propose les catégories où le collatéral compte avec la LTV de la catégorie et où la dette est empruntable, la meilleure LTV par défaut (ou la catégorie actuelle du compte si elle convient). Les calculs utilisent alors la LTV et le seuil de liquidation de la catégorie. L'eMode est un réglage du compte Aave que seul l'utilisateur peut changer : si besoin, une transaction `setUserEMode` part avant l'ouverture, le contrat ne change pas. La fermeture calcule avec l'eMode actuel du compte.
