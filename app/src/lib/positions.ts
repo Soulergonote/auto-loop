@@ -5,7 +5,6 @@
 import { daysLeft, type Campaign } from './merkl'
 import type { SnapReserve } from './snapshot'
 import { fmtHf } from './format'
-import { isCorrelated } from './scan'
 
 export type Holding = {
   reserve: SnapReserve
@@ -79,24 +78,6 @@ export function positionRewards(campaigns: Campaign[] | undefined, holdings: Hol
     out.push({ campaign: c, apy: reasons.length || equity <= 0 ? 0 : (c.apr * base) / equity, reasons })
   }
   return out.sort((a, b) => b.apy - a.apy)
-}
-
-/** Balances under a cent (leftover interest after a close) are not a position. */
-export const DUST = 1_000_000n
-
-/** The holding with the largest deposit or debt: the pair the position is shown and managed as. */
-export const biggest = (holdings: Holding[], key: 'suppliedBase' | 'borrowedBase') =>
-  [...holdings].sort((a, b) => (b[key] > a[key] ? 1 : b[key] < a[key] ? -1 : 0))[0]
-
-export type OpenPosition = { holdings: Holding[]; summary: PositionSummary; correlated: boolean }
-
-/** The position of an account on one market without dust, summarised; undefined when nothing is left. */
-export function openPosition(holdings: Holding[], healthFactor: number, campaigns: Campaign[] | undefined, nowMs = Date.now()): OpenPosition | undefined {
-  const kept = holdings.filter((h) => h.suppliedBase + h.borrowedBase >= DUST)
-  if (kept.length === 0) return undefined
-  const summary = summarizePosition(kept, campaigns, healthFactor, nowMs)
-  const correlated = summary.debtBase > 0n && isCorrelated(biggest(kept, 'suppliedBase').reserve, biggest(kept, 'borrowedBase').reserve)
-  return { holdings: kept, summary, correlated }
 }
 
 export type PositionSummary = {

@@ -4,13 +4,16 @@ import { getAddress, isAddress, type Address } from 'viem'
 import { MARKETS, getMarket, type Market } from '../config'
 import { daysLeft, merklQuery, type Campaign } from '../lib/merkl'
 import { snapshotQuery, userPositionQuery, type Snapshot, type UserPosition } from '../lib/snapshot'
-import { biggest, merklBalances, openPosition, userRewardsQuery, type PositionSummary } from '../lib/positions'
+import { merklBalances, summarizePosition, userRewardsQuery, type PositionSummary } from '../lib/positions'
+import { isCorrelated } from '../lib/scan'
 import { apyTone, hfTone } from '../lib/tone'
 import { fmtAmount, fmtDate, fmtDollars, fmtHf, fmtNum, fmtPct, fmtUsd, fmtX } from '../lib/format'
 import { Card, Fold, Metric, Notice, useSlow } from './ui'
 import type { Pick } from './Scanner'
 
 const READABLE = MARKETS.filter((m) => !m.soon)
+/** Balances under a cent (leftover interest after a close) are not a position. */
+const DUST = 1_000_000n
 
 type Open = { market: Market; snapshot: Snapshot; position: UserPosition; campaigns?: Campaign[]; summary: PositionSummary; correlated: boolean }
 
@@ -37,10 +40,15 @@ export function Positions({ account, onManage, onScan }: { account?: Address; on
     const snapshot = snapshots[i].data
     const raw = positions[i].data
     if (!snapshot || !raw) return []
+    const holdings = raw.holdings.filter((h) => h.suppliedBase + h.borrowedBase >= DUST)
+    if (holdings.length === 0) return []
+    const position = { ...raw, holdings }
     const marketCampaigns = campaigns[chainIds.indexOf(market.chain.id)]?.data
-    const p = openPosition(raw.holdings, raw.healthFactor, marketCampaigns)
-    if (!p) return []
-    return [{ market, snapshot, position: { ...raw, holdings: p.holdings }, campaigns: marketCampaigns, summary: p.summary, correlated: p.correlated }]
+    const summary = summarizePosition(holdings, marketCampaigns, raw.healthFactor)
+    const collateral = biggest(holdings, 'suppliedBase')
+    const debt = biggest(holdings, 'borrowedBase')
+    const correlated = summary.debtBase > 0n && isCorrelated(collateral.reserve, debt.reserve)
+    return [{ market, snapshot, position, campaigns: marketCampaigns, summary, correlated }]
   })
   const claim = chainIds
     .map((id, i) => ({ chain: markets.find((m) => m.chain.id === id)!.chain, balances: merklBalances(rewards[i].data) }))
@@ -159,6 +167,9 @@ export function Positions({ account, onManage, onScan }: { account?: Address; on
     </>
   )
 }
+
+const biggest = (holdings: UserPosition['holdings'], key: 'suppliedBase' | 'borrowedBase') =>
+  [...holdings].sort((a, b) => (b[key] > a[key] ? 1 : b[key] < a[key] ? -1 : 0))[0]
 
 function MarketPosition({ market, snapshot, position, campaigns, summary: s, correlated, onManage }: Open & { onManage: (p: Pick) => void }) {
   const { holdings, healthFactor, eModeCategory } = position
