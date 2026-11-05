@@ -195,7 +195,10 @@ footer { text-align: center; }
   .summary > .card-head, .summary .sum-item:not(.key), .summary .sum-sub, .summary .sum-extra { display: none; }
   .summary .sum-items { flex-direction: row; gap: 12px; }
   .summary .sum-value { font-size: 18px; }
-  .summary .sum-action { flex: 1; }
+  /* the button keeps half the bar; a result line under it wraps instead of pushing it out */
+  .summary .sum-action { flex: 1 1 0; min-width: 52%; }
+  .summary .sum-action .btn { white-space: normal; }
+  .summary .sum-action .success { font-size: 12px; }
   .summary .sum-reason { font-size: 12px; }
   /* tables become cards: no horizontal scrolling */
   table.cards thead { display: none; }

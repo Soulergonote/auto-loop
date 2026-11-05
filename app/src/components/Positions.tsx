@@ -125,7 +125,13 @@ export function Positions({ account, onManage, onScan }: { account?: Address; on
       </Card>
 
       {open.map((x) => (
-        <MarketPosition key={x.market.id} {...x} onManage={onManage} />
+        <MarketPosition
+          key={x.market.id}
+          {...x}
+          onManage={onManage}
+          // rewards are claimed by the connected wallet only, not for an address typed in read-only
+          canReinvest={!!account && user === account && claim.some((c) => c.chain.id === x.market.chain.id && c.balances.some((b) => b.claimable > 0))}
+        />
       ))}
 
       {claim.length > 0 && user && (
@@ -171,7 +177,16 @@ export function Positions({ account, onManage, onScan }: { account?: Address; on
 const biggest = (holdings: UserPosition['holdings'], key: 'suppliedBase' | 'borrowedBase') =>
   [...holdings].sort((a, b) => (b[key] > a[key] ? 1 : b[key] < a[key] ? -1 : 0))[0]
 
-function MarketPosition({ market, snapshot, position, campaigns, summary: s, correlated, onManage }: Open & { onManage: (p: Pick) => void }) {
+function MarketPosition({
+  market,
+  snapshot,
+  position,
+  campaigns,
+  summary: s,
+  correlated,
+  onManage,
+  canReinvest,
+}: Open & { onManage: (p: Pick) => void; canReinvest: boolean }) {
   const { holdings, healthFactor, eModeCategory } = position
   const emode = snapshot.emodes.find((c) => c.id === eModeCategory)
   const collateral = biggest(holdings, 'suppliedBase')
@@ -179,25 +194,30 @@ function MarketPosition({ market, snapshot, position, campaigns, summary: s, cor
   const excluded = s.campaigns.filter((c) => c.reasons.length > 0)
   const paying = s.campaigns.filter((c) => c.apy > 0)
   const tone = s.debtBase > 0n ? hfTone(healthFactor, correlated) : undefined
+  const manage = (tab?: 'reinvest') =>
+    onManage({
+      marketId: market.id,
+      collateral: collateral.reserve.token.address,
+      debt: debt.reserve.token.address,
+      emode: eModeCategory,
+      leverage: s.leverage,
+      tab,
+    })
   return (
     <Card
       title={market.label}
       aside={
         s.debtBase > 0n && (
-          <button
-            className="btn"
-            onClick={() =>
-              onManage({
-                marketId: market.id,
-                collateral: collateral.reserve.token.address,
-                debt: debt.reserve.token.address,
-                emode: eModeCategory,
-                leverage: s.leverage,
-              })
-            }
-          >
-            Gérer
-          </button>
+          <div className="actions">
+            {canReinvest && (
+              <button className="btn" onClick={() => manage('reinvest')}>
+                Réinvestir
+              </button>
+            )}
+            <button className="btn" onClick={() => manage()}>
+              Gérer
+            </button>
+          </div>
         )
       }
     >

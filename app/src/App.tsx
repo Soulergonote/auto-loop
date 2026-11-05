@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
-import type { Address } from 'viem'
+import { formatUnits, type Address } from 'viem'
 import {
   DEFAULT_COLLATERAL_SYMBOLS,
   DEFAULT_DEBT_SYMBOLS,
@@ -21,6 +21,8 @@ import { eligibleEModes, useEModeCategories, useMarket, useReserveTokens, withEM
 import { useCampaigns } from './lib/merkl'
 import { fmtAddress, fmtDate, fmtPct, fmtPrice } from './lib/format'
 import { WINDOWS, useRateAverages, type Window } from './lib/rateHistory'
+import { useClaimables } from './lib/reinvest'
+import { ReinvestPanel } from './components/ReinvestPanel'
 import { AggregatorPicker, Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary } from './components/ui'
 import { OpenPanel } from './components/OpenPanel'
 import { ClosePanel } from './components/ClosePanel'
@@ -133,7 +135,7 @@ export function App() {
     collateral: Address
     debt: Address
     /** set when the pair comes from the scanner: eMode and leverage to start the open panel with */
-    seed?: { emode: number; leverage: number; nonce: number }
+    seed?: { emode: number; leverage: number; tab?: 'reinvest'; nonce: number }
   }>()
 
   const pair = useMemo(() => {
@@ -156,7 +158,7 @@ export function App() {
   }
   function openPick(p: Pick) {
     chooseMarket(p.marketId)
-    setPicked({ market: p.marketId, collateral: p.collateral, debt: p.debt, seed: { emode: p.emode, leverage: p.leverage, nonce: Date.now() } })
+    setPicked({ market: p.marketId, collateral: p.collateral, debt: p.debt, seed: { emode: p.emode, leverage: p.leverage, tab: p.tab, nonce: Date.now() } })
     setView('loop')
     window.scrollTo({ top: 0 })
   }
@@ -340,11 +342,13 @@ type PairViewProps = {
   selectors: ReactNode
   common: ReactNode
   notes: ReactNode
-  seed?: { emode: number; leverage: number }
+  seed?: { emode: number; leverage: number; tab?: 'reinvest' }
 }
 
 function PairView({ market: m, collateral, debt, nativeToken, account, aggregator, selectors, common, notes, seed }: PairViewProps) {
-  const [tab, setTab] = useState<'open' | 'close'>('open')
+  const [tab, setTab] = useState<'open' | 'close' | 'reinvest'>(seed?.tab ?? 'open')
+  // filled by the reinvest flow's last step: "Augmenter" with the capital it gained
+  const [augment, setAugment] = useState<{ emode: number; leverage: number; amount: string }>()
   const market = useMarket(m, collateral, debt, account, nativeToken)
   const emodes = useEModeCategories(m)
   const incentives = useCampaigns(m)
@@ -352,6 +356,8 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
   // closing works inside the account's current eMode, if it applies to the pair
   const currentEMode = r && market.user ? eligibleEModes(emodes, r.collateral, r.debt).find((c) => c.id === market.user!.eModeCategory) : undefined
 
+  const { claimables } = useClaimables(m.chain.id, account)
+  const canReinvest = !!account && (claimables.length > 0 || tab === 'reinvest')
   const averages = useRateAverages(m.chain.id, m.pool, [collateral.address, debt.address])
   const natives = r ? [r.collateral.native, r.debt.native].filter((n) => n !== undefined) : []
   const nativeSince = natives.length ? Math.min(...natives.map((n) => n.since)) : undefined
@@ -417,6 +423,7 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
           options={[
             { value: 'open', label: 'Ouvrir / augmenter' },
             { value: 'close', label: 'Fermer / réduire' },
+            ...(canReinvest ? [{ value: 'reinvest' as const, label: 'Réinvestir' }] : []),
           ]}
         />
       </div>
@@ -440,11 +447,33 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
         {head}
       </LoopLayout>
     )
+  if (tab === 'reinvest')
+    return (
+      <ReinvestPanel
+        reserves={r}
+        user={market.user}
+        account={account}
+        aggregator={aggregator}
+        common={common}
+        head={head}
+        onAugment={(capital, leverage) => {
+          setAugment({
+            emode: market.user?.eModeCategory ?? 0,
+            leverage: leverage ?? 2,
+            amount: formatUnits(capital, r.collateral.token.decimals),
+          })
+          // the wallet now holds the collateral the flow brought: read its balance again before the "Augmenter" checks
+          void market.refetchUser()
+          setTab('open')
+          window.scrollTo({ top: 0 })
+        }}
+      />
+    )
   return tab === 'open' ? (
     <OpenPanel
       reserves={r}
       emodes={emodes}
-      seed={seed}
+      seed={augment ?? seed}
       user={market.user}
       account={account}
       aggregator={aggregator}

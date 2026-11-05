@@ -4,14 +4,55 @@
 //   node e2e/run.cjs reduce r2      reduce the position to 2x (target leverage slider)
 //   node e2e/run.cjs close fermer   close everything
 //   node e2e/run.cjs deploy deployer deploy the contract from the test wallet with the app's button
+//   USER_ADDR=0x… node e2e/run.cjs reinvest rei   claim that account's Merkl rewards, swap them, open "Augmenter"
+// USER_ADDR=0x… acts as that account (impersonated on anvil, funded for gas); Merkl's API is fetched from node
+// (its CORS only allows the deployed site).
 // EXECUTOR=0x… preloads an executor as if deployed from this browser (app built without VITE_EXECUTORS).
 // Writes <prefix>-avant.png / <prefix>-apres.png and prints the notices. Needs playwright (NODE_PATH=$(npm root -g)).
 const { chromium } = require('playwright')
 const [, , mode, outPrefix] = process.argv
-const U = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+const U = process.env.USER_ADDR || '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+const anvil = async (method, params) =>
+  (
+    await fetch('http://127.0.0.1:8545', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    })
+  ).json()
 ;(async () => {
+  if (process.env.USER_ADDR) {
+    await anvil('anvil_impersonateAccount', [U])
+    await anvil('anvil_setBalance', [U, '0x56BC75E2D63100000'])
+  }
   const browser = await chromium.launch()
-  const page = await browser.newPage({ viewport: { width: 1100, height: 1500 } })
+  const page = await browser.newPage(
+    process.env.MOBILE
+      ? { viewport: { width: 390, height: 1400 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
+      : { viewport: { width: 1100, height: 1500 } },
+  )
+  // anvil forwards eth_getLogs (7/30-day rates) upstream, where public RPCs rate-limit them: they hang for minutes and
+  // slow the whole fork. Fail them at once; the page then just shows no averages.
+  await page.route('http://127.0.0.1:8545/**', (route) => {
+    const body = route.request().postData() ?? ''
+    if (!body.includes('eth_getLogs')) return route.continue()
+    const one = (r) => ({ jsonrpc: '2.0', id: r.id, error: { code: -32005, message: 'getLogs disabled in e2e' } })
+    const req = JSON.parse(body)
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify(Array.isArray(req) ? req.map(one) : one(req)),
+    })
+  })
+  await page.route('https://api.merkl.xyz/**', async (route) => {
+    try {
+      const r = await fetch(route.request().url())
+      await route.fulfill({ status: r.status, body: await r.text(), headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } })
+    } catch {
+      await route.abort()
+    }
+  })
   page.on('console', (m) => {
     if (m.type() === 'error') console.log('console:', m.text().slice(0, 300))
   })
@@ -59,6 +100,7 @@ const U = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
     console.log('saved:', await page.evaluate(() => localStorage.getItem('auto-loop.executors')))
     return browser.close()
   }
+  if (mode === 'reinvest') return reinvest(page, browser)
   // AGG=Velora|KyberSwap forces one aggregator instead of the best-price comparison
   if (mode.startsWith('close') || mode === 'reduce') await page.getByRole('radio', { name: 'Fermer / réduire' }).click()
   // the aggregator lives in the collapsed "Réglages" block
@@ -104,3 +146,49 @@ const U = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
   }
   await browser.close()
 })()
+
+async function reinvest(page, browser) {
+  await page.getByRole('radio', { name: 'Réinvestir' }).click({ timeout: 60000 })
+  const btn = page.locator('button.btn.primary')
+  const log = async (tag) => {
+    console.log(tag, 'button:', await btn.textContent(), 'enabled:', await btn.isEnabled())
+    console.log('  reason:', (await page.locator('.sum-reason').allTextContents()).join(' | '))
+    console.log('  summary:', (await page.locator('.sum-item').allInnerTexts()).map((t) => t.replace(/\n/g, ' ')).join(' | '))
+    console.log('  notices:', (await page.locator('.notice, .success').allTextContents()).join(' | '))
+    for (const v of globalThis.__inflight?.values() ?? []) console.log('  in flight', Date.now() - v.t0, 'ms', v.methods)
+  }
+  if (process.env.SLIP) {
+    await page.locator('summary', { hasText: 'Réglages' }).click()
+    await page.getByRole('radio', { name: process.env.SLIP }).click()
+  }
+  for (let step = 0; step < 8; step++) {
+    // wait for the button to be ready (rewards read, quote fetched)
+    for (let i = 0; i < 150 && !(await btn.isEnabled()); i++) await page.waitForTimeout(1000)
+    await page.waitForTimeout(1500)
+    await page.screenshot({ path: `${outPrefix}-${step}.png`, fullPage: true })
+    await log(`step ${step}`)
+    const text = await btn.textContent()
+    if (!(await btn.isEnabled())) break
+    await btn.click()
+    if (/Augmenter la position/.test(text)) {
+      await page.waitForTimeout(8000)
+      console.log('open tab capital:', await page.locator('input[inputmode=decimal]').inputValue())
+      console.log('open tab leverage:', await page.locator('input[type=range]').first().inputValue())
+      console.log('open tab notices:', (await page.locator('.notice').allTextContents()).join(' | '), '/ button:', await btn.textContent())
+      await page.screenshot({ path: `${outPrefix}-augmenter.png`, fullPage: true })
+      break
+    }
+    // busy labels end with "…" (simulation, wallet, inclusion)
+    for (let i = 0; i < 300; i++) {
+      await page.waitForTimeout(1000)
+      const t = await btn.textContent()
+      if (i % 10 === 0) console.log('  ', i, 's:', t)
+      if (!t.endsWith('…') && i > 2) break
+      // automine makes no block after the transaction's own: when the app's first receipt poll came before that block
+      // was done (a swap reads many pool slots from the fork), it waits for a next block forever. A live chain has one.
+      if (i % 5 === 4) await anvil('evm_mine', [])
+    }
+  }
+  console.log('wallet calls:', [...new Set(await page.evaluate(() => window.__calls))].join(','))
+  await browser.close()
+}

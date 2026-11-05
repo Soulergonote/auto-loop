@@ -46,6 +46,15 @@ Les APY comptent aussi le rendement propre des tokens à rendement (wstETH, weET
 
 Pour ne pas ouvrir une boucle sur un pic de taux, la Boucle montre la moyenne sur 7 et 30 jours des taux de dépôt et d'emprunt de la paire (bloc « Taux Aave »), l'APY net de la boucle à ces taux moyens (bloc « Risques ») et un bandeau ambre quand le taux d'emprunt dépasse 1,5 fois sa moyenne sur 30 jours et d'au moins un point (idem pour un rendement de dépôt en pic). Source : les événements `ReserveDataUpdated` du pool, qui portent les index de la réserve à chaque action. Le dernier événement avant la date de début donne l'index d'alors, `getReserveNormalizedIncome` / `getReserveNormalizedVariableDebt` celui d'aujourd'hui ; leur rapport, annualisé, est l'APY moyen (`src/lib/rateHistory.ts`). Il faut un RPC qui garde les logs de la période : PublicNode ne garde qu'environ un jour sur Ethereum, Arbitrum, Optimism, BNB et Linea, le RPC public suivant de la chaîne prend alors le relais ; sans historique lisible, la moyenne ne s'affiche pas.
 
+## Réclamer et réinvestir les rewards Merkl
+
+Onglet « Réinvestir » de la Boucle (et bouton « Réinvestir » d'une position quand Merkl doit des rewards sur son réseau). Chaque étape est une transaction signée depuis le portefeuille, sans contrat nouveau ni autorisation durable (`src/lib/reinvest.ts`, `src/components/ReinvestPanel.tsx`) :
+1. réclamer sur le Distributor de Merkl (`0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae`), une transaction pour tous les tokens du réseau. Le montant réclamable est le cumul de l'arbre moins le `claimed` lu on-chain sur le Distributor (l'API Merkl a des heures de retard) ;
+2. pour chaque reward : l'aToken du collatéral est déjà du collatéral ; le collatéral lui-même devient du capital ; l'aToken d'une autre réserve est retiré d'Aave puis échangé ; tout autre token est échangé en collatéral par l'agrégateur, depuis le portefeuille (approbation du montant exact au routeur, minimum du devis vérifié sur le solde reçu). Moins de 1 $ ou prix inconnu : le token reste dans le portefeuille ;
+3. « Augmenter la position » : l'onglet Ouvrir / augmenter s'ouvre avec ce capital et le levier qu'avait la position.
+
+Testé sur fork de Base le 05/11/2026 avec un compte réel qui avait 47 MORPHO à réclamer (`USER_ADDR=0x… node e2e/run.cjs reinvest r`) : réclamation, approbation, échange MORPHO → 0,0435 WETH, puis Augmenter prérempli. Le Distributor n'a été vérifié que sur Base (même adresse annoncée par Merkl sur les autres réseaux).
+
 ## eMode
 
 Les catégories eMode du marché sont lues sur le pool (getters Aave v3.2+ : configuration, bitmaps collatéral, empruntable et LTV nulle). Pour une paire, l'interface propose les catégories où le collatéral compte avec la LTV de la catégorie et où la dette est empruntable, la meilleure LTV par défaut (ou la catégorie actuelle du compte si elle convient). Les calculs utilisent alors la LTV et le seuil de liquidation de la catégorie. L'eMode est un réglage du compte Aave que seul l'utilisateur peut changer : si besoin, une transaction `setUserEMode` part avant l'ouverture, le contrat ne change pas. La fermeture calcule avec l'eMode actuel du compte.

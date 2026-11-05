@@ -36,7 +36,8 @@ type Props = {
   /** market card and open / close tabs, at the top of the left column */
   head: ReactNode
   /** eMode and leverage to start with (pair picked in the scanner) */
-  seed?: { emode: number; leverage: number }
+  /** from the scanner, the positions or the reinvest flow; amount = capital to fill in, as typed text */
+  seed?: { emode: number; leverage: number; amount?: string }
 }
 
 export function OpenPanel({ reserves: base, emodes, user, account, aggregator, onDone, seed, common, head }: Props) {
@@ -56,7 +57,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   )
   const { market, collateral: C, debt: D } = reserves
   const executor = market.executor
-  const [amountText, setAmountText] = useState('1')
+  const [amountText, setAmountText] = useState(seed?.amount ?? '1')
   const [leverage, setLeverage] = useState(seed ? Math.floor(seed.leverage * 20) / 20 : 2)
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
   const [horizonText, setHorizon] = useState('90')
