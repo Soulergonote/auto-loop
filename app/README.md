@@ -53,7 +53,16 @@ Onglet « Réinvestir » de la Boucle (et bouton « Réinvestir » d'une positio
 2. pour chaque reward : l'aToken du collatéral est déjà du collatéral ; le collatéral lui-même devient du capital ; l'aToken d'une autre réserve est retiré d'Aave puis échangé ; tout autre token est échangé en collatéral par l'agrégateur, depuis le portefeuille (approbation du montant exact au routeur, minimum du devis vérifié sur le solde reçu). Moins de 1 $ ou prix inconnu : le token reste dans le portefeuille ;
 3. « Augmenter la position » : l'onglet Ouvrir / augmenter s'ouvre avec ce capital et le levier qu'avait la position.
 
-Testé sur fork de Base le 05/11/2026 avec un compte réel qui avait 47 MORPHO à réclamer (`USER_ADDR=0x… node e2e/run.cjs reinvest r`) : réclamation, approbation, échange MORPHO → 0,0435 WETH, puis Augmenter prérempli. Le Distributor n'a été vérifié que sur Base (même adresse annoncée par Merkl sur les autres réseaux).
+**En un clic** (portefeuille qui envoie un lot atomique, EIP-5792 `wallet_sendCalls` avec `forceAtomic` : MetaMask en compte intelligent, Ambire ; position à reprendre sur la paire ; eMode du compte compatible) : toutes les étapes partent en une confirmation, toutes passent ou aucune (`src/lib/oneClick.ts`). Garde-fous :
+- le calldata de chaque échange est relu avant signature (`src/lib/swapCalldata.ts`, Velora et KyberSwap) : mêmes tokens, montant vendu exact (et jamais plus tiré par le routeur), sortie payée au portefeuille, aucun frais, minimum au moins celui de l'app ; sinon le devis est refusé. Ce contrôle vaut aussi pour le mode étape par étape ;
+- le capital remis au contrat est la somme de ces minimums : si un échange rend moins, le contrat ne peut pas prendre le capital et tout le lot est annulé ;
+- chaque autorisation (routeur, contrat, délégation de crédit) est du montant exact et revient à sa valeur d'avant juste après usage (0 le plus souvent) ; pour les tokens type USDT, passage par 0 ;
+- devis, autorisations et levier recalculés au clic ; LTV projetée au pire cas vérifiée ; simulation du lot (`eth_simulateV1`) quand le RPC la permet, le portefeuille simule de son côté ;
+- le contrat n'a pas changé : il ne vérifie toujours que son propre échange et n'agit que pour l'adresse qui signe.
+
+Sinon, le mode étape par étape ci-dessus reste disponible.
+
+Testé sur fork de Base le 05/11/2026 avec un compte réel qui avait 47 MORPHO à réclamer (`USER_ADDR=0x… node e2e/run.cjs reinvest r`) : réclamation, approbation, échange MORPHO → 0,0435 WETH, puis Augmenter prérempli. En un clic (portefeuille de test qui exécute le lot avec retour arrière en cas d'échec), sur une position WETH/USDC à 1,98x : réclamation, échange, levier en un lot ; collatéral +210 $, dette +103 USDC, levier inchangé, toutes les autorisations revenues à 0. Le Distributor n'a été vérifié que sur Base (même adresse annoncée par Merkl sur les autres réseaux).
 
 ## eMode
 

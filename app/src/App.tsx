@@ -451,6 +451,8 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
     return (
       <ReinvestPanel
         reserves={r}
+        emode={currentEMode}
+        onDone={market.refetchUser}
         user={market.user}
         account={account}
         aggregator={aggregator}

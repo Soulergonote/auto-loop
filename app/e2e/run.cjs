@@ -57,37 +57,76 @@ const anvil = async (method, params) =>
     if (m.type() === 'error') console.log('console:', m.text().slice(0, 300))
   })
   if (process.env.EXECUTOR) await page.addInitScript((a) => localStorage.setItem('auto-loop.executors', JSON.stringify({ base: a })), process.env.EXECUTOR)
-  await page.addInitScript((U) => {
-    let id = 0
-    const rpc = async (method, params) => {
-      const r = await fetch('http://127.0.0.1:8545', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params: params ?? [] }),
-      })
-      const j = await r.json()
-      if (j.error) {
-        const e = new Error(j.error.message)
-        e.code = j.error.code
-        e.data = j.error.data
-        throw e
+  await page.addInitScript(
+    ([U, BATCH]) => {
+      let id = 0
+      const rpc = async (method, params) => {
+        const r = await fetch('http://127.0.0.1:8545', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params: params ?? [] }),
+        })
+        const j = await r.json()
+        if (j.error) {
+          const e = new Error(j.error.message)
+          e.code = j.error.code
+          e.data = j.error.data
+          throw e
+        }
+        return j.result
       }
-      return j.result
-    }
-    window.__calls = []
-    window.ethereum = {
-      isMetaMask: true,
-      on() {},
-      removeListener() {},
-      async request({ method, params }) {
-        window.__calls.push(method)
-        if (method === 'eth_requestAccounts' || method === 'eth_accounts') return [U]
-        if (method === 'eth_chainId') return '0x2105'
-        if (method === 'wallet_switchEthereumChain' || method === 'wallet_requestPermissions') return null
-        return rpc(method, params)
-      },
-    }
-  }, U)
+      window.__calls = []
+      window.ethereum = {
+        isMetaMask: true,
+        on() {},
+        removeListener() {},
+        async request({ method, params }) {
+          window.__calls.push(method)
+          if (method === 'eth_requestAccounts' || method === 'eth_accounts') return [U]
+          if (method === 'eth_chainId') return '0x2105'
+          if (method === 'wallet_switchEthereumChain' || method === 'wallet_requestPermissions') return null
+          // BATCH=1: an EIP-5792 wallet that sends a batch atomically (the calls one by one, all undone if one fails)
+          if (method === 'wallet_getCapabilities') {
+            if (!BATCH) throw Object.assign(new Error('Method not supported'), { code: 4200 })
+            return { '0x2105': { atomic: { status: 'supported' } } }
+          }
+          if (method === 'wallet_sendCalls') {
+            const { calls } = params[0]
+            window.__batch = calls.length
+            const snap = await rpc('evm_snapshot')
+            const receipts = []
+            let ok = true
+            for (const c of calls) {
+              const hash = await rpc('eth_sendTransaction', [{ from: U, to: c.to, data: c.data, value: c.value }]).catch(() => null)
+              let r = null
+              for (let i = 0; hash && !r && i < 120; i++) {
+                r = await rpc('eth_getTransactionReceipt', [hash])
+                if (!r) {
+                  await new Promise((res) => setTimeout(res, 1000))
+                  if (i % 5 === 4) await rpc('evm_mine')
+                }
+              }
+              if (!r || r.status !== '0x1') {
+                ok = false
+                break
+              }
+              receipts.push(r)
+            }
+            if (!ok) await rpc('evm_revert', [snap])
+            const id = '0x' + Date.now().toString(16).padStart(64, '0')
+            window.__bundles = { ...window.__bundles, [id]: { ok, receipts: ok ? receipts : [] } }
+            return { id }
+          }
+          if (method === 'wallet_getCallsStatus') {
+            const b = window.__bundles?.[params[0]]
+            return { version: '2.0.0', id: params[0], chainId: '0x2105', atomic: true, status: b.ok ? 200 : 500, receipts: b.receipts }
+          }
+          return rpc(method, params)
+        },
+      }
+    },
+    [U, !!process.env.BATCH],
+  )
   await page.goto(process.env.APP_URL || 'http://localhost:5173/')
   await page.getByText('Connecter le portefeuille').click()
   await page.waitForSelector('.summary', { timeout: 30000 })
@@ -161,6 +200,7 @@ async function reinvest(page, browser) {
     await page.locator('summary', { hasText: 'Réglages' }).click()
     await page.getByRole('radio', { name: process.env.SLIP }).click()
   }
+  if (process.env.OPEN_STEPS) await page.locator('summary', { hasText: 'Étapes' }).click()
   for (let step = 0; step < 8; step++) {
     // wait for the button to be ready (rewards read, quote fetched)
     for (let i = 0; i < 150 && !(await btn.isEnabled()); i++) await page.waitForTimeout(1000)
