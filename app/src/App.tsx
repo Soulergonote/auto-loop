@@ -20,6 +20,7 @@ import {
 import { eligibleEModes, useEModeCategories, useMarket, useReserveTokens, withEMode, withIncentives } from './lib/useMarket'
 import { useCampaigns } from './lib/merkl'
 import { fmtAddress, fmtDate, fmtPct, fmtPrice } from './lib/format'
+import { WINDOWS, useRateAverages, type Window } from './lib/rateHistory'
 import { AggregatorPicker, Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary } from './components/ui'
 import { OpenPanel } from './components/OpenPanel'
 import { ClosePanel } from './components/ClosePanel'
@@ -351,6 +352,7 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
   // closing works inside the account's current eMode, if it applies to the pair
   const currentEMode = r && market.user ? eligibleEModes(emodes, r.collateral, r.debt).find((c) => c.id === market.user!.eModeCategory) : undefined
 
+  const averages = useRateAverages(m.chain.id, m.pool, [collateral.address, debt.address])
   const natives = r ? [r.collateral.native, r.debt.native].filter((n) => n !== undefined) : []
   const nativeSince = natives.length ? Math.min(...natives.map((n) => n.since)) : undefined
 
@@ -388,16 +390,19 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
                       {fmtPct(x.supplyApy)}
                       {x.native && <span className="muted"> + {fmtPct(x.native.apy)} token</span>}
                       {x.supplyRewardApr > 0 && <span className="reward"> + {fmtPct(x.supplyRewardApr)} Merkl</span>}
+                      <Averages values={averages.data?.get(x.token.address.toLowerCase())?.supply} pending={averages.isPending} />
                     </td>
                     <td data-label="APY emprunt">
                       {fmtPct(x.borrowApy)}
                       {x.native && <span className="muted"> + {fmtPct(x.native.apy)} token</span>}
                       {x.borrowRewardApr > 0 && <span className="reward"> − {fmtPct(x.borrowRewardApr)} Merkl</span>}
+                      <Averages values={averages.data?.get(x.token.address.toLowerCase())?.borrow} pending={averages.isPending} />
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            <p className="muted small">Moyennes 7 j et 30 j : hausse des index Aave sur la période, annualisée.</p>
             {nativeSince !== undefined && (
               <p className="muted small">« token » : rendement propre du token, hausse de son taux de change depuis le {fmtDate(nativeSince)}, annualisée.</p>
             )}
@@ -458,4 +463,16 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
       onDone={market.refetchUser}
     />
   )
+}
+
+/** Second line of a rate cell: its 7- and 30-day averages, a skeleton while they are read, nothing if unreadable. */
+function Averages({ values, pending }: { values?: Partial<Record<Window, number>>; pending: boolean }) {
+  if (pending)
+    return (
+      <div>
+        <Skel w={8} />
+      </div>
+    )
+  if (!values || WINDOWS.every((w) => values[w] === undefined)) return null
+  return <div className="muted small">{WINDOWS.map((w) => `${w} j ${values[w] !== undefined ? fmtPct(values[w]!) : '—'}`).join(' · ')}</div>
 }

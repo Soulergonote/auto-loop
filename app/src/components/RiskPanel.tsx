@@ -1,6 +1,7 @@
 import { breakEvenBorrowApy, daysToLiquidationByInterest, hfAfterDays, hfAfterDrop } from '../lib/economics'
 import { fmtHf, fmtPct } from '../lib/format'
-import { hfTone } from '../lib/tone'
+import { apyTone, hfTone } from '../lib/tone'
+import { WINDOWS, type Window } from '../lib/rateHistory'
 import { Fold } from './ui'
 
 const DROPS = [0.01, 0.02, 0.05, 0.1]
@@ -18,10 +19,25 @@ type Props = {
   debtNativeApy?: number
   rewardsApy: number
   correlated: boolean
+  /** net APY today, and priced on the 7- and 30-day average Aave rates when they could be read */
+  apy?: number
+  averageApy?: Partial<Record<Window, number>>
 }
 
 /** What would hurt the loop: a price move, a rate rise, or simply time while interest accrues. */
-export function RiskPanel({ collateral, debt, healthFactor, leverage, supplyApy, borrowApy, debtNativeApy = 0, rewardsApy, correlated }: Props) {
+export function RiskPanel({
+  collateral,
+  debt,
+  healthFactor,
+  leverage,
+  supplyApy,
+  borrowApy,
+  debtNativeApy = 0,
+  rewardsApy,
+  correlated,
+  apy,
+  averageApy = {},
+}: Props) {
   const hfClass = (hf: number) => hfTone(hf, correlated)
   if (!Number.isFinite(healthFactor)) return null
   // the thresholds are on the Aave borrow rate: the debt's own yield is already a cost on top of it
@@ -65,6 +81,20 @@ export function RiskPanel({ collateral, debt, healthFactor, leverage, supplyApy,
               sans Merkl : {fmtPct(zeroWithout)}
             </td>
           </tr>
+          {apy !== undefined && WINDOWS.some((w) => averageApy[w] !== undefined) && (
+            <>
+              <tr>
+                <th colSpan={DROPS.length + 1}>APY net aux taux moyens d’Aave (aujourd’hui {fmtPct(apy)})</th>
+              </tr>
+              <tr>
+                {WINDOWS.map((w, i) => (
+                  <td key={w} colSpan={i === 0 ? 2 : 3} className={apyTone(averageApy[w])}>
+                    sur {w} j : {averageApy[w] !== undefined ? fmtPct(averageApy[w]!) : 'non lu'}
+                  </td>
+                ))}
+              </tr>
+            </>
+          )}
           <tr>
             <th colSpan={DROPS.length + 1}>Health factor avec le temps, aux taux actuels, sans réclamer les rewards</th>
           </tr>

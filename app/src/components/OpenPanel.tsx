@@ -11,6 +11,7 @@ import { useQuote } from '../lib/useQuote'
 import { useDebounced } from '../lib/useDebounced'
 import { getQuote } from '../lib/quotes'
 import { loopNativeApy } from '../lib/nativeYield'
+import { WINDOWS, isRateSpike, useRateAverages } from '../lib/rateHistory'
 import { extraDebtForTarget, maxLeverage, netApy, positionLeverage, project, roundSignificant, toBase, EMPTY_ACCOUNT, NO_POSITION } from '../lib/math'
 import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
 import { executeOpen, explainError, openArgs, type OpenPlan } from '../lib/execute'
@@ -60,6 +61,9 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
   const [horizonText, setHorizon] = useState('90')
   const horizon = Number(horizonText)
+  const averages = useRateAverages(market.chain.id, market.pool, [C.token.address, D.token.address]).data
+  const avgC = averages?.get(C.token.address.toLowerCase())
+  const avgD = averages?.get(D.token.address.toLowerCase())
   const gasPrice = useGasPrice({ chainId: market.chain.id, query: { refetchInterval: 30_000 } })
   const [busy, setBusy] = useState<string>()
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash }>()
@@ -164,6 +168,14 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const nativeApy = loopLev !== undefined ? loopNativeApy(loopLev, C.native, D.native) : 0
   const ratesApy = loopLev !== undefined ? netApy(loopLev, C.supplyApy, D.borrowApy) + nativeApy : undefined
   const apy = ratesApy !== undefined ? ratesApy + rewardsApy : undefined
+  // the same loop priced on the 7- and 30-day average Aave rates instead of today's
+  const averageApy = Object.fromEntries(
+    WINDOWS.flatMap((w) => {
+      const supply = avgC?.supply[w]
+      const borrow = avgD?.borrow[w]
+      return loopLev !== undefined && supply !== undefined && borrow !== undefined ? [[w, netApy(loopLev, supply, borrow) + nativeApy + rewardsApy]] : []
+    }),
+  )
   const apyParts = [nativeApy !== 0 && `${fmtPct(nativeApy)} token`, rewardsApy !== 0 && `${fmtPct(rewardsApy)} Merkl`].filter(Boolean)
 
   // one-off costs, and the yield once they are paid, over the planned holding time
@@ -202,6 +214,11 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           yields.map((y) => ({ apy: y.apy * toCapital, days: daysLeft(y.campaign) })),
         )
       : undefined
+  // a rate far from its own average does not last: the APY above would not either
+  if (isRateSpike(D.borrowApy, avgD?.borrow[30]))
+    warnings.push(`Emprunt ${D.token.symbol} à ${fmtPct(D.borrowApy)}, contre ${fmtPct(avgD!.borrow[30]!)} en moyenne sur 30 j : taux en pic.`)
+  if (isRateSpike(C.supplyApy, avgC?.supply[30]))
+    warnings.push(`Dépôt ${C.token.symbol} à ${fmtPct(C.supplyApy)}, contre ${fmtPct(avgC!.supply[30]!)} en moyenne sur 30 j : rendement en pic.`)
   for (const c of [...pairCampaigns.supply, ...pairCampaigns.borrow].filter((c) => c.conditional))
     warnings.push(`Bonus Merkl « ${c.name} » : certaines conditions ne sont pas lisibles par l’app, à vérifier sur Merkl.`)
   for (const x of eligibility?.excluded ?? []) warnings.push(`Bonus Merkl « ${x.campaign.name} » non compté : ${x.reasons.join(', ')}.`)
@@ -440,6 +457,8 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
             debtNativeApy={D.native?.apy ?? 0}
             rewardsApy={rewardsApy}
             correlated={correlated}
+            apy={apy}
+            averageApy={averageApy}
           />
         )}
 
