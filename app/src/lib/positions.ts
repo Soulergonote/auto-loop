@@ -87,6 +87,8 @@ export type PositionSummary = {
   leverage: number
   /** Aave rates only, on equity */
   ratesApy: number
+  /** intrinsic yield of yield-bearing tokens held or owed, on equity */
+  nativeApy: number
   rewardsApy: number
   apy: number
   campaigns: CampaignOnPosition[]
@@ -101,6 +103,9 @@ export function summarizePosition(holdings: Holding[], campaigns: Campaign[] | u
   const equity = Number(equityBase)
   const yearly = holdings.reduce((s, h) => s + Number(h.suppliedBase) * h.reserve.supplyApy - Number(h.borrowedBase) * h.reserve.borrowApy, 0)
   const ratesApy = equity > 0 ? yearly / equity : NaN
+  // a yield-bearing debt grows with its exchange rate too: it costs what a supplied one earns
+  const nativeYearly = holdings.reduce((s, h) => s + (Number(h.suppliedBase) - Number(h.borrowedBase)) * (h.reserve.native?.apy ?? 0), 0)
+  const nativeApy = equity > 0 ? nativeYearly / equity : NaN
   const onPosition = positionRewards(campaigns, holdings, healthFactor, equityBase)
   const rewardsApy = onPosition.reduce((s, c) => s + c.apy, 0)
   return {
@@ -109,8 +114,9 @@ export function summarizePosition(holdings: Holding[], campaigns: Campaign[] | u
     equityBase,
     leverage: equity > 0 ? Number(collateralBase) / equity : Infinity,
     ratesApy,
+    nativeApy,
     rewardsApy,
-    apy: ratesApy + rewardsApy,
+    apy: ratesApy + nativeApy + rewardsApy,
     campaigns: onPosition,
     endingSoon: onPosition.filter((c) => c.apy > 0 && daysLeft(c.campaign, nowMs) < 7).map((c) => c.campaign),
   }

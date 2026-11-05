@@ -20,14 +20,14 @@ const LOW_CAPACITY = 50_000n * 10n ** 8n
 
 const FLAG_TAG: Record<ScanFlag, { text: string; tone?: 'good' | 'warn' }> = {
   conditional: { text: 'conditions Merkl' },
-  yieldBearing: { text: 'rendement du token en plus' },
+  nativeUnknown: { text: 'rendement du token non compté' },
   lowCapacity: { text: 'presque plein', tone: 'warn' },
 }
 
 /** Markets the app can loop on: an aggregator quotes there. */
 const SCANNABLE = MARKETS.filter((m) => !m.soon && aggregatorsFor(m.chain.id).length > 0)
 
-/** Every pair of every market, looped at a target health factor, ranked by yield (Aave rates + eligible Merkl). */
+/** Every pair of every market, looped at a target health factor, ranked by yield (Aave rates + token yield + eligible Merkl). */
 export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
   const [scope, setScope] = useState('all')
   const [hfText, setHf] = useState<(typeof HFS)[number]>('1.1')
@@ -56,7 +56,7 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
   const shown = rows.filter(
     (r) =>
       (filter === 'all' || (filter === 'stable' ? r.stable : r.correlated)) &&
-      (showNegative || r.apy > 0 || r.flags.includes('yieldBearing')) &&
+      (showNegative || r.apy > 0 || r.flags.includes('nativeUnknown')) &&
       r.capacityBase >= MIN_CAPACITY,
   )
   const loading = snapshots.filter((q) => q.isPending).length
@@ -135,6 +135,7 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
               <th>Paire</th>
               <th className="num">Levier</th>
               <th className="num">APY net</th>
+              <th className="num">dont token</th>
               <th className="num">dont Merkl</th>
               <th className="num">Capacité</th>
               <th>Fin du bonus</th>
@@ -162,6 +163,9 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
                 </td>
                 <td data-label="APY net" className={`num ${r.apy < 0 ? 'bad' : 'good'}`}>
                   <strong>{fmtPct(r.apy)}</strong>
+                </td>
+                <td data-label="dont token" className="num">
+                  {r.nativeApy !== 0 ? fmtPct(r.nativeApy) : '—'}
                 </td>
                 <td data-label="dont Merkl" className="num">
                   {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : '—'}
@@ -192,7 +196,7 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
               visible.length < 5 &&
               Array.from({ length: 5 - visible.length }, (_, i) => (
                 <tr key={`skel-${i}`}>
-                  <td className="lead" colSpan={7}>
+                  <td className="lead" colSpan={8}>
                     <Skel w={16} />
                   </td>
                 </tr>
@@ -218,8 +222,13 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
           Les rewards Merkl ne comptent que si la position y a droit à ce health factor. Les taux sont variables : l’APY change avec l’utilisation du marché.
         </p>
         <p className="muted small">
-          Non compté : le rendement propre des tokens à rendement (sUSDe, wstETH…), le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes
-          Merkl à public restreint. La capacité est le capital encore « bouclable » avant que l’actif emprunté manque de liquidité ou atteigne un plafond.
+          « dont token » est le rendement propre des tokens à rendement (wstETH, sUSDe…) : la hausse de leur taux de change depuis le dernier relevé de leur
+          adaptateur de prix Aave, annualisée, sur le collatéral moins celle d’une dette qui en a un. Sans adaptateur lisible, l’étiquette « rendement du token
+          non compté » le signale.
+        </p>
+        <p className="muted small">
+          Non compté : le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes Merkl à public restreint. La capacité est le capital encore «
+          bouclable » avant que l’actif emprunté manque de liquidité ou atteigne un plafond.
         </p>
       </Fold>
     </Card>

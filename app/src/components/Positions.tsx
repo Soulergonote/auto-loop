@@ -209,7 +209,7 @@ function MarketPosition({ market, snapshot, position, campaigns, summary: s, cor
           label="APY net"
           value={fmtPct(s.apy)}
           tone={apyTone(s.apy)}
-          sub={`${fmtDollars((Number(s.equityBase) / 1e8) * (Number.isFinite(s.apy) ? s.apy : 0))} par an`}
+          sub={`${fmtDollars((Number(s.equityBase) / 1e8) * (Number.isFinite(s.apy) ? s.apy : 0))} par an${s.nativeApy ? `, dont ${fmtPct(s.nativeApy)} token` : ''}`}
         />
       </div>
       {tone === 'bad' && (
@@ -247,6 +247,7 @@ function MarketPosition({ market, snapshot, position, campaigns, summary: s, cor
                   {h.supplied > 0n && `dépôt ${fmtPct(h.reserve.supplyApy)}`}
                   {h.supplied > 0n && h.borrowed > 0n && ' · '}
                   {h.borrowed > 0n && `emprunt ${fmtPct(h.reserve.borrowApy)}`}
+                  {h.reserve.native && <span className="muted"> + {fmtPct(h.reserve.native.apy)} token</span>}
                 </td>
               </tr>
             ))}

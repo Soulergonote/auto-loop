@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useReadContract, useReadContracts } from 'wagmi'
+import { useQuery } from '@tanstack/react-query'
 import { zeroAddress, type Address } from 'viem'
 import { poolAbi, providerAbi, oracleAbi, erc20Abi, debtTokenAbi } from '../abi'
 import { DEMO, DEMO_TOKENS, type Market, type Token } from '../config'
@@ -7,6 +8,7 @@ import { demoReserve, demoUser } from './demo'
 import { decodeReserveConfig, rayAprToApy, type ReserveConfig } from './aave'
 import type { Account, Side } from './math'
 import { headlineRewards, type Campaign } from './merkl'
+import { nativeYieldQuery, type NativeYield } from './nativeYield'
 
 export type Reserve = {
   token: Token
@@ -20,6 +22,8 @@ export type Reserve = {
   /** Merkl reward APRs (fractions), 0 when there is no campaign */
   supplyRewardApr: number
   borrowRewardApr: number
+  /** exchange-rate yield of a yield-bearing token (wstETH, sUSDe…), from its Aave price adapter */
+  native?: NativeYield
   price: bigint
   side: Side
 }
@@ -97,6 +101,8 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
     allowFailure: false,
     query: { enabled: !!oracle.data, refetchInterval: 30_000 },
   })
+  // a failed read only leaves the intrinsic yield out
+  const native = useQuery(nativeYieldQuery(chainId, DEMO ? undefined : oracle.data, [collateral.address, debt.address]))
 
   const reserves = useMemo(() => {
     if (DEMO) return { market, collateral: demoReserve(collateral), debt: demoReserve(debt), premiumBps: 5n, nativePrice: undefined }
@@ -105,6 +111,7 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
     const build = (token: Token, r: typeof rc, price: bigint): Reserve => {
       const config = decodeReserveConfig(r.configuration)
       return {
+        native: native.data?.get(token.address.toLowerCase()),
         token: { ...token, decimals: config.decimals },
         config,
         id: r.id,
@@ -126,7 +133,7 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
       premiumBps: BigInt(premium),
       nativePrice: nativeToken ? prices[2] : undefined,
     }
-  }, [reads.data, market, collateral, debt, nativeToken])
+  }, [reads.data, native.data, market, collateral, debt, nativeToken])
 
   const executor = market.executor
   const spender = executor ?? zeroAddress

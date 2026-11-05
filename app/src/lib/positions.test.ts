@@ -32,7 +32,16 @@ describe('positions', () => {
     expect(s.ratesApy).toBeCloseTo(0.03 * 5 - 0.05 * 4)
     const expected = campaignYields(campaignsForPair(campaigns, usde, usdc), 5, usde, usdc).reduce((t, y) => t + y.apy, 0)
     expect(s.rewardsApy).toBeCloseTo(expected)
+    expect(s.nativeApy).toBe(0)
     expect(s.apy).toBeCloseTo(s.ratesApy + s.rewardsApy)
+  })
+
+  it('adds the intrinsic yield of a yield-bearing collateral, and charges it on a yield-bearing debt', () => {
+    const susde = reserve(2, 'sUSDe', { supplyApy: 0, native: { apy: 0.05, since: 0 } })
+    expect(summarizePosition([hold(susde, 5000, 0), hold(usdc, 0, 4000)], [], 1.1).nativeApy).toBeCloseTo(0.25)
+    const s = summarizePosition([hold(usde, 5000, 0), hold(susde, 0, 4000)], [], 1.1)
+    expect(s.nativeApy).toBeCloseTo(-0.2)
+    expect(s.apy).toBeCloseTo(s.ratesApy - 0.2)
   })
 
   it('counts nothing for a campaign whose rules the position breaks, and says why', () => {

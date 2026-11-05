@@ -19,7 +19,7 @@ import {
 } from './config'
 import { eligibleEModes, useEModeCategories, useMarket, useReserveTokens, withEMode, withIncentives } from './lib/useMarket'
 import { useCampaigns } from './lib/merkl'
-import { fmtAddress, fmtPct, fmtPrice } from './lib/format'
+import { fmtAddress, fmtDate, fmtPct, fmtPrice } from './lib/format'
 import { AggregatorPicker, Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary } from './components/ui'
 import { OpenPanel } from './components/OpenPanel'
 import { ClosePanel } from './components/ClosePanel'
@@ -351,6 +351,9 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
   // closing works inside the account's current eMode, if it applies to the pair
   const currentEMode = r && market.user ? eligibleEModes(emodes, r.collateral, r.debt).find((c) => c.id === market.user!.eModeCategory) : undefined
 
+  const natives = r ? [r.collateral.native, r.debt.native].filter((n) => n !== undefined) : []
+  const nativeSince = natives.length ? Math.min(...natives.map((n) => n.since)) : undefined
+
   const head = (
     <>
       {notes}
@@ -383,16 +386,21 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
                     </td>
                     <td data-label="APY dépôt">
                       {fmtPct(x.supplyApy)}
+                      {x.native && <span className="muted"> + {fmtPct(x.native.apy)} token</span>}
                       {x.supplyRewardApr > 0 && <span className="reward"> + {fmtPct(x.supplyRewardApr)} Merkl</span>}
                     </td>
                     <td data-label="APY emprunt">
                       {fmtPct(x.borrowApy)}
+                      {x.native && <span className="muted"> + {fmtPct(x.native.apy)} token</span>}
                       {x.borrowRewardApr > 0 && <span className="reward"> − {fmtPct(x.borrowRewardApr)} Merkl</span>}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {nativeSince !== undefined && (
+              <p className="muted small">« token » : rendement propre du token, hausse de son taux de change depuis le {fmtDate(nativeSince)}, annualisée.</p>
+            )}
             {incentives.isError && <p className="muted small">Merkl indisponible : APY sans bonus.</p>}
           </Fold>
         )}

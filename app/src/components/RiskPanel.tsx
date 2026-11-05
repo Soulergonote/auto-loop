@@ -10,19 +10,25 @@ type Props = {
   debt: string
   healthFactor: number
   leverage: number
+  /** collateral yield: Aave rate plus the token's intrinsic yield */
   supplyApy: number
+  /** Aave borrow rate of the debt asset */
   borrowApy: number
+  /** intrinsic yield of a yield-bearing debt asset, which the debt also accrues */
+  debtNativeApy?: number
   rewardsApy: number
   correlated: boolean
 }
 
 /** What would hurt the loop: a price move, a rate rise, or simply time while interest accrues. */
-export function RiskPanel({ collateral, debt, healthFactor, leverage, supplyApy, borrowApy, rewardsApy, correlated }: Props) {
+export function RiskPanel({ collateral, debt, healthFactor, leverage, supplyApy, borrowApy, debtNativeApy = 0, rewardsApy, correlated }: Props) {
   const hfClass = (hf: number) => hfTone(hf, correlated)
   if (!Number.isFinite(healthFactor)) return null
-  const zeroWith = breakEvenBorrowApy(leverage, supplyApy, rewardsApy)
-  const zeroWithout = breakEvenBorrowApy(leverage, supplyApy)
-  const liqDays = daysToLiquidationByInterest(healthFactor, supplyApy, borrowApy)
+  // the thresholds are on the Aave borrow rate: the debt's own yield is already a cost on top of it
+  const zeroWith = breakEvenBorrowApy(leverage, supplyApy, rewardsApy) - debtNativeApy
+  const zeroWithout = breakEvenBorrowApy(leverage, supplyApy) - debtNativeApy
+  const debtGrowth = borrowApy + debtNativeApy
+  const liqDays = daysToLiquidationByInterest(healthFactor, supplyApy, debtGrowth)
   return (
     <Fold
       title="Risques"
@@ -63,11 +69,11 @@ export function RiskPanel({ collateral, debt, healthFactor, leverage, supplyApy,
             <th colSpan={DROPS.length + 1}>Health factor avec le temps, aux taux actuels, sans réclamer les rewards</th>
           </tr>
           <tr>
-            <td colSpan={2} className={hfClass(hfAfterDays(healthFactor, supplyApy, borrowApy, 30))}>
-              dans 30 j : {fmtHf(hfAfterDays(healthFactor, supplyApy, borrowApy, 30))}
+            <td colSpan={2} className={hfClass(hfAfterDays(healthFactor, supplyApy, debtGrowth, 30))}>
+              dans 30 j : {fmtHf(hfAfterDays(healthFactor, supplyApy, debtGrowth, 30))}
             </td>
-            <td colSpan={2} className={hfClass(hfAfterDays(healthFactor, supplyApy, borrowApy, 365))}>
-              dans 1 an : {fmtHf(Math.max(0, hfAfterDays(healthFactor, supplyApy, borrowApy, 365)))}
+            <td colSpan={2} className={hfClass(hfAfterDays(healthFactor, supplyApy, debtGrowth, 365))}>
+              dans 1 an : {fmtHf(Math.max(0, hfAfterDays(healthFactor, supplyApy, debtGrowth, 365)))}
             </td>
             <td className={liqDays < 365 ? 'bad' : undefined}>
               {Number.isFinite(liqDays) ? `liquidation dans ${liqDays > 3650 ? 'plus de 10 ans' : `${Math.floor(liqDays)} j`}` : 'pas d’érosion'}

@@ -10,6 +10,7 @@ import { eligibleEModes, withEMode, type EModeCategory, type Reserves, type User
 import { useQuote } from '../lib/useQuote'
 import { useDebounced } from '../lib/useDebounced'
 import { getQuote } from '../lib/quotes'
+import { loopNativeApy } from '../lib/nativeYield'
 import { extraDebtForTarget, maxLeverage, netApy, positionLeverage, project, roundSignificant, toBase, EMPTY_ACCOUNT, NO_POSITION } from '../lib/math'
 import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
 import { executeOpen, explainError, openArgs, type OpenPlan } from '../lib/execute'
@@ -159,8 +160,11 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const eligibility = proj ? eligibleForPosition(pairCampaigns, { healthFactor: proj.healthFactor, debtToken: D.variableDebtToken }) : undefined
   const yields = loopLev !== undefined && eligibility ? campaignYields(eligibility.pair, loopLev, C, D) : []
   const rewardsApy = yields.reduce((sum, y) => sum + y.apy, 0)
-  const ratesApy = loopLev !== undefined ? netApy(loopLev, C.supplyApy, D.borrowApy) : undefined
+  // the intrinsic yield of yield-bearing legs lasts like the Aave rates: it counts with them over the horizon
+  const nativeApy = loopLev !== undefined ? loopNativeApy(loopLev, C.native, D.native) : 0
+  const ratesApy = loopLev !== undefined ? netApy(loopLev, C.supplyApy, D.borrowApy) + nativeApy : undefined
   const apy = ratesApy !== undefined ? ratesApy + rewardsApy : undefined
+  const apyParts = [nativeApy !== 0 && `${fmtPct(nativeApy)} token`, rewardsApy !== 0 && `${fmtPct(rewardsApy)} Merkl`].filter(Boolean)
 
   // one-off costs, and the yield once they are paid, over the planned holding time
   const capitalBase = (debouncedInitial !== undefined ? toBase(debouncedInitial, C.side) : 0n) + position.collateralBase - position.debtBase
@@ -308,7 +312,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
         {
           label: 'APY net',
           value: apy !== undefined ? fmtPct(apy) : undefined,
-          sub: rewardsApy !== 0 && ratesApy !== undefined ? `dont ${fmtPct(rewardsApy)} Merkl` : 'taux variables, hors coûts',
+          sub: apyParts.length > 0 && ratesApy !== undefined ? `dont ${apyParts.join(', ')}` : 'taux variables, hors coûts',
           tone: apyTone(apy),
           key: true,
         },
@@ -398,10 +402,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           <Notice key={w}>{w}</Notice>
         ))}
 
-        <Fold
-          title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)} · ${fmtDays(horizon)} · ${emodeLabel}`}
-        >
+        <Fold title="Réglages" value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)} · ${fmtDays(horizon)} · ${emodeLabel}`}>
           {common}
           <div className="grid2">
             <div className="field">
@@ -434,8 +435,9 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
             debt={D.token.symbol}
             healthFactor={proj.healthFactor}
             leverage={loopLev}
-            supplyApy={C.supplyApy}
+            supplyApy={C.supplyApy + (C.native?.apy ?? 0)}
             borrowApy={D.borrowApy}
+            debtNativeApy={D.native?.apy ?? 0}
             rewardsApy={rewardsApy}
             correlated={correlated}
           />

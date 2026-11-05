@@ -35,6 +35,7 @@ export function reserve(
     borrowApy: o.borrowApy ?? 0.05,
     supplyRewardApr: 0,
     borrowRewardApr: 0,
+    native: o.native,
     price,
     side: { price, decimals: 18 },
     cashBase: o.cashBase ?? 10_000_000n * USD,

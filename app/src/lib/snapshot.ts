@@ -9,6 +9,7 @@ import { erc20Abi, oracleAbi, poolAbi, providerAbi } from '../abi'
 import type { Market, Token } from '../config'
 import { decodeReserveConfig, rayAprToApy } from './aave'
 import { toBase } from './math'
+import { readNativeYields } from './nativeYield'
 import type { EModeCategory, Reserve } from './useMarket'
 import type { Holding } from './positions'
 
@@ -77,20 +78,29 @@ export async function loadSnapshot(market: Market): Promise<Snapshot> {
     return [{ token, rd, config, price }]
   })
 
-  const amounts = await readContracts(wagmiConfig, {
-    contracts: base.flatMap(({ token, rd }) => [
-      { chainId, address: token.address, abi: erc20Abi, functionName: 'balanceOf', args: [rd.aTokenAddress] } as const,
-      { chainId, address: rd.aTokenAddress, abi: erc20Abi, functionName: 'totalSupply' } as const,
-      { chainId, address: rd.variableDebtTokenAddress, abi: erc20Abi, functionName: 'totalSupply' } as const,
-    ]),
-    allowFailure: true,
-  })
+  const [amounts, native] = await Promise.all([
+    readContracts(wagmiConfig, {
+      contracts: base.flatMap(({ token, rd }) => [
+        { chainId, address: token.address, abi: erc20Abi, functionName: 'balanceOf', args: [rd.aTokenAddress] } as const,
+        { chainId, address: rd.aTokenAddress, abi: erc20Abi, functionName: 'totalSupply' } as const,
+        { chainId, address: rd.variableDebtTokenAddress, abi: erc20Abi, functionName: 'totalSupply' } as const,
+      ]),
+      allowFailure: true,
+    }),
+    // a failed read only leaves the intrinsic yield out
+    readNativeYields(
+      chainId,
+      oracle,
+      base.map((b) => b.token.address),
+    ).catch(() => new Map()),
+  ])
 
   const reserves: SnapReserve[] = base.map(({ token, rd, config, price }, i) => {
     const side = { price, decimals: config.decimals }
     const amount = (k: number) => toBase((amounts[3 * i + k].result as bigint | undefined) ?? 0n, side)
     return {
       token,
+      native: native.get(token.address.toLowerCase()),
       id: rd.id,
       config,
       aToken: rd.aTokenAddress,

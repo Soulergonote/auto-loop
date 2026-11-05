@@ -91,10 +91,26 @@ describe('scanMarket', () => {
     const linkUsdc = rows.find((r) => r.collateral.token.symbol === 'LINK' && r.debt.token.symbol === 'USDC')!
     expect(linkUsdc.emode?.id).toBe(1)
     expect(linkUsdc.correlated).toBe(false)
-    expect(linkUsdc.flags).not.toContain('yieldBearing')
+    expect(linkUsdc.flags).not.toContain('nativeUnknown')
     const lst = rows.find((r) => r.collateral.token.symbol === 'wstETH' && r.debt.token.symbol === 'WETH')!
     expect(lst.correlated).toBe(true)
-    expect(lst.flags).toContain('yieldBearing')
+    expect(lst.flags).toContain('nativeUnknown')
+  })
+
+  it('counts the intrinsic yield of the collateral on L and of a yield-bearing debt on L - 1', () => {
+    const since = 1_700_000_000
+    const wsteth = reserve(0, 'wstETH', { price: 3600n * USD, supplyApy: 0, native: { apy: 0.03, since } })
+    const weth = reserve(1, 'WETH', { price: 3000n * USD, borrowApy: 0.02 })
+    const weeth = reserve(2, 'weETH', { price: 3200n * USD, borrowApy: 0.01, native: { apy: 0.025, since } })
+    const rows = scanMarket(snapshot([wsteth, weth, weeth], [emode(1, [0], [1, 2], 9300, 9500)]), [], { targetHf: 1.1 })
+    const onWeth = rows.find((r) => r.collateral.token.symbol === 'wstETH' && r.debt.token.symbol === 'WETH')!
+    const L = onWeth.leverage
+    expect(onWeth.nativeApy).toBeCloseTo(0.03 * L)
+    expect(onWeth.ratesApy).toBeCloseTo(-0.02 * (L - 1))
+    expect(onWeth.apy).toBeCloseTo(0.03 * L - 0.02 * (L - 1))
+    expect(onWeth.flags).not.toContain('nativeUnknown')
+    const onWeeth = rows.find((r) => r.collateral.token.symbol === 'wstETH' && r.debt.token.symbol === 'weETH')!
+    expect(onWeeth.nativeApy).toBeCloseTo(0.03 * onWeeth.leverage - 0.025 * (onWeeth.leverage - 1))
   })
 
   it('does not take EURC / USDC for a correlated, yield-bearing pair (the euro is not a yield)', () => {
@@ -103,7 +119,7 @@ describe('scanMarket', () => {
     const rows = scanMarket(snapshot([eurc, usdc], [emode(1, [0, 1], [0, 1])]), [], { targetHf: 1.5 })
     const row = rows.find((r) => r.collateral.token.symbol === 'EURC')!
     expect(row.correlated).toBe(false)
-    expect(row.flags).not.toContain('yieldBearing')
+    expect(row.flags).not.toContain('nativeUnknown')
     expect(isCorrelated(reserve(0, 'cbBTC', { price: 70_000n * USD }), reserve(1, 'WBTC', { price: 70_100n * USD }))).toBe(true)
     expect(isCorrelated(reserve(0, 'sUSDe', { price: 120_000_000n }), reserve(1, 'USDC'))).toBe(true)
     expect(isCorrelated(reserve(0, 'WETH', { price: 3000n * USD }), reserve(1, 'USDC'))).toBe(false)

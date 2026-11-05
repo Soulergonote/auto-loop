@@ -38,6 +38,10 @@ Liste dans `src/config.ts` (`MARKETS`), adresses des pools tirées de `@bgd-labs
 
 Les APY ajoutent les campagnes Merkl en cours sur Aave (`api.merkl.xyz/v4/opportunities`, sans clé) : rewards de dépôt sur l'aToken du collatéral, rewards d'emprunt sur le jeton de dette. Une campagne n'est comptée que si elle nomme l'adresse de l'aToken ou du jeton de dette ; sinon elle est ignorée. Les conditions d'éligibilité propres à certaines campagnes ne sont pas vérifiées. Si l'API ne répond pas, l'interface le dit et affiche les APY sans bonus.
 
+## Rendement propre des tokens
+
+Les APY comptent aussi le rendement propre des tokens à rendement (wstETH, weETH, cbETH, rETH, sUSDe, syrupUSDC, sDAI…), qu'Aave intègre au prix mais n'affiche pas comme un taux. Source : l'adaptateur de prix « CAPO » d'Aave de chaque token (`getSourceOfAsset` sur l'oracle), qui garde un relevé du taux de change et sa date (`getSnapshotRatio`, `getSnapshotTimestamp`). La hausse entre ce relevé et le taux actuel (`getRatio`), annualisée, donne un rendement moyen lu sur la même chaîne, sans API tierce ni nœud d'archive (`src/lib/nativeYield.ts`). Il s'ajoute sur le collatéral (× levier) et se retranche sur une dette qui en a un (× levier − 1). Un token sans adaptateur CAPO (PT Pendle, adaptateur Chainlink simple) n'a pas de valeur : le Scanner l'étiquette « rendement du token non compté » quand son prix laisse penser qu'il en a un. Relevé de moins de 7 jours : ignoré.
+
 ## eMode
 
 Les catégories eMode du marché sont lues sur le pool (getters Aave v3.2+ : configuration, bitmaps collatéral, empruntable et LTV nulle). Pour une paire, l'interface propose les catégories où le collatéral compte avec la LTV de la catégorie et où la dette est empruntable, la meilleure LTV par défaut (ou la catégorie actuelle du compte si elle convient). Les calculs utilisent alors la LTV et le seuil de liquidation de la catégorie. L'eMode est un réglage du compte Aave que seul l'utilisateur peut changer : si besoin, une transaction `setUserEMode` part avant l'ouverture, le contrat ne change pas. La fermeture calcule avec l'eMode actuel du compte.

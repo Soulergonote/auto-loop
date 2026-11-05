@@ -1,10 +1,12 @@
 /**
  * Opportunity scanner: every collateral / debt pair of a market, looped at the leverage that gives a target health
- * factor, ranked by yield on equity (Aave rates + the Merkl campaigns the position would qualify for).
+ * factor, ranked by yield on equity (Aave rates + intrinsic yield of yield-bearing tokens + the Merkl campaigns the
+ * position would qualify for).
  * Pure functions over a market snapshot, so they can be tested without a chain.
  */
 import { maxLeverage, netApy } from './math'
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, type Campaign } from './merkl'
+import { loopNativeApy } from './nativeYield'
 import { eligibleEModes, type EModeCategory } from './useMarket'
 import type { Snapshot, SnapReserve } from './snapshot'
 
@@ -56,7 +58,8 @@ export function isCorrelated(C: Pick<SnapReserve, 'price' | 'token'>, D: Pick<Sn
   return assetFamily(C) === assetFamily(D) && ratio >= 0.97 && ratio <= 1.6
 }
 
-export type ScanFlag = 'conditional' | 'yieldBearing' | 'lowCapacity'
+/** nativeUnknown: priced above its base like a yield-bearing token, but its adapter gives no rate to count */
+export type ScanFlag = 'conditional' | 'nativeUnknown' | 'lowCapacity'
 
 export type ScanRow = {
   marketId: string
@@ -65,8 +68,9 @@ export type ScanRow = {
   emode?: EModeCategory
   leverage: number
   healthFactor: number
-  /** yield on equity: Aave rates, then Merkl campaigns the position qualifies for */
+  /** yield on equity: Aave rates, intrinsic yield of yield-bearing legs, Merkl campaigns the position qualifies for */
   ratesApy: number
+  nativeApy: number
   rewardsApy: number
   apy: number
   /** campaigns counted in rewardsApy */
@@ -137,6 +141,7 @@ export function scanMarket(snapshot: Snapshot, campaigns: Campaign[] | undefined
         if (!(leverage >= MIN_SCAN_LEVERAGE)) continue
         const healthFactor = hfAtLeverage(C.config.liquidationThresholdBps, leverage)
         const ratesApy = netApy(leverage, C.supplyApy, D.borrowApy)
+        const nativeApy = loopNativeApy(leverage, C0.native, D.native)
         const { pair } = eligibleForPosition(campaignsForPair(campaigns, C, D), { healthFactor, debtToken: D.variableDebtToken })
         const yields = campaignYields(pair, leverage, C, D).filter((y) => y.apy > 0)
         const rewardsApy = yields.reduce((s, y) => s + y.apy, 0)
@@ -144,8 +149,8 @@ export function scanMarket(snapshot: Snapshot, campaigns: Campaign[] | undefined
         const capacityBase = loopCapacity(C0, D, leverage)
         const flags: ScanFlag[] = []
         if (yields.some((y) => y.campaign.conditional)) flags.push('conditional')
-        // a staked / yield-bearing collateral priced above what it is borrowed against earns more than Aave shows
-        if (correlated && C0.price * 100n > D.price * 101n) flags.push('yieldBearing')
+        // priced above what it is borrowed against, like a staked token, but no rate to count: the APY is understated
+        if (correlated && !C0.native && C0.price * 100n > D.price * 101n) flags.push('nativeUnknown')
         if (opts.minCapacityBase !== undefined && capacityBase < opts.minCapacityBase) flags.push('lowCapacity')
         const row: ScanRow = {
           marketId: market.id,
@@ -155,8 +160,9 @@ export function scanMarket(snapshot: Snapshot, campaigns: Campaign[] | undefined
           leverage,
           healthFactor,
           ratesApy,
+          nativeApy,
           rewardsApy,
-          apy: ratesApy + rewardsApy,
+          apy: ratesApy + nativeApy + rewardsApy,
           campaigns: yields.map((y) => y.campaign),
           rewardsEnd: ends.length ? Math.min(...ends) : undefined,
           capacityBase,
