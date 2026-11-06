@@ -363,8 +363,8 @@ contract V2SecurityTest is V2Base {
         assertEq(_bal(vUSDX, alice), 0);
     }
 
-    function test_donations_doNotBlockAndGoToTheNextCaller() public {
-        // tokens sent to the executor by mistake do not block anything; aTokens are swept by the next withdraw
+    function test_donations_doNotBlockAndStay() public {
+        // tokens sent to the executor by mistake do not block anything and stay there (deltas only; aTokens: V2Audit)
         deal(WETH, address(this), 1e18);
         IERC20(WETH).transfer(address(executor), 1e18);
         _open(alice, 1e18, 300);

@@ -729,12 +729,18 @@ contract LeverageExecutorV2 is
     }
 
     /// @dev Pulls `amount` aTokens of `asset` from `user` (max = all) and withdraws them to this contract.
+    /// Only what this call pulled is withdrawn: aTokens someone sent to the contract stay where they are, so that
+    /// a donation larger than the reserve's liquidity can never make the withdrawal (and every close) fail.
     function _pullAndWithdraw(address user, address asset, uint256 amount) internal returns (uint256 withdrawn) {
         address aToken = POOL.getReserveData(asset).aTokenAddress;
         uint256 aAmount = amount == type(uint256).max ? IERC20(aToken).balanceOf(user) : amount;
         if (aAmount == 0) revert ZeroAmount();
+        uint256 aBefore = IERC20(aToken).balanceOf(address(this));
         IERC20(aToken).safeTransferFrom(user, address(this), aAmount);
-        withdrawn = POOL.withdraw(asset, type(uint256).max, address(this));
+        // nothing held before (the usual case): withdraw everything, which leaves no rounding dust; otherwise
+        // only the balance gained, which Aave can always burn (it never exceeds the contract's balance)
+        uint256 toWithdraw = aBefore == 0 ? type(uint256).max : IERC20(aToken).balanceOf(address(this)) - aBefore;
+        withdrawn = POOL.withdraw(asset, toWithdraw, address(this));
     }
 
     /// @dev Every token an open touches: index 0 collateral, 1 debt asset, then the capital, the step outputs and

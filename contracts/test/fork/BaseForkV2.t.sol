@@ -317,6 +317,77 @@ contract BaseForkV2Test is Test {
         vm.expectRevert(LeverageExecutorV2.UnexpectedFlashLoan.selector);
         IBalancerVaultV2(BALANCER_VAULT).flashLoan(address(ex), tokens, amounts, abi.encode(uint8(1), user, ""));
     }
+
+    /// Audit L-02: during a Balancer v2 flash loan the Vault is locked (one reentrancy guard for flashLoan, swap,
+    /// batchSwap, joins, exits, manageUserBalance), so a route that goes through a Balancer v2 pool reverts with
+    /// BAL#400. The same route works with Morpho as the lender.
+    function test_forkV2_L02_balancerRouteFailsUnderBalancerFlash() public {
+        BalancerTouchingRouter br = new BalancerTouchingRouter(BALANCER_VAULT);
+        deal(USDC, address(br), 1_000_000e6);
+        address[] memory routers = new address[](1);
+        routers[0] = address(br);
+        LeverageExecutorV2.FlashLender[] memory lenders = new LeverageExecutorV2.FlashLender[](2);
+        lenders[0] = LeverageExecutorV2.FlashLender(LeverageExecutorV2.FlashKind.Morpho, MORPHO);
+        lenders[1] = LeverageExecutorV2.FlashLender(LeverageExecutorV2.FlashKind.Balancer, BALANCER_VAULT);
+        LeverageExecutorV2 ex2 = new LeverageExecutorV2(IAaveV3Pool(POOL), routers, lenders);
+
+        _openWethFromUsdc(3_000e6);
+        uint256 debt = IERC20(vUSDC).balanceOf(user);
+        uint256 toSell = _at(USDC, 1e6, WETH, 1e18, debt) * 102 / 100;
+        LeverageExecutorV2.Step[] memory s = new LeverageExecutorV2.Step[](1);
+        s[0] = LeverageExecutorV2.Step({
+            router: address(br),
+            tokenOut: USDC,
+            data: abi.encodeCall(BalancerTouchingRouter.swap, (WETH, USDC, toSell, debt * 102 / 100, address(ex2))),
+            minOut: debt
+        });
+        LeverageExecutorV2.CloseParams memory p = LeverageExecutorV2.CloseParams({
+            collateralAsset: WETH,
+            debtAsset: USDC,
+            repayAmount: type(uint256).max,
+            collateralToWithdraw: type(uint256).max,
+            collateralToSell: toSell,
+            steps: s,
+            flashLender: BALANCER_VAULT,
+            guard: LeverageExecutorV2.Guard(0, block.timestamp)
+        });
+        vm.startPrank(user);
+        IERC20(aWETH).approve(address(ex2), type(uint256).max);
+        vm.expectRevert(bytes("BAL#400"));
+        ex2.close(p);
+
+        p.flashLender = MORPHO;
+        ex2.close(p);
+        vm.stopPrank();
+        assertEq(IERC20(vUSDC).balanceOf(user), 0, "closed through Morpho");
+    }
+}
+
+/// @dev stand-in for an aggregator route through a Balancer v2 pool: touches a Vault function guarded like swap
+contract BalancerTouchingRouter {
+    address immutable vault;
+
+    constructor(address vault_) {
+        vault = vault_;
+    }
+
+    function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut, address recipient) external {
+        IVaultUserBalance(vault).manageUserBalance(new IVaultUserBalance.UserBalanceOp[](0));
+        IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn);
+        IERC20(tokenOut).transfer(recipient, amountOut);
+    }
+}
+
+interface IVaultUserBalance {
+    struct UserBalanceOp {
+        uint8 kind;
+        address asset;
+        uint256 amount;
+        address sender;
+        address payable recipient;
+    }
+
+    function manageUserBalance(UserBalanceOp[] memory ops) external payable;
 }
 
 interface IBalancerVaultV2 {

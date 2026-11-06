@@ -18,7 +18,7 @@ Deux versions cohabitent : `LeverageExecutor` (v1, utilisée par l'app et déplo
 | `script/setup.sh` | Installe les dépendances dans `lib/`. |
 | `src/LeverageExecutorV2.sol` | La v2 (chaînes de swaps, capital en n'importe quel token, garde, changement de collatéral, flash loans gratuits). |
 | `src/interfaces/IFlashLenders.sol` | Interfaces des flash loans Morpho Blue et Balancer v2. |
-| `test/v2/*.t.sol` | 130 tests v2 sur le même Aave v3.6 local : ouverture, fermeture, changement de collatéral, attaques, fuzz et invariants. |
+| `test/v2/*.t.sol` | 136 tests v2 sur le même Aave v3.6 local : ouverture, fermeture, changement de collatéral, attaques, fuzz, invariants et preuves de l'audit interne (`V2Audit.t.sol`). |
 | `test/mocks/MockFlashLenders.sol`, `test/mocks/AttackRouter.sol` | Prêteurs Morpho et Balancer factices (même déroulé que les vrais), prêteurs qui ne rappellent jamais, routeur qui exécute du code hostile au milieu d'un swap. |
 | `test/fork/BaseForkV2.t.sol`, `test/fork/EthereumForkV2.t.sol` | v2 sur forks réels : Base (Aave, Morpho, Balancer, Uniswap) et Ethereum (Aave Core, Pendle, Curve, Morpho, Balancer). Ignorés sans `BASE_RPC_URL` / `ETH_RPC_URL`. |
 
@@ -109,7 +109,7 @@ Prérequis côté utilisateur, montants exacts, dans le même lot de transaction
 - Toujours aucun propriétaire, aucune fonction d'administration, aucun proxy ; le bytecode ne contient ni `SELFDESTRUCT`, ni `DELEGATECALL`, ni `CALLCODE` (testé en parcourant le bytecode).
 - Invariants (fuzz avec état, 48 séquences de 40 appels par propriété : ouvertures, fermetures partielles et totales, changements de collatéral, par 3 utilisateurs, via les 3 prêteurs, routes à 1 ou 2 étapes, temps qui passe) : le contrat ne garde jamais ni token ni approval, et aucun appel ne modifie la position d'un autre utilisateur que l'appelant.
 - Slither 0.11.6 : rien de bloquant. Signalés et vérifiés : `transferFrom` d'un `user` qui est toujours `msg.sender` (ou l'adresse liée à l'empreinte du flash loan, elle-même écrite avec `msg.sender`) ; soldes lus avant l'appel au routeur (c'est voulu : contrôle par différence) ; écritures après appels externes protégées par `nonReentrant` et l'empreinte.
-- Un token envoyé par erreur au contrat y reste (seules les différences de soldes sont rendues) et ne bloque rien ; des aTokens envoyés par erreur partent avec le prochain retrait. Pas de fonction de récupération, puisqu'il n'y a pas d'administrateur.
+- Un token ou un aToken envoyé par erreur au contrat y reste (seules les différences de soldes sont rendues, et seuls les aTokens pris à l'appelant sont retirés) et ne bloque rien. Pas de fonction de récupération, puisqu'il n'y a pas d'administrateur.
 
 ### Lancer
 
@@ -121,15 +121,24 @@ ETH_RPC_URL=https://ethereum-rpc.publicnode.com forge test --match-contract Ethe
 
 ### Résultats (06/11/2026)
 
-- **156 tests locaux passent** : 27 v1 + 129 v2 (40 ouverture, 26 fermeture, 27 changement de collatéral, 31 sécurité, 3 fuzz à 256 essais, 2 invariants).
+- **163 tests locaux passent** : 27 v1 + 136 v2 (40 ouverture, 26 fermeture, 27 changement de collatéral, 31 sécurité, 7 preuves d'audit, 3 fuzz à 256 essais, 2 invariants).
 - Cas des PT (collatéral seulement en eMode, LTV de base 0) : confirmé en local (actif à LTV 0 hors eMode, eMode à 90 %) **et sur le vrai Aave Core d'Ethereum**, où USDe et sUSDe ont justement une LTV de base de 0. Un supply fait par le contrat pour l'utilisateur active bien le collatéral à la LTV de l'eMode ; hors eMode, Aave refuse l'emprunt ; si Aave met la LTV d'un PT à zéro dans l'eMode (`ltvzero`), l'ouverture échoue.
-- **Fork Base, 5/5** (Aave v3, vrais Morpho et Balancer v2, Uniswap v3 comme routeur) : ouverture 3x WETH/USDC depuis 3 000 USDC puis fermeture totale via Morpho (prime 0, Morpho remboursé au wei près) ; route à 2 étapes USDC → WETH → wstETH avec capital en WETH, fermeture en 2 étapes via Balancer (frais 0) ; changement de collatéral WETH → wstETH via Morpho et via Aave (prime 0,0016 wstETH) ; faux rappel Balancer refusé. Le constructeur accepte les 6 routeurs de Base (Uniswap, Velora, KyberSwap, 1inch, 0x, Pendle).
+- **Fork Base, 6/6** (Aave v3, vrais Morpho et Balancer v2, Uniswap v3 comme routeur) : ouverture 3x WETH/USDC depuis 3 000 USDC puis fermeture totale via Morpho (prime 0, Morpho remboursé au wei près) ; route à 2 étapes USDC → WETH → wstETH avec capital en WETH, fermeture en 2 étapes via Balancer (frais 0) ; changement de collatéral WETH → wstETH via Morpho et via Aave (prime 0,0016 wstETH) ; faux rappel Balancer refusé ; route passant par le Vault Balancer refusée sous prêt Balancer et acceptée sous Morpho (audit L-02). Le constructeur accepte les 6 routeurs de Base (Uniswap, Velora, KyberSwap, 1inch, 0x, Pendle).
 - **Fork Ethereum, 4/4** : boucle 5x USDe/USDC en eMode (10 000 USDC de capital, 50 022 USDe déposés, HF 1,15) puis fermeture totale via Morpho ; fermeture partielle via Balancer avec `minHealthFactor` ; refus hors eMode ; un PT arrivé à maturité (PT-srUSDe-22OCT2026) apporté comme capital est remboursé par le **routeur Pendle** (`redeemPyToToken`) en sUSDe et déposé, en une transaction (7 954,6 sUSDe pour 10 000 PT, 0,03 % sous l'oracle).
-- Gas (local, swap factice) : ~550k pour `open`, ~570k pour `close` en médiane. Taille : 17 552 octets (limite 24 576).
+- Gas (local, swap factice) : ~550k pour `open`, ~570k pour `close` en médiane. Taille : 17 792 octets (limite 24 576).
+
+### Audit interne (06/11/2026)
+
+Rapport complet : [Audit interne du contrat v2](https://claude.ai/artifact/61hHEirBcbrf9LhHvn3Gdv). Aucune faille critique, haute ou moyenne ; 2 constats faibles, 11 informatifs, 2 optimisations de gaz non appliquées.
+
+- **L-01, corrigé.** `_pullAndWithdraw` retirait `type(uint256).max`, donc aussi les aTokens donnés au contrat : un don plus gros que la liquidité de la réserve bloquait toutes les fermetures sur cet actif. Le contrat ne retire plus que ce qu'il a pris à l'appelant (retrait total si le contrat ne détenait rien avant, sinon le delta). Preuves dans `test/v2/V2Audit.t.sol`. **La v1 a la même ligne** (`LeverageExecutor.sol:258`) : en cas de blocage, déployer un nouvel exécuteur depuis l'app.
+- **L-02, à traiter dans l'app.** Le Vault Balancer v2 a un seul verrou pour `flashLoan`, `swap` et `batchSwap` : une route d'agrégateur qui passe par un pool Balancer v2 échoue (`BAL#400`) quand le prêt flash vient aussi de Balancer. En branchant la v2 : préférer Morpho, ou exclure Balancer v2 de la route (Velora `excludeDEXS`, KyberSwap `excludedSources`) quand le prêteur est Balancer, et toujours simuler avant de signer.
+- **Opcodes Cancun (I-09).** Le bytecode contient `PUSH0` et `MCOPY`. Une sonde `eth_call` les accepte, ainsi que `TSTORE`, sur Ethereum, Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Linea et Sonic ; Plasma aussi (la v1 contient `MCOPY` et y tourne). Monad n'est pas joignable depuis l'environnement cloud : simuler le déploiement avant.
+- `forge coverage` ne compile pas (Aave local trop profond pour la pile sans optimiseur, même avec `--ir-minimum`) ; chaque erreur du contrat est déclenchée par au moins un test.
 
 ### Limites connues (v2)
 
-- **Non audité.** Rien n'est déployé sur un réseau réel. L'app utilise toujours la v1 : brancher la v2 (bytecode, vérification on-chain, formulaires) est l'étape suivante.
+- **Audit interne seulement.** Pas d'audit externe ; rien n'est déployé sur un réseau réel. L'app utilise toujours la v1 : brancher la v2 (bytecode, vérification on-chain, formulaires) est l'étape suivante.
 - Achat de PT Pendle (`swapExactTokenForPt`) non testé de bout en bout : aucun PT actif n'est listé sur Aave Core Ethereum aujourd'hui (le plus récent, PT-srUSDe-22OCT2026, est arrivé à maturité), ni sur Base. Le même routeur Pendle a été testé pour le remboursement à maturité, avec le même mécanisme (approval exacte, `transferFrom` par le routeur, sortie vers le contrat).
 - Aave de Plasma et de Monad non testés (RPC inaccessibles depuis l'environnement cloud) : version d'Aave et comportement du LTV 0 en eMode à vérifier avant d'y faire des PT.
 - Morpho Blue et Balancer v2 doivent être déployés sur la chaîne pour servir de prêteur gratuit (adresses à vérifier chaîne par chaîne ; sinon `address(POOL)` avec prime).
