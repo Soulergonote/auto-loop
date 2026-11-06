@@ -1,5 +1,7 @@
 # Auto-loop : contrat de levier atomique
 
+Deux versions cohabitent : `LeverageExecutor` (v1, utilisée par l'app et déployée par Azerty sur Plasma) et `LeverageExecutorV2` (v2, voir [la section v2](#v2--leverageexecutorv2), pas encore branchée dans l'app).
+
 `LeverageExecutor` ouvre et ferme une position à levier sur Aave v3 en **une seule transaction**, avec un swap via un agrégateur (Velora, KyberSwap ; 0x et 1inch prévus). Conception : voir `../architecture.md`.
 
 ## Contenu
@@ -14,6 +16,11 @@
 | `script/quote-velora.sh`, `script/quote-kyber.sh` | Récupèrent un devis Velora ou KyberSwap réel (USDC → WETH) avec le contrat comme taker. |
 | `script/export-bytecode.cjs` | Compile le contrat avec solc-js 0.8.27 et écrit `app/src/executorBytecode.ts`, utilisé par le bouton « Déployer le contrat » de l'app. |
 | `script/setup.sh` | Installe les dépendances dans `lib/`. |
+| `src/LeverageExecutorV2.sol` | La v2 (chaînes de swaps, capital en n'importe quel token, garde, changement de collatéral, flash loans gratuits). |
+| `src/interfaces/IFlashLenders.sol` | Interfaces des flash loans Morpho Blue et Balancer v2. |
+| `test/v2/*.t.sol` | 130 tests v2 sur le même Aave v3.6 local : ouverture, fermeture, changement de collatéral, attaques, fuzz et invariants. |
+| `test/mocks/MockFlashLenders.sol`, `test/mocks/AttackRouter.sol` | Prêteurs Morpho et Balancer factices (même déroulé que les vrais), prêteurs qui ne rappellent jamais, routeur qui exécute du code hostile au milieu d'un swap. |
+| `test/fork/BaseForkV2.t.sol`, `test/fork/EthereumForkV2.t.sol` | v2 sur forks réels : Base (Aave, Morpho, Balancer, Uniswap) et Ethereum (Aave Core, Pendle, Curve, Morpho, Balancer). Ignorés sans `BASE_RPC_URL` / `ETH_RPC_URL`. |
 
 ## Lancer
 
@@ -73,5 +80,59 @@ Prérequis côté utilisateur : `C.approve(executor, initial)` et `variableDebtD
 - Tokens à frais de transfert non supportés.
 - Adresses des routeurs dans `BaseFork.t.sol` à revérifier dans la doc de chaque agrégateur avant tout déploiement.
 - Non audité. Rien n'est déployé sur un réseau réel ; le déploiement se fait depuis le portefeuille de l'utilisateur, dans l'app.
+
+## v2 : `LeverageExecutorV2`
+
+Nouveau contrat, même modèle de sécurité que la v1 ; la v1 n'est pas modifiée. Une position ouverte avec la v1 (ou directement sur aave.com) se gère avec la v2, puisqu'elle vit sur le compte Aave de l'utilisateur (testé).
+
+### Les 7 changements
+
+1. **Chaînes de swaps** : chaque swap est une liste de 1 à 4 étapes `Step {router, tokenOut, data, minOut}` (par exemple PT → sUSDe → USDe). Chaque étape a son propre minimum, contrôlé par différence de soldes ; la dernière doit livrer le bon token. La deuxième étape vend le montant écrit dans son calldata (le minimum de la première, comme l'app le cote) : ce que la première a livré en plus revient à l'utilisateur dans le token intermédiaire.
+2. **Capital en n'importe quel token** : `capitalToken` peut être le collatéral, l'actif de dette (vendu avec la dette, en une seule étape) ou autre chose, échangé en collatéral par `capitalSteps`. `debtAmount = 0` fait un simple dépôt (avec ou sans swap) ; `capitalAmount = 0` ajoute du levier à une position existante.
+3. **Garde** sur chaque appel : `minHealthFactor` (0 = pas de contrôle) et `deadline` (inclusive ; 0 échoue toujours, ce n'est pas « sans limite »).
+4. **`swapCollateral`** : remplace le collatéral sans toucher à la dette (flash loan du nouveau collatéral → supply pour l'utilisateur → retrait de l'ancien → swap → remboursement ; le surplus est déposé pour l'utilisateur). C'est le « roll » d'un PT Pendle à maturité.
+5. **Fermeture et changement de collatéral sans prime** : `flashLender` vaut `address(POOL)` (prime Aave, 0,05 % par défaut) ou un prêteur gratuit enregistré au déploiement, Morpho Blue ou le Vault Balancer v2. L'ouverture reste en flash loan Aave mode 2 (sans prime).
+6. **Valeurs de retour et événements** : `open` renvoie `(collateralSupplied, debtBorrowed, healthFactor)`, `close` un `CloseResult` (dette remboursée, collatéral retiré, collatéral et dette rendus, prime, HF), `swapCollateral` un `SwapCollateralResult`. Un événement `Swapped` par étape, et `PositionOpened` / `PositionClosed` / `CollateralSwapped` qui reprennent exactement les valeurs renvoyées (testé).
+7. **Routeur Pendle** : aucun code spécifique, il suffit de le mettre dans la liste blanche au déploiement (`0x888888888889758F76e7103c6CbF23ABbF58F946`, même adresse sur toutes les chaînes).
+
+Prérequis côté utilisateur, montants exacts, dans le même lot de transactions du portefeuille :
+- ouverture : `capitalToken.approve(executor, capitalAmount)` et `variableDebtD.approveDelegation(executor, debtAmount)` (ou `openWithSig`) ;
+- fermeture : `aC.approve(executor, montant)` (ou `closeWithSig`) ;
+- changement de collatéral : `aC1.approve(executor, montant)` (ou `swapCollateralWithSig`), et l'eMode de l'utilisateur doit accepter le nouveau collatéral.
+
+### Sécurité v2 (en plus de celle de la v1)
+
+- **Rappels de flash loan à usage unique** : juste avant de demander un prêt, le contrat enregistre `keccak256(prêteur, actif, montant, données)` ; un rappel n'est accepté que du prêteur demandé, avec exactement ces valeurs, et efface l'empreinte. Un rappel qui n'arrive jamais fait échouer l'appel (`FlashLoanNotExecuted`). Testé : appels directs des trois rappels, Vault Balancer appelé par un attaquant avec le contrat comme destinataire (l'attaque classique), flash loan Aave initié par un tiers, autre instance de Morpho, rejeu des mêmes données pendant un swap.
+- **Routeurs hostiles** : un routeur de la liste blanche qui exécute du code au milieu d'un swap ne peut ni rentrer dans `open`, `close` ou `swapCollateral` (`nonReentrant`), ni déclencher un rappel de flash loan, ni dépenser les approvals des utilisateurs (elles sont données au contrat, pas au routeur). Testé avec `AttackRouter`.
+- **Aucun token comme routeur** : le constructeur refuse le Pool, les prêteurs, le contrat lui-même, les adresses sans code, et **tout token Aave** (actif listé, aToken, token de dette) ; en plus, chaque étape refuse un routeur qui est l'un des tokens de l'opération. Testé, y compris avec des routeurs qui ont une fonction `fallback`.
+- Le constructeur refuse un prêteur sans code, en double, de type `None`, ou égal au Pool ou au contrat.
+- Toujours aucun propriétaire, aucune fonction d'administration, aucun proxy ; le bytecode ne contient ni `SELFDESTRUCT`, ni `DELEGATECALL`, ni `CALLCODE` (testé en parcourant le bytecode).
+- Invariants (fuzz avec état, 48 séquences de 40 appels par propriété : ouvertures, fermetures partielles et totales, changements de collatéral, par 3 utilisateurs, via les 3 prêteurs, routes à 1 ou 2 étapes, temps qui passe) : le contrat ne garde jamais ni token ni approval, et aucun appel ne modifie la position d'un autre utilisateur que l'appelant.
+- Slither 0.11.6 : rien de bloquant. Signalés et vérifiés : `transferFrom` d'un `user` qui est toujours `msg.sender` (ou l'adresse liée à l'empreinte du flash loan, elle-même écrite avec `msg.sender`) ; soldes lus avant l'appel au routeur (c'est voulu : contrôle par différence) ; écritures après appels externes protégées par `nonReentrant` et l'empreinte.
+- Un token envoyé par erreur au contrat y reste (seules les différences de soldes sont rendues) et ne bloque rien ; des aTokens envoyés par erreur partent avec le prochain retrait. Pas de fonction de récupération, puisqu'il n'y a pas d'administrateur.
+
+### Lancer
+
+```bash
+forge test --no-match-path 'test/fork/*'                       # v1 + v2 en local
+BASE_RPC_URL=https://base-rpc.publicnode.com forge test --match-contract BaseForkV2Test -vv
+ETH_RPC_URL=https://ethereum-rpc.publicnode.com forge test --match-contract EthereumForkV2Test -vv
+```
+
+### Résultats (06/11/2026)
+
+- **156 tests locaux passent** : 27 v1 + 129 v2 (40 ouverture, 26 fermeture, 27 changement de collatéral, 31 sécurité, 3 fuzz à 256 essais, 2 invariants).
+- Cas des PT (collatéral seulement en eMode, LTV de base 0) : confirmé en local (actif à LTV 0 hors eMode, eMode à 90 %) **et sur le vrai Aave Core d'Ethereum**, où USDe et sUSDe ont justement une LTV de base de 0. Un supply fait par le contrat pour l'utilisateur active bien le collatéral à la LTV de l'eMode ; hors eMode, Aave refuse l'emprunt ; si Aave met la LTV d'un PT à zéro dans l'eMode (`ltvzero`), l'ouverture échoue.
+- **Fork Base, 5/5** (Aave v3, vrais Morpho et Balancer v2, Uniswap v3 comme routeur) : ouverture 3x WETH/USDC depuis 3 000 USDC puis fermeture totale via Morpho (prime 0, Morpho remboursé au wei près) ; route à 2 étapes USDC → WETH → wstETH avec capital en WETH, fermeture en 2 étapes via Balancer (frais 0) ; changement de collatéral WETH → wstETH via Morpho et via Aave (prime 0,0016 wstETH) ; faux rappel Balancer refusé. Le constructeur accepte les 6 routeurs de Base (Uniswap, Velora, KyberSwap, 1inch, 0x, Pendle).
+- **Fork Ethereum, 4/4** : boucle 5x USDe/USDC en eMode (10 000 USDC de capital, 50 022 USDe déposés, HF 1,15) puis fermeture totale via Morpho ; fermeture partielle via Balancer avec `minHealthFactor` ; refus hors eMode ; un PT arrivé à maturité (PT-srUSDe-22OCT2026) apporté comme capital est remboursé par le **routeur Pendle** (`redeemPyToToken`) en sUSDe et déposé, en une transaction (7 954,6 sUSDe pour 10 000 PT, 0,03 % sous l'oracle).
+- Gas (local, swap factice) : ~550k pour `open`, ~570k pour `close` en médiane. Taille : 17 552 octets (limite 24 576).
+
+### Limites connues (v2)
+
+- **Non audité.** Rien n'est déployé sur un réseau réel. L'app utilise toujours la v1 : brancher la v2 (bytecode, vérification on-chain, formulaires) est l'étape suivante.
+- Achat de PT Pendle (`swapExactTokenForPt`) non testé de bout en bout : aucun PT actif n'est listé sur Aave Core Ethereum aujourd'hui (le plus récent, PT-srUSDe-22OCT2026, est arrivé à maturité), ni sur Base. Le même routeur Pendle a été testé pour le remboursement à maturité, avec le même mécanisme (approval exacte, `transferFrom` par le routeur, sortie vers le contrat).
+- Aave de Plasma et de Monad non testés (RPC inaccessibles depuis l'environnement cloud) : version d'Aave et comportement du LTV 0 en eMode à vérifier avant d'y faire des PT.
+- Morpho Blue et Balancer v2 doivent être déployés sur la chaîne pour servir de prêteur gratuit (adresses à vérifier chaîne par chaîne ; sinon `address(POOL)` avec prime).
+- Mêmes limites que la v1 pour l'isolation mode, les tokens à frais de transfert et l'eMode (que l'utilisateur active lui-même).
 
 Dépendance de test : `aave-v3-origin` est sous licence BUSL-1.1, utilisé uniquement pour les tests. Le contrat lui-même est MIT et n'importe que OpenZeppelin.
