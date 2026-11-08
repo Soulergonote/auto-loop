@@ -7,6 +7,8 @@ import { EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../executorBytecode'
 import { executorLenders, executorRouters, type Market } from '../config'
 
 export type ExecutorVersion = 1 | 2
+/** What the code check found: the contract version, and whether Pendle's router is whitelisted (PT loops). */
+export type ExecutorCheck = { version: ExecutorVersion; pendle: boolean }
 
 function deployDataV2(market: Market) {
   const routers = executorRouters(market.chain.id).map((r) => r.router)
@@ -21,11 +23,12 @@ function deployDataV1(market: Market) {
 /**
  * Checks that `address` runs exactly the audited-in-tests LeverageExecutor for this market, and says which version:
  * its code must equal what the constructor produces for this Aave pool (dry-run of the deployment, same compiler
- * output as the tests), and every router (and, for v2, the Morpho lender) of the market must be registered. Code
- * equality also proves there is no owner or admin function. A v1 executor (deployed before v2) is still accepted:
- * positions live in the user's Aave account, so either version manages them.
+ * output as the tests), and every aggregator router (and, for v2, the Morpho lender) of the market must be registered.
+ * Code equality also proves there is no owner or admin function. A v1 executor (deployed before v2) is still accepted:
+ * positions live in the user's Aave account, so either version manages them. Pendle's router is checked on its own:
+ * an executor deployed before PT loops lacks it and stays usable for every other pair.
  */
-export async function verifyExecutor(market: Market, address: Address): Promise<ExecutorVersion> {
+export async function verifyExecutor(market: Market, address: Address): Promise<ExecutorCheck> {
   const client = getPublicClient(wagmiConfig, { chainId: market.chain.id })
   if (!client) throw new Error(`pas de connexion à ${market.chain.name}`)
   const code = await client.getCode({ address })
@@ -43,16 +46,18 @@ export async function verifyExecutor(market: Market, address: Address): Promise<
   }
   if (!version) throw new Error('le code de ce contrat n’est pas celui d’Auto-loop pour ce marché')
   const abi = version === 2 ? executorAbi : executorAbiV1
+  let pendle = false
   for (const r of executorRouters(market.chain.id)) {
     const ok = await client.readContract({ address, abi, functionName: 'isRouterAllowed', args: [r.router] })
-    if (!ok) throw new Error(`le routeur ${r.label} n’est pas autorisé dans ce contrat`)
+    if (r.id === 'pendle') pendle = ok && version === 2
+    else if (!ok) throw new Error(`le routeur ${r.label} n’est pas autorisé dans ce contrat`)
   }
   if (version === 2)
     for (const l of executorLenders(market.chain.id)) {
       const kind = await client.readContract({ address, abi: executorAbi, functionName: 'flashLenderKind', args: [l.lender] })
       if (kind !== l.kind) throw new Error('le prêteur Morpho n’est pas enregistré dans ce contrat')
     }
-  return version
+  return { version, pendle }
 }
 
 export function useExecutorCheck(market: Market) {
@@ -79,6 +84,6 @@ export async function deployExecutor(market: Market, onStep: (s: string) => void
   if (receipt.status !== 'success' || !receipt.contractAddress) throw new Error('le déploiement a échoué')
   const address = getAddress(receipt.contractAddress)
   onStep('Vérification du contrat déployé…')
-  if ((await verifyExecutor(market, address)) !== 2) throw new Error('le contrat déployé n’est pas la v2')
+  if ((await verifyExecutor(market, address)).version !== 2) throw new Error('le contrat déployé n’est pas la v2')
   return address
 }

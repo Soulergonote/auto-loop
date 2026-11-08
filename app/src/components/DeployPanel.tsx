@@ -14,8 +14,9 @@ function errText(e: unknown) {
 /**
  * Banner shown while the market has no executor: deploy one from the connected wallet, or reuse one already deployed.
  * With `upgrade`, the market runs a v1 executor: it keeps working, the banner offers the v2 (closes without premium).
+ * With `upgrade="pendle"`, a v2 executor deployed before PT loops: the banner offers one with Pendle's router.
  */
-export function DeployPanel({ market, onReady, upgrade }: { market: Market; onReady: (a: Address) => void; upgrade?: boolean }) {
+export function DeployPanel({ market, onReady, upgrade }: { market: Market; onReady: (a: Address) => void; upgrade?: boolean | 'pendle' }) {
   const { isConnected, chainId } = useAccount()
   const { switchChain } = useSwitchChain()
   const routers = executorRouters(market.chain.id)
@@ -42,7 +43,8 @@ export function DeployPanel({ market, onReady, upgrade }: { market: Market; onRe
       const a = getAddress(pasted.trim())
       setStep('Vérification du contrat…')
       const v = await verifyExecutor(market, a)
-      if (upgrade && v !== 2) throw new Error('ce contrat est une v1')
+      if (upgrade && v.version !== 2) throw new Error('ce contrat est une v1')
+      if (upgrade === 'pendle' && !v.pendle) throw new Error('ce contrat n’autorise pas le routeur Pendle')
       return a
     })
 
@@ -52,9 +54,11 @@ export function DeployPanel({ market, onReady, upgrade }: { market: Market; onRe
     <>
       <Notice>
         <span>
-          {upgrade
-            ? `Contrat Auto-loop v1 sur ${market.label} : il reste utilisable. La v2 ferme les positions sans prime de flash loan quand Morpho a la liquidité ; une transaction la déploie.`
-            : `Contrat Auto-loop absent sur ${market.label} : une transaction depuis le portefeuille le déploie.`}
+          {upgrade === 'pendle'
+            ? `Le contrat Auto-loop de ${market.label} n’autorise pas le routeur Pendle : il reste utilisable pour les autres paires. Une transaction déploie un contrat qui gère aussi les PT.`
+            : upgrade
+              ? `Contrat Auto-loop v1 sur ${market.label} : il reste utilisable. La v2 ferme les positions sans prime de flash loan quand Morpho a la liquidité ; une transaction la déploie.`
+              : `Contrat Auto-loop absent sur ${market.label} : une transaction depuis le portefeuille le déploie.`}
         </span>
         {!isConnected ? null : chainId !== market.chain.id ? (
           <button className="btn" onClick={() => switchChain({ chainId: market.chain.id })}>
@@ -62,7 +66,7 @@ export function DeployPanel({ market, onReady, upgrade }: { market: Market; onRe
           </button>
         ) : (
           <button className="btn" disabled={busy} onClick={deploy}>
-            {step ?? `Déployer le contrat${upgrade ? ' v2' : ''} sur ${market.label}`}
+            {step ?? `Déployer le contrat${upgrade === 'pendle' ? ' avec Pendle' : upgrade ? ' v2' : ''} sur ${market.label}`}
           </button>
         )}
       </Notice>

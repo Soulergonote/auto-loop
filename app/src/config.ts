@@ -171,6 +171,31 @@ export const MORPHO_BLUE: Record<number, Address> = {
   146: '0xd6c916eB7542D0Ad3f18AEd0FCBD50C582cfa95f',
 }
 
+/**
+ * Pendle (PT loops). The router is the same proxy on every chain; RouterStatic quotes on-chain, without Pendle's API.
+ * Pendle is offered where RouterStatic exists and the app was tested: Ethereum (2026-11-08, on a fork that lists live
+ * PTs on Aave, Aave's own PTs having all expired). New executors there whitelist the router; older ones keep working
+ * for every other pair.
+ */
+export const PENDLE_ROUTER: Address = '0x888888888889758F76e7103c6CbF23ABbF58F946'
+export const PENDLE_ROUTER_STATIC: Record<number, Address> = { 1: '0x263833d47eA3fA4a30f269323aba6a107f9eB14C' }
+/** Pendle market factories whose `isValidMarket` vouches for a market (read 2026-11-08 from live markets' factory()). */
+export const PENDLE_FACTORIES: Record<number, Address[]> = {
+  1: ['0x6d247b1c044fA1E22e6B04fA9F71Baf99EB29A9f', '0x6fcf753f2C67b83f7B09746Bbc4FA0047b35D050'],
+}
+/**
+ * Known Pendle markets, used with the ones Pendle's API lists (when it answers): each one is checked on-chain (factory,
+ * readTokens) before use. PTs past maturity need no market: they are redeemed 1 for 1.
+ */
+export const PENDLE_MARKETS: Record<number, Address[]> = {
+  1: [
+    '0x90b70c407f1077f8eb92bf423b44cd92329b737a', // PT-reUSDe-10DEC2026
+    '0x16d3126ee82ee36816499fb9db6f647c6addd09c', // PT-sUSN-22JUL2027
+    '0x43c97094da0e894d3af2fda6f507d59a29888251', // PT-USDe-13AUG2026
+  ],
+}
+export const pendleChain = (chainId: number) => !!PENDLE_ROUTER_STATIC[chainId]
+
 /** Free flash lenders a new executor registers on a chain (kind 1 = Morpho), fixed for good like the routers. */
 export function executorLenders(chainId: number): { kind: number; lender: Address }[] {
   const m = MORPHO_BLUE[chainId]
@@ -185,6 +210,8 @@ export type Market = MarketDef & {
   executorSource?: 'build' | 'wallet'
   /** taker sent to the aggregators: the contract holds the tokens during the swap */
   quoteTaker: Address
+  /** the executor whitelists Pendle's router (PT loops), known once its code is checked */
+  executorPendle?: boolean
 }
 
 /** Executors the user deployed (or pasted) from this browser, per market id. */
@@ -209,12 +236,12 @@ export function storeExecutors(all: Record<string, Address>) {
   }
 }
 
-/** Routers a new executor whitelists on a chain: those of the aggregators that quote there (fixed for good). */
-export function executorRouters(chainId: number): { id: AggregatorId; label: string; router: Address }[] {
+/** Routers a new executor whitelists on a chain (fixed for good): the aggregators that quote there, and Pendle's where PT loops are offered. */
+export function executorRouters(chainId: number): { id: AggregatorId | 'pendle'; label: string; router: Address }[] {
   const seen = new Set<string>()
-  return aggregatorsFor(chainId)
-    .map((id) => ({ id, label: AGGREGATORS[id].label, router: getAddress(AGGREGATORS[id].router) }))
-    .filter((r) => !seen.has(r.router) && !!seen.add(r.router))
+  const aggregators = aggregatorsFor(chainId).map((id) => ({ id, label: AGGREGATORS[id].label, router: getAddress(AGGREGATORS[id].router) }))
+  const pendle = pendleChain(chainId) ? [{ id: 'pendle' as const, label: 'Pendle', router: getAddress(PENDLE_ROUTER) }] : []
+  return [...aggregators, ...pendle].filter((r) => !seen.has(r.router) && !!seen.add(r.router))
 }
 
 export function getMarket(id: string, local: Record<string, Address> = {}): Market {

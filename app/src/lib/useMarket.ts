@@ -264,8 +264,8 @@ export type EModeCategory = {
   ltvZeroBitmap: bigint
 }
 
-/** Highest category id probed: markets use far fewer (Base: 11 in Oct. 2026). */
-const MAX_EMODE_ID = 40
+/** Highest category id probed: Ethereum Core gives each PT its own categories (up to 48 in Nov. 2026). */
+const MAX_EMODE_ID = 80
 const EMODE_FNS = [
   'getEModeCategoryLabel',
   'getEModeCategoryCollateralConfig',

@@ -22,7 +22,7 @@ export type SnapReserve = Reserve & {
 
 export type Snapshot = { market: Market; reserves: SnapReserve[]; emodes: EModeCategory[]; premiumBps: bigint }
 
-const MAX_EMODE_ID = 40
+const MAX_EMODE_ID = 80
 const EMODE_FNS = [
   'getEModeCategoryLabel',
   'getEModeCategoryCollateralConfig',

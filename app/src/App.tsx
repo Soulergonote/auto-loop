@@ -111,7 +111,7 @@ export function App() {
   // an executor is only offered for signing once its on-chain code is checked to be exactly this contract
   const check = useExecutorCheck(declared)
   const market = useMemo(
-    () => (!declared.executor ? declared : check.data ? { ...declared, executorVersion: check.data } : { ...declared, executor: undefined }),
+    () => (!declared.executor ? declared : check.data ? { ...declared, executorVersion: check.data.version, executorPendle: check.data.pendle } : { ...declared, executor: undefined }),
     [declared, check.data],
   )
   function setLocalExecutor(id: string, a?: Address) {

@@ -2,7 +2,7 @@ import { BaseError, ContractFunctionRevertedError, encodeFunctionData, maxUint25
 import { simulateContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
 import { wagmiConfig } from '../wagmi'
 import { erc20Abi, executorAbi, executorAbiV1, poolAbi } from '../abi'
-import type { Quote } from './quotes'
+import { quoteSteps, type Quote } from './quotes'
 import { signATokenPermit, signDelegation, type ExecutorSignature } from './signatures'
 import { aTokensToApprove, swapCollateralArgs, type SwapCollateralPlan } from './swapCollateral'
 
@@ -63,6 +63,7 @@ const callDeadline = () => BigInt(Math.floor(Date.now() / 1000) + 20 * 60)
 
 /** v1 parameters (executors deployed before v2). */
 export function openArgsV1(p: OpenPlan) {
+  if (p.quote.route) throw new Error('Le contrat v1 ne fait qu’un swap : route Pendle impossible')
   return {
     collateralAsset: p.collateral,
     debtAsset: p.debt,
@@ -93,14 +94,15 @@ export function openArgs(p: OpenPlan) {
     debtAsset: p.debt,
     capitalToken: capital,
     capitalAmount: p.initialCollateral,
-    capitalSteps: swapped ? [{ router: cq!.router, tokenOut: p.collateral, data: cq!.data, minOut: cq!.minOut }] : [],
+    capitalSteps: swapped ? quoteSteps(cq!, p.collateral) : [],
     debtAmount: p.debtAmount,
-    steps: [{ router: p.quote.router, tokenOut: p.collateral, data: p.quote.data, minOut: p.quote.minOut }],
+    steps: quoteSteps(p.quote, p.collateral),
     guard: { minHealthFactor: p.minHealthFactor ?? 0n, deadline: callDeadline() },
   } as const
 }
 
 export function closeArgsV1(p: ClosePlan) {
+  if (p.quote.route) throw new Error('Le contrat v1 ne fait qu’un swap : route Pendle impossible')
   return {
     collateralAsset: p.collateral,
     debtAsset: p.debt,
@@ -118,7 +120,7 @@ export function closeArgs(p: ClosePlan) {
     repayAmount: p.full ? maxUint256 : p.repayAmount,
     collateralToWithdraw: p.full ? maxUint256 : p.collateralToWithdraw,
     collateralToSell: p.collateralToSell,
-    steps: [{ router: p.quote.router, tokenOut: p.debt, data: p.quote.data, minOut: p.quote.minOut }],
+    steps: quoteSteps(p.quote, p.debt),
     flashLender: p.flashLender ?? zeroAddress,
     guard: { minHealthFactor: p.full ? 0n : (p.minHealthFactor ?? 0n), deadline: callDeadline() },
   } as const

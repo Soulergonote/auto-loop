@@ -4,7 +4,7 @@
  * execution lives in execute.ts (step by step) and oneClick.ts (one batch).
  */
 import { maxUint256, zeroAddress, type Address } from 'viem'
-import type { Quote } from './quotes'
+import { quoteSteps, type Quote } from './quotes'
 import type { Account } from './math'
 import type { EModeCategory, Reserve } from './useMarket'
 
@@ -56,7 +56,7 @@ export function swapCollateralArgs(
     toAsset: p.to,
     fromAmount: p.full ? maxUint256 : p.fromAmount,
     toAmount: p.toAmount,
-    steps: [{ router: p.quote.router, tokenOut: p.to, data: p.quote.data, minOut: p.quote.minOut }],
+    steps: quoteSteps(p.quote, p.to),
     flashLender: p.flashLender,
     guard: { minHealthFactor: p.minHealthFactor, deadline: callDeadline() },
   } as const

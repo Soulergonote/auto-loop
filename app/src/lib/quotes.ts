@@ -9,11 +9,13 @@ import {
   VELORA_INCLUDE_DEXS,
   VELORA_PARTNER,
   aggregatorsFor,
+  pendleChain,
   type AggregatorChoice,
   type AggregatorId,
   type Token,
 } from '../config'
 import { applySlippage, oracleSwapOut, type Side } from './math'
+import { PENDLE_ROUTER_ADDRESS, isExpired, pendleCalldataProblem, quoteBuyPt, quoteSellPt, readPt, type PtInfo } from './pendle'
 
 export type QuoteRequest = {
   aggregator: AggregatorChoice
@@ -42,6 +44,37 @@ export type Quote = {
   fetchedAt: number
   /** 'best' mode: what each aggregator offered (or why it could not quote) */
   alternatives?: { aggregator: AggregatorId; buyAmount?: bigint; error?: string }[]
+  /**
+   * Several swaps in a row (contract v2 runs them in one transaction, each one selling what the previous one
+   * delivered): set for a route through Pendle. `router`, `data` and `minOut` above are then the last leg's.
+   */
+  route?: RouteLeg[]
+  /** the Pendle leg of the route: buy, sell or (after maturity) redeem of a PT */
+  pendle?: { kind: 'buy' | 'sell' | 'redeem'; pt: Address; priceImpact: number; fixedApy?: number; expiry: number }
+}
+
+export type RouteLeg = {
+  via: AggregatorId | 'pendle'
+  router: Address
+  sell: Token
+  buy: Token
+  sellAmount: bigint
+  buyAmount: bigint
+  minOut: bigint
+  data: Hex
+}
+
+/** One contract step per leg of the quote (a single step for a plain aggregator quote). */
+export function quoteSteps(q: Quote, tokenOut: Address): { router: Address; tokenOut: Address; data: Hex; minOut: bigint }[] {
+  if (!q.route) return [{ router: q.router, tokenOut, data: q.data, minOut: q.minOut }]
+  if (q.route.at(-1)!.buy.address.toLowerCase() !== tokenOut.toLowerCase()) throw new Error('Le devis ne finit pas dans le bon token')
+  return q.route.map((l) => ({ router: l.router, tokenOut: l.buy.address, data: l.data, minOut: l.minOut }))
+}
+
+/** Who quotes it, as shown: the aggregator, Pendle, or both for a route through Pendle. */
+export function quoteLabel(q: Quote): string {
+  if (!q.route) return AGGREGATORS[q.aggregator].label
+  return [...new Set(q.route.map((l) => (l.via === 'pendle' ? 'Pendle' : AGGREGATORS[l.via].label)))].join(' + ')
 }
 
 type SingleRequest = QuoteRequest & { aggregator: AggregatorId }
@@ -52,8 +85,117 @@ export class QuoteError extends Error {}
 const SIMULATED_COST_BPS = 15n
 
 export async function getQuote(req: QuoteRequest, signal?: AbortSignal): Promise<Quote> {
+  if (QUOTE_MODE !== 'mock' && pendleChain(req.chainId)) {
+    const [ps, pb] = await Promise.all([readPt(req.chainId, req.sell.address), readPt(req.chainId, req.buy.address)])
+    if (ps || pb) {
+      try {
+        return await pendleRoute(req, ps, pb, signal)
+      } catch (e) {
+        if (QUOTE_MODE === 'live' || signal?.aborted) throw e
+        const first = req.aggregator === 'best' ? (aggregatorsFor(req.chainId)[0] ?? 'velora') : req.aggregator
+        return simulatedQuote({ ...req, aggregator: first }, `Pendle : ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+  }
   if (req.aggregator === 'best') return bestQuote(req, signal)
   return singleQuote(req as SingleRequest, signal)
+}
+
+/** A live quote between two non-PT tokens, never simulated: the leg of a route has no oracle price of its own. */
+async function liveLeg(req: QuoteRequest, signal?: AbortSignal): Promise<Quote> {
+  if (req.aggregator !== 'best') return liveQuote(req as SingleRequest, signal)
+  const ids = aggregatorsFor(req.chainId)
+  const settled = await Promise.allSettled(ids.map((aggregator) => liveQuote({ ...req, aggregator }, signal)))
+  const quotes = settled.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+  if (quotes.length) return quotes.reduce((a, b) => (b.buyAmount > a.buyAmount ? b : a))
+  throw new QuoteError(
+    settled.map((r, i) => `${AGGREGATORS[ids[i]].label} : ${r.status === 'rejected' ? String(r.reason?.message ?? r.reason) : ''}`).join(' ; '),
+  )
+}
+
+const same = (a: Address, b: Address) => a.toLowerCase() === b.toLowerCase()
+const has = (list: Token[], t: Address) => list.find((x) => same(x.address, t))
+
+/**
+ * A route through Pendle when either side is a PT: sell (or, after maturity, redeem) the PT for a token its SY gives
+ * out, swap with an aggregator when needed, and buy the PT with a token its SY takes in. Each leg sells the previous
+ * leg's guaranteed minimum; what a leg delivers above it goes back to the user with the contract's leftovers.
+ */
+async function pendleRoute(req: QuoteRequest, ps: PtInfo | undefined, pb: PtInfo | undefined, signal?: AbortSignal): Promise<Quote> {
+  const legs: RouteLeg[] = []
+  let token = req.sell
+  let amount = req.sellAmount
+  let pendle: Quote['pendle']
+  const aggregatorLeg = async (buy: Token) => {
+    const q = await liveLeg({ ...req, sell: token, buy, sellAmount: amount }, signal)
+    legs.push({ via: q.aggregator, router: q.router, sell: token, buy, sellAmount: amount, buyAmount: q.buyAmount, minOut: q.minOut, data: q.data })
+    token = buy
+    amount = q.minOut
+  }
+  if (ps) {
+    const out = has(ps.tokensOut, req.buy.address) ?? (pb && ps.tokensOut.find((t) => has(pb.tokensIn, t.address))) ?? ps.tokensOut[0]
+    if (!out) throw new QuoteError('le SY du PT ne rend aucun token')
+    const leg = await quoteSellPt(req.chainId, ps, amount, out.address, req.taker, req.slippageBps)
+    const target = leg.kind === 'redeem' ? ps.yt : ps.market!
+    const problem = pendleCalldataProblem(leg.data, { kind: leg.kind, receiver: req.taker, target, token: out.address, amountIn: amount, minOut: leg.minOut })
+    if (problem) throw new QuoteError(problem)
+    legs.push({
+      via: 'pendle',
+      router: PENDLE_ROUTER_ADDRESS,
+      sell: token,
+      buy: out,
+      sellAmount: amount,
+      buyAmount: leg.out,
+      minOut: leg.minOut,
+      data: leg.data,
+    })
+    pendle = { kind: leg.kind, pt: ps.pt, priceImpact: leg.priceImpact, expiry: ps.expiry }
+    token = out
+    amount = leg.minOut
+  }
+  if (pb) {
+    if (isExpired(pb)) throw new QuoteError(`${req.buy.symbol} est échu : il ne s’achète plus`)
+    const tin = has(pb.tokensIn, token.address) ?? pb.tokensIn[0]
+    if (!tin) throw new QuoteError('le SY du PT ne prend aucun token')
+    if (!same(tin.address, token.address)) await aggregatorLeg(tin)
+    const leg = await quoteBuyPt(req.chainId, pb, token.address, amount, req.taker, req.slippageBps)
+    const problem = pendleCalldataProblem(leg.data, {
+      kind: 'buy',
+      receiver: req.taker,
+      target: pb.market!,
+      token: token.address,
+      amountIn: amount,
+      minOut: leg.minOut,
+    })
+    if (problem) throw new QuoteError(problem)
+    legs.push({
+      via: 'pendle',
+      router: PENDLE_ROUTER_ADDRESS,
+      sell: token,
+      buy: req.buy,
+      sellAmount: amount,
+      buyAmount: leg.out,
+      minOut: leg.minOut,
+      data: leg.data,
+    })
+    // a roll (PT to PT) shows the PT it buys
+    pendle = { kind: 'buy', pt: pb.pt, priceImpact: leg.priceImpact + (pendle?.priceImpact ?? 0), fixedApy: leg.fixedApy, expiry: pb.expiry }
+  } else if (!same(token.address, req.buy.address)) await aggregatorLeg(req.buy)
+  if (legs.length > 4) throw new QuoteError('route trop longue')
+  const last = legs.at(-1)!
+  const firstAggregator = legs.find((l) => l.via !== 'pendle')?.via as AggregatorId | undefined
+  return {
+    aggregator: firstAggregator ?? (req.aggregator === 'best' ? (aggregatorsFor(req.chainId)[0] ?? 'velora') : req.aggregator),
+    router: last.router,
+    data: last.data,
+    sellAmount: req.sellAmount,
+    buyAmount: last.buyAmount,
+    minOut: last.minOut,
+    simulated: false,
+    fetchedAt: Date.now(),
+    route: legs,
+    pendle,
+  }
 }
 
 /** Asks every aggregator that quotes on the chain in parallel and keeps the one that gives the most. */
