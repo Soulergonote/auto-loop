@@ -180,12 +180,24 @@ export function TxLink({ market, hash }: { market: Market; hash: string }) {
 }
 
 /** Outcome of a transaction: a green line with the explorer link, or a red banner. */
-export function TxResult({ market, result }: { market: Market; result?: { ok: boolean; text: string; hash?: string } }) {
+export function TxResult({ market, result }: { market: Market; result?: { ok: boolean; text: string; hash?: string; details?: string[] } }) {
   if (!result) return null
   return result.ok ? (
-    <p className="success">
-      {result.text} {result.hash && <TxLink market={market} hash={result.hash} />}
-    </p>
+    <>
+      <p className="success">
+        {result.text} {result.hash && <TxLink market={market} hash={result.hash} />}
+      </p>
+      {result.details && result.details.length > 0 && (
+        <div className="outcome">
+          <div className="outcome-title">Montants réels</div>
+          <ul>
+            {result.details.map((d) => (
+              <li key={d}>{d}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
   ) : (
     <Notice tone="bad">{result.text}</Notice>
   )

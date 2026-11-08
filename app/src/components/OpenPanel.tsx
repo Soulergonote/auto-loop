@@ -16,6 +16,7 @@ import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss,
 import { encodeCall, executeOpen, explainError, openCall, type OpenPlan } from '../lib/execute'
 import { executeOpenBatch, useAtomicBatch } from '../lib/oneClick'
 import { capitalKind, useWalletTokens } from '../lib/capital'
+import { outcomeLines, readOutcome } from '../lib/outcome'
 import { fmtAmount, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
@@ -83,7 +84,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   // a wallet that sends atomic batches: eMode, approval, delegation, open and allowances back in one confirmation
   const batch = useAtomicBatch(market.chain.id, account) === true
   const [busy, setBusy] = useState<string>()
-  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash }>()
+  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[] }>()
 
   // an existing position on the pair is levered further: the slider then sets the leverage of the whole position
   const position = user ? { collateralBase: toBase(user.aTokenBalance, C.side), debtBase: toBase(user.debtBalance, D.side) } : NO_POSITION
@@ -344,7 +345,11 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       if (fresh.simulated || freshCapital?.simulated) throw new Error('Plus de devis réel disponible')
       const p = plan(fresh, freshCapital)!
       const hash = batch ? await executeOpenBatch(p, setBusy) : await executeOpen(p, setBusy)
-      setResult({ ok: true, text: hasPosition ? 'Position augmentée.' : 'Position ouverte.', hash })
+      // v2 emits what it really supplied and borrowed: shown instead of the estimate
+      const outcome = market.executorVersion === 2 ? await readOutcome(market.chain.id, hash, p.executor, p.user) : undefined
+      const expectedSupplied = (kind === 'swap' ? (freshCapital?.buyAmount ?? 0n) : kind === 'collateral' ? p.initialCollateral : 0n) + fresh.buyAmount
+      const details = outcome && outcomeLines(outcome, [C.token, D.token, K], { supplied: expectedSupplied })
+      setResult({ ok: true, text: hasPosition ? 'Position augmentée.' : 'Position ouverte.', hash, details })
       onDone()
       void wallet.refetch()
     } catch (e) {

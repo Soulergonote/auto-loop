@@ -213,6 +213,7 @@ const anvil = async (method, params) =>
     await page.screenshot({ path: `${outPrefix}-apres.png`, fullPage: true })
     console.log('wallet calls:', [...new Set(await page.evaluate(() => window.__calls))].join(','))
     console.log('notices after:', (await page.locator('.notice, .success').allTextContents()).join(' | '))
+    console.log('real amounts:', (await page.locator('.outcome li').allTextContents()).join(' | '))
     const show = page.locator('button:has-text("Afficher la paire")')
     if (await show.count()) {
       await show.click()

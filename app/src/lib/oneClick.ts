@@ -184,7 +184,7 @@ export function useAtomicBatch(chainId: number, account: Address | undefined): b
  * Sends the batch: a simulation of all the calls first when the RPC can (a failing call stops here), then one
  * confirmation in the wallet. Returns the transaction hash once included.
  */
-export async function sendBatch(chainId: number, user: Address, calls: BatchCall[], onStep: Progress): Promise<Hash | undefined> {
+export async function sendBatch(chainId: number, user: Address, calls: BatchCall[], onStep: Progress, main?: Address): Promise<Hash | undefined> {
   onStep('Simulation du lot…')
   const failure = await simulate(chainId, user, calls)
   if (failure) throw new Error(failure)
@@ -199,7 +199,10 @@ export async function sendBatch(chainId: number, user: Address, calls: BatchCall
         ? 'Le lot a échoué en partie : vérifier les transactions dans le portefeuille.'
         : 'Le lot a échoué : aucune de ses opérations n’a eu lieu.',
     )
-  return status.receipts?.at(-1)?.transactionHash
+  // one transaction for a wallet that bundles the calls; otherwise the one where `main` (the executor) acted
+  const receipts = status.receipts ?? []
+  const own = main ? receipts.find((r) => r.logs.some((l) => l.address.toLowerCase() === main.toLowerCase())) : undefined
+  return (own ?? receipts.at(-1))?.transactionHash
 }
 
 /**
@@ -271,7 +274,7 @@ export async function executeSwapCollateralBatch(p: SwapCollateralPlan, onStep: 
     functionName: 'allowance',
     args: [p.user, p.executor],
   })
-  return sendBatch(p.chainId, p.user, swapCollateralBatchCalls(p, allowance), onStep)
+  return sendBatch(p.chainId, p.user, swapCollateralBatchCalls(p, allowance), onStep, p.executor)
 }
 
 /** Opens in one confirmation, with the allowances read now (not the ones the screen last polled). */
@@ -287,7 +290,7 @@ export async function executeOpenBatch(p: OpenPlan, onStep: Progress): Promise<H
       args: [p.user, p.executor],
     }),
   ])
-  return sendBatch(p.chainId, p.user, openBatchCalls(p, { collateral, borrow }), onStep)
+  return sendBatch(p.chainId, p.user, openBatchCalls(p, { collateral, borrow }), onStep, p.executor)
 }
 
 /** Closes in one confirmation, with the aToken allowance read now. */
@@ -300,7 +303,7 @@ export async function executeCloseBatch(p: ClosePlan, onStep: Progress): Promise
     functionName: 'allowance',
     args: [p.user, p.executor],
   })
-  return sendBatch(p.chainId, p.user, closeBatchCalls(p, allowance), onStep)
+  return sendBatch(p.chainId, p.user, closeBatchCalls(p, allowance), onStep, p.executor)
 }
 
 /** First failing call of the batch, or undefined (also when the RPC cannot simulate a batch: the wallet still does). */

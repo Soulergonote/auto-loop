@@ -12,6 +12,7 @@ import { swapLoss, swapLossProblem } from '../lib/economics'
 import { closeCall, encodeCall, executeClose, explainError, type ClosePlan } from '../lib/execute'
 import { executeCloseBatch, useAtomicBatch } from '../lib/oneClick'
 import { fmtAmount, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { outcomeLines, readOutcome } from '../lib/outcome'
 import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
 import { Card, Fold, LoopLayout, QuoteCompare, Metric, Notice, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
@@ -52,7 +53,7 @@ export function ClosePanel({ reserves, user, account, aggregator, onDone, common
   const [target, setTarget] = useState(1)
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
   const [busy, setBusy] = useState<string>()
-  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash }>()
+  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[] }>()
 
   if (!user) {
     return (
@@ -123,8 +124,8 @@ function ClosePanelInner(p: {
   setSlippage: (s: (typeof SLIPPAGES)[number]) => void
   busy?: string
   setBusy: (s?: string) => void
-  result?: { ok: boolean; text: string; hash?: Hash }
-  setResult: (r?: { ok: boolean; text: string; hash?: Hash }) => void
+  result?: { ok: boolean; text: string; hash?: Hash; details?: string[] }
+  setResult: (r?: { ok: boolean; text: string; hash?: Hash; details?: string[] }) => void
 }) {
   const { market, C, D, user, account, aggregator, slippage, busy, setBusy, result, setResult } = p
   // a wallet that sends atomic batches: approval, close and approval back in one confirmation
@@ -265,8 +266,17 @@ function ClosePanelInner(p: {
       const fresh = await getQuote(quoteReq!)
       if (fresh.simulated) throw new Error('Plus de devis réel disponible')
       if (fresh.minOut < required) throw new Error('Le nouveau devis ne couvre plus le remboursement')
-      const hash = batch ? await executeCloseBatch(makePlan(fresh)!, setBusy) : await executeClose(makePlan(fresh)!, setBusy)
-      setResult({ ok: true, text: full ? 'Position fermée.' : 'Position réduite.', hash })
+      const plan = makePlan(fresh)!
+      const hash = batch ? await executeCloseBatch(plan, setBusy) : await executeClose(plan, setBusy)
+      // v2 emits what it really repaid, withdrew and sent back: shown instead of the estimate
+      const outcome = market.executorVersion === 2 ? await readOutcome(market.chain.id, hash, plan.executor, plan.user) : undefined
+      const details =
+        outcome &&
+        outcomeLines(outcome, [C.token, D.token], {
+          collateralReturned: full ? collatBack : undefined,
+          debtReturned: fresh.buyAmount > owed ? fresh.buyAmount - owed : undefined,
+        })
+      setResult({ ok: true, text: full ? 'Position fermée.' : 'Position réduite.', hash, details })
       p.onDone()
     } catch (e) {
       setResult({ ok: false, text: explainError(e) })

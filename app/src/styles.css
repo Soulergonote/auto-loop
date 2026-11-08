@@ -212,3 +212,6 @@ footer { text-align: center; }
 }
 .inputrow { display: flex; gap: 8px; }
 .inputrow select { width: auto; flex: 0 0 auto; max-width: 45%; }
+.outcome { font-size: 12px; color: var(--muted); }
+.outcome-title { font-weight: 600; color: var(--text); margin-bottom: 2px; }
+.outcome ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font-variant-numeric: tabular-nums; }

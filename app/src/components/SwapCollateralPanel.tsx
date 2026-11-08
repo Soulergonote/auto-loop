@@ -13,6 +13,7 @@ import { encodeCall, executeSwapCollateral, explainError, swapCollateralCall } f
 import { executeSwapCollateralBatch, useAtomicBatch } from '../lib/oneClick'
 import { aTokensToApprove, flashAmountFor, projectSwap, swapTargets, thresholdIn, type SwapCollateralPlan } from '../lib/swapCollateral'
 import { fmtAmount, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { outcomeLines, readOutcome } from '../lib/outcome'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
 import { Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
@@ -51,7 +52,7 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
   const [part, setPart] = useState<(typeof PARTS)[number]>('100')
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
   const [busy, setBusy] = useState<string>()
-  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; to?: Token }>()
+  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; to?: Token; details?: string[] }>()
   const batch = useAtomicBatch(market.chain.id, account) === true
   const gasPrice = useGasPrice({ chainId: market.chain.id, query: { refetchInterval: 30_000 } })
 
@@ -189,7 +190,11 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
       if (fresh.simulated) throw new Error('Plus de devis réel disponible')
       const p = plan(fresh)!
       const hash = batch ? await executeSwapCollateralBatch(p, setBusy) : await executeSwapCollateral(p, setBusy)
-      setResult({ ok: true, text: `Collatéral changé : ${T!.token.symbol}.`, hash, to: T!.token })
+      // what the contract really withdrew and supplied, instead of the estimate
+      const outcome = await readOutcome(market.chain.id, hash, p.executor, p.user)
+      const expected = fresh.buyAmount - (flashLoanOwed(p.toAmount, premiumBps) - p.toAmount)
+      const details = outcome && outcomeLines(outcome, [C.token, D.token, T!.token], { supplied: expected })
+      setResult({ ok: true, text: `Collatéral changé : ${T!.token.symbol}.`, hash, to: T!.token, details })
       onDone()
     } catch (e) {
       setResult({ ok: false, text: explainError(e) })
