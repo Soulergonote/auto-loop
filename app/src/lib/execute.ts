@@ -1,15 +1,19 @@
-import { BaseError, ContractFunctionRevertedError, maxUint256, type Address, type Hash } from 'viem'
+import { BaseError, ContractFunctionRevertedError, encodeFunctionData, maxUint256, zeroAddress, type Address, type Hash, type Hex } from 'viem'
 import { simulateContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
 import { wagmiConfig } from '../wagmi'
-import { erc20Abi, executorAbi, poolAbi } from '../abi'
+import { erc20Abi, executorAbi, executorAbiV1, poolAbi } from '../abi'
 import type { Quote } from './quotes'
-import { signATokenPermit, signDelegation } from './signatures'
+import { signATokenPermit, signDelegation, type ExecutorSignature } from './signatures'
 
 export type Progress = (step: string) => void
 
 export type OpenPlan = {
   chainId: number
   executor: Address
+  /** contract version of `executor` (2 for every new deployment) */
+  version?: 1 | 2
+  /** v2: the call reverts if the account's health factor ends below this (1e18 = 1.00; 0 = no check) */
+  minHealthFactor?: bigint
   user: Address
   collateral: Address
   debt: Address
@@ -28,6 +32,10 @@ export type OpenPlan = {
 export type ClosePlan = {
   chainId: number
   executor: Address
+  version?: 1 | 2
+  /** v2: Morpho (no premium) or the Aave pool (premium); v1 always borrows from Aave */
+  flashLender?: Address
+  minHealthFactor?: bigint
   user: Address
   collateral: Address
   debt: Address
@@ -42,12 +50,41 @@ export type ClosePlan = {
   quote: Quote
 }
 
-export function openArgs(p: OpenPlan) {
+/** Each call's deadline: the signatures used with it expire after 20 minutes too. */
+const callDeadline = () => BigInt(Math.floor(Date.now() / 1000) + 20 * 60)
+
+/** v1 parameters (executors deployed before v2). */
+export function openArgsV1(p: OpenPlan) {
   return {
     collateralAsset: p.collateral,
     debtAsset: p.debt,
     initialCollateral: p.initialCollateral,
     debtAmount: p.debtAmount,
+    swap: { router: p.quote.router, data: p.quote.data, minOut: p.quote.minOut },
+  } as const
+}
+
+/** v2 parameters: the capital is the collateral itself, one swap step from the debt asset to the collateral. */
+export function openArgs(p: OpenPlan) {
+  return {
+    collateralAsset: p.collateral,
+    debtAsset: p.debt,
+    capitalToken: p.collateral,
+    capitalAmount: p.initialCollateral,
+    capitalSteps: [],
+    debtAmount: p.debtAmount,
+    steps: [{ router: p.quote.router, tokenOut: p.collateral, data: p.quote.data, minOut: p.quote.minOut }],
+    guard: { minHealthFactor: p.minHealthFactor ?? 0n, deadline: callDeadline() },
+  } as const
+}
+
+export function closeArgsV1(p: ClosePlan) {
+  return {
+    collateralAsset: p.collateral,
+    debtAsset: p.debt,
+    repayAmount: p.full ? maxUint256 : p.repayAmount,
+    collateralToWithdraw: p.full ? maxUint256 : p.collateralToWithdraw,
+    collateralToSell: p.collateralToSell,
     swap: { router: p.quote.router, data: p.quote.data, minOut: p.quote.minOut },
   } as const
 }
@@ -59,8 +96,36 @@ export function closeArgs(p: ClosePlan) {
     repayAmount: p.full ? maxUint256 : p.repayAmount,
     collateralToWithdraw: p.full ? maxUint256 : p.collateralToWithdraw,
     collateralToSell: p.collateralToSell,
-    swap: { router: p.quote.router, data: p.quote.data, minOut: p.quote.minOut },
+    steps: [{ router: p.quote.router, tokenOut: p.debt, data: p.quote.data, minOut: p.quote.minOut }],
+    flashLender: p.flashLender ?? zeroAddress,
+    guard: { minHealthFactor: p.full ? 0n : (p.minHealthFactor ?? 0n), deadline: callDeadline() },
   } as const
+}
+
+type Call = { abi: typeof executorAbi | typeof executorAbiV1; functionName: string; args: readonly unknown[] }
+
+/** The executor call of an open, for the plan's contract version, with or without the delegation signature. */
+export function openCall(p: OpenPlan, sig?: ExecutorSignature): Call {
+  const v1 = p.version === 1
+  const args = v1 ? openArgsV1(p) : openArgs(p)
+  return { abi: v1 ? executorAbiV1 : executorAbi, functionName: sig ? 'openWithSig' : 'open', args: sig ? [args, sig] : [args] }
+}
+
+export function closeCall(p: ClosePlan, sig?: ExecutorSignature): Call {
+  if (p.version !== 1 && !p.flashLender) throw new Error('Prêteur du flash loan non choisi')
+  const v1 = p.version === 1
+  const args = v1 ? closeArgsV1(p) : closeArgs(p)
+  return { abi: v1 ? executorAbiV1 : executorAbi, functionName: sig ? 'closeWithSig' : 'close', args: sig ? [args, sig] : [args] }
+}
+
+export const encodeCall = (c: Call): Hex => encodeFunctionData(c as never)
+
+/** Simulates then sends one executor call from the user's account. */
+async function send(chainId: number, user: Address, executor: Address, c: Call, onStep: Progress, what: string): Promise<Hash> {
+  onStep(`Simulation de ${what}…`)
+  const { request } = await simulateContract(wagmiConfig, { chainId, account: user, address: executor, ...(c as object) } as never)
+  onStep('Confirmation de la transaction dans le portefeuille…')
+  return writeContract(wagmiConfig, request as never)
 }
 
 async function approve(chainId: number, token: Address, spender: Address, amount: bigint, account: Address, onStep: Progress) {
@@ -101,35 +166,13 @@ export async function executeOpen(p: OpenPlan, onStep: Progress): Promise<Hash> 
     await approve(p.chainId, p.collateral, p.executor, p.initialCollateral, p.user, onStep)
   }
 
-  const args = openArgs(p)
-  const confirm = () => onStep('Confirmation de la transaction dans le portefeuille…')
   let hash: Hash
   if (p.borrowAllowance >= p.debtAmount) {
-    onStep('Simulation de l’ouverture…')
-    const { request } = await simulateContract(wagmiConfig, {
-      chainId: p.chainId,
-      account: p.user,
-      address: p.executor,
-      abi: executorAbi,
-      functionName: 'open',
-      args: [args],
-    })
-    confirm()
-    hash = await writeContract(wagmiConfig, request)
+    hash = await send(p.chainId, p.user, p.executor, openCall(p), onStep, 'l’ouverture')
   } else {
     onStep('Signature de la délégation de crédit…')
     const sig = await signDelegation(p.chainId, p.user, p.variableDebtToken, p.executor, p.debtAmount)
-    onStep('Simulation de l’ouverture…')
-    const { request } = await simulateContract(wagmiConfig, {
-      chainId: p.chainId,
-      account: p.user,
-      address: p.executor,
-      abi: executorAbi,
-      functionName: 'openWithSig',
-      args: [args, sig],
-    })
-    confirm()
-    hash = await writeContract(wagmiConfig, request)
+    hash = await send(p.chainId, p.user, p.executor, openCall(p, sig), onStep, 'l’ouverture')
   }
   onStep('En attente d’inclusion…')
   const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: p.chainId, hash })
@@ -140,37 +183,15 @@ export async function executeOpen(p: OpenPlan, onStep: Progress): Promise<Hash> 
 /** Closes (fully or partially): aToken permit by signature if needed, then one transaction. */
 export async function executeClose(p: ClosePlan, onStep: Progress): Promise<Hash> {
   if (p.quote.simulated) throw new Error('Devis simulé : impossible à exécuter')
-  const args = closeArgs(p)
-  const confirm = () => onStep('Confirmation de la transaction dans le portefeuille…')
   let hash: Hash
   if (p.aTokenAllowance >= p.aTokensNeeded) {
-    onStep('Simulation de la fermeture…')
-    const { request } = await simulateContract(wagmiConfig, {
-      chainId: p.chainId,
-      account: p.user,
-      address: p.executor,
-      abi: executorAbi,
-      functionName: 'close',
-      args: [args],
-    })
-    confirm()
-    hash = await writeContract(wagmiConfig, request)
+    hash = await send(p.chainId, p.user, p.executor, closeCall(p), onStep, 'la fermeture')
   } else {
     onStep('Signature de l’autorisation sur les aTokens…')
     // a little headroom: aToken balances grow every block
     const value = p.full ? (p.aTokensNeeded * 1001n) / 1000n : p.aTokensNeeded
     const sig = await signATokenPermit(p.chainId, p.user, p.aToken, p.executor, value)
-    onStep('Simulation de la fermeture…')
-    const { request } = await simulateContract(wagmiConfig, {
-      chainId: p.chainId,
-      account: p.user,
-      address: p.executor,
-      abi: executorAbi,
-      functionName: 'closeWithSig',
-      args: [args, sig],
-    })
-    confirm()
-    hash = await writeContract(wagmiConfig, request)
+    hash = await send(p.chainId, p.user, p.executor, closeCall(p, sig), onStep, 'la fermeture')
   }
   onStep('En attente d’inclusion…')
   const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: p.chainId, hash })
@@ -187,6 +208,10 @@ const REVERT_MESSAGES: Record<string, string> = {
   InvalidFlashLoan: 'Flash loan incohérent avec les paramètres.',
   ZeroAmount: 'Montant nul.',
   SameAsset: 'Le collatéral et la dette doivent être différents.',
+  HealthFactorTooLow: 'Le health factor finirait sous le minimum prévu : le prix a bougé, recoter.',
+  Expired: 'Délai dépassé : recoter et signer à nouveau.',
+  FlashLenderNotAllowed: 'Ce prêteur de flash loan n’est pas enregistré dans le contrat.',
+  WrongFinalToken: 'Le swap ne finit pas dans le bon token.',
 }
 
 /** Human-readable error, decoding LeverageExecutor custom errors when present. */

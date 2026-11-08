@@ -155,8 +155,32 @@ function readExecutors(): Record<string, Address> {
 }
 const EXECUTORS = readExecutors()
 
+/**
+ * Morpho Blue per chain, registered in v2 executors as a free flash lender for closes (no premium, unlike Aave).
+ * Checked 2026-11-08 on each chain's RPC (Morpho Blue code, owner(), isIrmEnabled()). Balancer v2 is not used: its
+ * Vault locks swaps during its own flash loans, so routes through Balancer pools would fail (audit L-02).
+ */
+export const MORPHO_BLUE: Record<number, Address> = {
+  1: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb',
+  8453: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb',
+  42161: '0x6c247b1F6182318877311737BaC0844bAa518F5e',
+  10: '0xce95AfbB8EA029495c66020883F87aaE8864AF92',
+  137: '0x1bF0c2541F820E775182832f06c0B7Fc27A25f67',
+  43114: '0x895383274303AA19fe978AFB4Ac55C7f094f982C',
+  56: '0x01b0Bd309AA75547f7a37Ad7B1219A898E67a83a',
+  146: '0xd6c916eB7542D0Ad3f18AEd0FCBD50C582cfa95f',
+}
+
+/** Free flash lenders a new executor registers on a chain (kind 1 = Morpho), fixed for good like the routers. */
+export function executorLenders(chainId: number): { kind: number; lender: Address }[] {
+  const m = MORPHO_BLUE[chainId]
+  return m ? [{ kind: 1, lender: getAddress(m) }] : []
+}
+
 export type Market = MarketDef & {
   executor?: Address
+  /** contract version of `executor`, known once its code is checked on chain (2 for every new deployment) */
+  executorVersion?: 1 | 2
   /** where the executor address comes from: the build (VITE_EXECUTORS) or a deployment from this browser's wallet */
   executorSource?: 'build' | 'wallet'
   /** taker sent to the aggregators: the contract holds the tokens during the swap */
@@ -228,7 +252,6 @@ export function rpcUrls(chain: Chain): string[] {
 export type QuoteMode = 'auto' | 'live' | 'mock'
 const rawMode = import.meta.env.VITE_QUOTE_MODE as string | undefined
 export const QUOTE_MODE: QuoteMode = rawMode === 'live' || rawMode === 'mock' ? rawMode : 'auto'
-
 
 /** Static illustrative market data instead of on-chain reads (screenshots, offline work). Never for real use. */
 export const DEMO = import.meta.env.VITE_DEMO === 'true'

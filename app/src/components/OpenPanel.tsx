@@ -1,8 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useGasPrice } from 'wagmi'
-import { encodeFunctionData, parseUnits, type Address, type Hash } from 'viem'
+import { parseUnits, type Address, type Hash } from 'viem'
 import { AGGREGATORS, type AggregatorChoice } from '../config'
-import { executorAbi } from '../abi'
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../lib/merkl'
 import { CampaignTable } from './CampaignTable'
 import { RiskPanel } from './RiskPanel'
@@ -14,7 +13,7 @@ import { loopNativeApy } from '../lib/nativeYield'
 import { WINDOWS, isRateSpike, useRateAverages } from '../lib/rateHistory'
 import { extraDebtForTarget, maxLeverage, netApy, positionLeverage, project, roundSignificant, toBase, EMPTY_ACCOUNT, NO_POSITION } from '../lib/math'
 import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
-import { executeOpen, explainError, openArgs, type OpenPlan } from '../lib/execute'
+import { encodeCall, executeOpen, explainError, openCall, type OpenPlan } from '../lib/execute'
 import { executeOpenBatch, useAtomicBatch } from '../lib/oneClick'
 import { fmtAmount, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
@@ -236,6 +235,9 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       ? {
           chainId: market.chain.id,
           executor: executor ?? market.quoteTaker,
+          version: market.executorVersion,
+          // worst case of the quote (its minimum), with a little room for prices moving before inclusion
+          minHealthFactor: worst && Number.isFinite(worst.healthFactor) ? BigInt(Math.floor(worst.healthFactor * 0.98 * 1e6)) * 10n ** 12n : 0n,
           user: account,
           collateral: C.token.address,
           debt: D.token.address,
@@ -251,19 +253,16 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       : undefined
 
   const preview = q
-    ? encodeFunctionData({
-        abi: executorAbi,
-        functionName: 'open',
-        args: [
-          openArgs({
-            collateral: C.token.address,
-            debt: D.token.address,
-            initialCollateral: debouncedInitial ?? 0n,
-            debtAmount,
-            quote: q,
-          } as OpenPlan),
-        ],
-      })
+    ? encodeCall(
+        openCall({
+          version: market.executorVersion,
+          collateral: C.token.address,
+          debt: D.token.address,
+          initialCollateral: debouncedInitial ?? 0n,
+          debtAmount,
+          quote: q,
+        } as OpenPlan),
+      )
     : undefined
 
   const stale = initial !== debouncedInitial || quote.isFetching

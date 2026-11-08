@@ -1,14 +1,15 @@
 import { useState, type ReactNode } from 'react'
-import { encodeFunctionData, type Address, type Hash } from 'viem'
-import { AGGREGATORS, type AggregatorChoice } from '../config'
-import { executorAbi } from '../abi'
+import { type Address, type Hash } from 'viem'
+import { useReadContract } from 'wagmi'
+import { AGGREGATORS, MORPHO_BLUE, type AggregatorChoice } from '../config'
+import { erc20Abi } from '../abi'
 import type { Reserves, UserState } from '../lib/useMarket'
 import { useQuote } from '../lib/useQuote'
 import { getQuote } from '../lib/quotes'
 import { collateralToSellForRepay, flashLoanOwed, positionLeverage, repayForTarget, roundSignificant, toBase } from '../lib/math'
 import { useDebounced } from '../lib/useDebounced'
 import { swapLoss, swapLossProblem } from '../lib/economics'
-import { closeArgs, executeClose, explainError, type ClosePlan } from '../lib/execute'
+import { closeCall, encodeCall, executeClose, explainError, type ClosePlan } from '../lib/execute'
 import { executeCloseBatch, useAtomicBatch } from '../lib/oneClick'
 import { fmtAmount, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
@@ -125,7 +126,7 @@ function ClosePanelInner(p: {
   result?: { ok: boolean; text: string; hash?: Hash }
   setResult: (r?: { ok: boolean; text: string; hash?: Hash }) => void
 }) {
-  const { market, C, D, premiumBps, user, account, aggregator, slippage, busy, setBusy, result, setResult } = p
+  const { market, C, D, user, account, aggregator, slippage, busy, setBusy, result, setResult } = p
   // a wallet that sends atomic batches: approval, close and approval back in one confirmation
   const batch = useAtomicBatch(market.chain.id, account) === true
   const position = { collateralBase: toBase(user.aTokenBalance, C.side), debtBase: toBase(user.debtBalance, D.side) }
@@ -136,6 +137,19 @@ function ClosePanelInner(p: {
   const full = debouncedLev <= 1
   // rounded so that interest accruing on the debt does not re-quote at every block
   const repay = full ? user.debtBalance : roundSignificant(repayForTarget(position, BigInt(Math.round(debouncedLev * 10_000)), D.side), 5)
+  // v2 executor: borrow the repayment from Morpho (no premium) when it holds enough of the debt asset, else from Aave
+  const morpho = market.executorVersion === 2 ? MORPHO_BLUE[market.chain.id] : undefined
+  const morphoCash = useReadContract({
+    chainId: market.chain.id,
+    address: D.token.address,
+    abi: erc20Abi,
+    functionName: 'balanceOf',
+    args: morpho ? [morpho] : undefined,
+    query: { enabled: !!morpho, refetchInterval: 60_000 },
+  })
+  const viaMorpho = !!morpho && morphoCash.data !== undefined && morphoCash.data >= (repay * 102n) / 100n
+  const flashLender: Address = viaMorpho ? morpho! : market.pool
+  const premiumBps = viaMorpho ? 0n : p.premiumBps
   const owed = flashLoanOwed(repay, premiumBps)
   let toSell = collateralToSellForRepay(repay, premiumBps, BigInt(slippage), C.side, D.side)
   if (toSell > user.aTokenBalance) toSell = user.aTokenBalance
@@ -201,6 +215,10 @@ function ClosePanelInner(p: {
       ? {
           chainId: market.chain.id,
           executor: market.executor ?? market.quoteTaker,
+          version: market.executorVersion,
+          flashLender,
+          // the health factor may end a little lower than shown (prices move between quote and inclusion), not much
+          minHealthFactor: full || !Number.isFinite(hfAfter) ? 0n : BigInt(Math.floor(hfAfter * 0.98 * 1e6)) * 10n ** 12n,
           user: account,
           collateral: C.token.address,
           debt: D.token.address,
@@ -216,21 +234,19 @@ function ClosePanelInner(p: {
       : undefined
 
   const preview = q
-    ? encodeFunctionData({
-        abi: executorAbi,
-        functionName: 'close',
-        args: [
-          closeArgs({
-            collateral: C.token.address,
-            debt: D.token.address,
-            full,
-            repayAmount: repay,
-            collateralToWithdraw: toSell,
-            collateralToSell: toSell,
-            quote: q,
-          } as ClosePlan),
-        ],
-      })
+    ? encodeCall(
+        closeCall({
+          version: market.executorVersion,
+          flashLender,
+          collateral: C.token.address,
+          debt: D.token.address,
+          full,
+          repayAmount: repay,
+          collateralToWithdraw: toSell,
+          collateralToSell: toSell,
+          quote: q,
+        } as ClosePlan),
+      )
     : undefined
 
   const canSign = !!market.executor && !!account && !!q && !q.simulated && problems.length === 0 && !quote.isFetching && !busy && lev === debouncedLev
@@ -336,7 +352,7 @@ function ClosePanelInner(p: {
 
         <Fold
           title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)} · prime flash loan ${fmtPct(Number(premiumBps) / 10_000)}`}
+          value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan Aave ${fmtPct(Number(premiumBps) / 10_000)}`}`}
         >
           {p.common}
           <div className="field">

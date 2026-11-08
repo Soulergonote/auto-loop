@@ -1,6 +1,6 @@
 # Auto-loop : interface
 
-Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Plasma, Linea, Sonic et Monad, via le contrat `LeverageExecutor` (`../contracts`). On choisit la paire collatéral / dette et le levier ; le swap passe par Velora ou KyberSwap selon la chaîne (0x et 1inch sont codés mais pas proposés) ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
+Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Plasma, Linea, Sonic et Monad, via le contrat `LeverageExecutorV2` (`../contracts` ; un contrat v1 déjà déployé reste reconnu et utilisé). On choisit la paire collatéral / dette et le levier ; le swap passe par Velora ou KyberSwap selon la chaîne (0x et 1inch sont codés mais pas proposés) ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
 
 Stack : Vite + React + TypeScript, wagmi 2 / viem 2.
 
@@ -19,7 +19,7 @@ Le build ne dépend d'aucun serveur : le navigateur appelle directement l'API Ve
 
 | Variable | Rôle |
 |---|---|
-| `VITE_EXECUTORS` | Adresse du contrat déployé pour chaque marché, en JSON (`{"base":"0x…"}`) : un contrat par pool Aave. Marché absent : l'app propose de **déployer le contrat depuis le portefeuille connecté** (bouton « Déployer le contrat », routeurs = agrégateurs qui cotent sur la chaîne), ou de coller l'adresse d'un contrat déjà déployé ; l'adresse est retenue dans le navigateur. Toute adresse, d'ici ou du navigateur, n'est utilisée qu'après vérification on-chain que son code est exactement celui du contrat pour ce Pool. `VITE_EXECUTOR_ADDRESS` reste lue pour Base. |
+| `VITE_EXECUTORS` | Adresse du contrat déployé pour chaque marché, en JSON (`{"base":"0x…"}`) : un contrat par pool Aave. Marché absent : l'app propose de **déployer le contrat v2 depuis le portefeuille connecté** (bouton « Déployer le contrat », routeurs = agrégateurs qui cotent sur la chaîne, prêteur gratuit = Morpho Blue là où il existe), ou de coller l'adresse d'un contrat déjà déployé ; l'adresse est retenue dans le navigateur. Toute adresse, d'ici ou du navigateur, n'est utilisée qu'après vérification on-chain que son code est exactement celui du contrat (v2, ou v1 pour un contrat déjà déployé) pour ce Pool. Avec un contrat v1 enregistré dans le navigateur, un bandeau propose de déployer la v2. `VITE_EXECUTOR_ADDRESS` reste lue pour Base. |
 | `VITE_RPC_URL_<chainId>` | RPC d'une chaîne pour les lectures et simulations (vide = PublicNode, puis le RPC public de la chaîne). `VITE_RPC_URL` vaut pour Base. Pour un fork local : `anvil --fork-url https://mainnet.base.org --chain-id 8453` puis `http://127.0.0.1:8545`. |
 | `VITE_QUOTE_MODE` | `auto` (API réelles, repli sur un devis simulé si elles ne répondent pas), `live` ou `mock`. Un devis simulé n’est jamais exécutable. |
 | `ZEROX_API_KEY`, `ONEINCH_API_KEY` | Lues uniquement par le serveur de dev (proxy `/api/0x` et `/api/1inch` dans `vite.config.ts`), jamais envoyées au navigateur : 0x et 1inch ne marchent donc pas dans le build statique. Inutiles tant que 0x et 1inch sont désactivés ; Velora n’en demande pas. |
@@ -81,7 +81,7 @@ Les catégories eMode du marché sont lues sur le pool (getters Aave v3.2+ : con
 **Ouvrir** : emprunt `D = capital × (levier − 1)` au prix de l’oracle Aave, devis D → collatéral chez l’agrégateur choisi (taker = contrat), `minOut` = devis − slippage. Affiche collatéral déposé, levier effectif, health factor (attendu et pire cas), prix de liquidation, LTV face au maximum d’Aave, APY net. Bloque si la LTV dépasse le maximum, si l’actif est isolé, gelé, sans flash loan, ou si le solde manque.
 Signature : `approve` du collatéral si besoin (une transaction, une fois), délégation de crédit signée en EIP-712 si besoin (sans gas), puis `openWithSig` ou `open`.
 
-**Fermer / réduire** (25, 50, 75 % ou tout) : calcule le collatéral à vendre pour couvrir dette + prime de flash loan + slippage, vérifie que le minimum garanti du devis couvre le remboursement, affiche ce qui revient. Permit d’aToken signé si besoin, puis `closeWithSig` ou `close`.
+**Fermer / réduire** (25, 50, 75 % ou tout) : avec la v2, le flash loan vient de Morpho Blue (sans prime) quand il détient au moins 102 % du montant à rembourser, sinon d'Aave (prime). Calcule le collatéral à vendre pour couvrir dette + prime éventuelle + slippage, vérifie que le minimum garanti du devis couvre le remboursement, affiche ce qui revient. Permit d’aToken signé si besoin, puis `closeWithSig` ou `close`.
 
 Avant chaque signature : nouvelle cotation (un devis expire en quelques blocs), simulation `eth_call` de la transaction, erreurs du contrat traduites. Le domaine EIP-712 est recalculé et comparé au `DOMAIN_SEPARATOR` du token avant de signer.
 
@@ -113,6 +113,8 @@ Résultats (1 WETH de capital, levier 3x, dette USDC, slippage 0,5 %) :
 - fermeture à 50 % puis totale : permit d’aWETH signé, `closeWithSig`. Dette à 0, ~1,7M gas pour la fermeture totale ; il revient 0,9835 WETH + 33,6 USDC, soit ~0,25 % de coût aller-retour sur le capital (swaps sur 3x le capital + prime de flash loan) ;
 - après chaque transaction, le contrat ne garde ni token ni approval ;
 - avec le filtre AMM, 3 tours complets sur 4 ont réussi (dont un avec fermeture à 50 %) ; l’échec est remonté comme une erreur dans l’interface, sans perte.
+
+Testé le 08/11/2026 avec la v2 (`bash e2e/fork.sh` la déploie, `V1=1` déploie l'ancienne) : ouverture 3x, augmentation à 4x, réduction à 2x, fermeture totale via Morpho (prime 0, événement `PositionClosed` vérifié), en étapes et en lot (`BATCH=1`), avec Velora et KyberSwap ; déploiement par le bouton de l'app ; ouverture et fermeture avec un contrat v1 (bandeau de mise à jour affiché). La v2 ajoute un health factor minimum (98 % du pire cas du devis) et une échéance de 20 minutes à chaque appel.
 
 Limite propre au fork : le fork est figé au bloc du `fork.sh`, alors que Velora cote sur l’état réel du moment. Les DEX à prix d’oracle (Kipseli, Tessera, WooFiV2, metric-v1…) revertent alors systématiquement, d’où `VITE_VELORA_INCLUDE_DEXS` limité aux AMM classiques. Même ainsi, une route peut encore échouer à la simulation si le fork a trop vieilli : relancer `fork.sh`. Sur le vrai réseau ce décalage n’existe pas, et de toute façon la simulation avant signature bloque une transaction qui échouerait.
 

@@ -10,19 +10,19 @@
  *     allowance is put back to what it was right after the swap (0 most of the time);
  *   - the capital handed to the contract is the sum of those decoded minimums: if a swap returns less, the contract's
  *     pull of that capital fails and the whole batch reverts;
- *   - the contract's `open` checks its own swap's minimum on-chain (unchanged contract); the collateral approval and
+ *   - the contract's `open` checks its own swap's minimum on-chain (and, v2, the health factor and a deadline); the collateral approval and
  *     the credit delegation are for the exact amounts and are put back to their previous values after it.
  */
 import { encodeFunctionData, getAddress, parseAbi, type Address, type Hash, type Hex } from 'viem'
 import { getPublicClient, readContract, sendCalls, waitForCallsStatus } from '@wagmi/core'
 import { useCapabilities } from 'wagmi'
 import { wagmiConfig } from '../wagmi'
-import { debtTokenAbi, erc20Abi, executorAbi, poolAbi } from '../abi'
+import { debtTokenAbi, erc20Abi, poolAbi } from '../abi'
 import type { Token } from '../config'
 import { getQuote, QuoteError, type Quote, type QuoteRequest } from './quotes'
 import { distributorAbi, MERKL_DISTRIBUTOR, type Claimable } from './reinvest'
 import { walletSwapProblem, swapTerms } from './swapCalldata'
-import { closeArgs, openArgs, type ClosePlan, type OpenPlan, type Progress } from './execute'
+import { closeCall, encodeCall, openCall, type ClosePlan, type OpenPlan, type Progress } from './execute'
 
 const withdrawAbi = parseAbi(['function withdraw(address asset, uint256 amount, address to) returns (uint256)'])
 
@@ -92,6 +92,10 @@ export type ReinvestBatch = {
   debt: Token
   variableDebtToken: Address
   executor: Address
+  /** contract version of `executor` */
+  version?: 1 | 2
+  /** v2 guard on the account's health factor after the lever (0 = none) */
+  minHealthFactor?: bigint
   collateralAllowance: bigint
   borrowAllowance: bigint
   /** debt the contract borrows to bring the position back to its leverage; 0 = nothing to lever */
@@ -140,7 +144,9 @@ export function buildReinvestBatch(p: ReinvestBatch): { calls: BatchCall[]; capi
       set: `Déléguer l’emprunt de ce montant de ${p.debt.symbol} au contrat`,
       reset: `Remettre la délégation ${p.debt.symbol} du contrat à sa valeur`,
     })
-    const args = openArgs({
+    const call = openCall({
+      version: p.version,
+      minHealthFactor: p.minHealthFactor,
       collateral: p.collateral.address,
       debt: p.debt.address,
       initialCollateral: capital,
@@ -152,7 +158,7 @@ export function buildReinvestBatch(p: ReinvestBatch): { calls: BatchCall[]; capi
       ...del.before,
       {
         to: p.executor,
-        data: encodeFunctionData({ abi: executorAbi, functionName: 'open', args: [args] }),
+        data: encodeCall(call),
         label: 'Augmenter la position : flash loan, swap et dépôt',
       },
       ...del.after,
@@ -224,7 +230,7 @@ export function openBatchCalls(p: OpenPlan, allowances: { collateral: bigint; bo
     ...emode,
     ...col.before,
     ...del.before,
-    { to: p.executor, data: encodeFunctionData({ abi: executorAbi, functionName: 'open', args: [openArgs(p)] }), label: 'Ouvrir : flash loan, swap et dépôt' },
+    { to: p.executor, data: encodeCall(openCall(p)), label: 'Ouvrir : flash loan, swap et dépôt' },
     ...del.after,
     ...col.after,
   ]
@@ -244,7 +250,7 @@ export function closeBatchCalls(p: ClosePlan, aTokenAllowance: bigint): BatchCal
     ...a.before,
     {
       to: p.executor,
-      data: encodeFunctionData({ abi: executorAbi, functionName: 'close', args: [closeArgs(p)] }),
+      data: encodeCall(closeCall(p)),
       label: 'Fermer : flash loan, remboursement, retrait et swap',
     },
     ...a.after,

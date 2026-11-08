@@ -5,7 +5,8 @@ const sig = '(uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)'
 const openParams = `(address collateralAsset, address debtAsset, uint256 initialCollateral, uint256 debtAmount, ${swap} swap)`
 const closeParams = `(address collateralAsset, address debtAsset, uint256 repayAmount, uint256 collateralToWithdraw, uint256 collateralToSell, ${swap} swap)`
 
-export const executorAbi = parseAbi([
+/** LeverageExecutor v1: still used by executors deployed before v2 (positions live in the user's Aave account). */
+export const executorAbiV1 = parseAbi([
   'constructor(address pool, address[] routers)',
   'function POOL() view returns (address)',
   `function open(${openParams} p)`,
@@ -23,6 +24,46 @@ export const executorAbi = parseAbi([
   'error InsufficientToRepayFlashLoan(uint256 balance, uint256 owed)',
   'error ZeroAddress()',
   'error InvalidRouter(address router)',
+])
+
+const step = '(address router, address tokenOut, bytes data, uint256 minOut)'
+const guard = '(uint256 minHealthFactor, uint256 deadline)'
+const openV2 = `(address collateralAsset, address debtAsset, address capitalToken, uint256 capitalAmount, ${step}[] capitalSteps, uint256 debtAmount, ${step}[] steps, ${guard} guard)`
+const closeV2 = `(address collateralAsset, address debtAsset, uint256 repayAmount, uint256 collateralToWithdraw, uint256 collateralToSell, ${step}[] steps, address flashLender, ${guard} guard)`
+const closeResult =
+  '(uint256 debtRepaid, uint256 collateralWithdrawn, uint256 collateralReturned, uint256 debtReturned, uint256 flashPremium, uint256 healthFactor)'
+
+/** LeverageExecutorV2, deployed by the app. */
+export const executorAbi = parseAbi([
+  'constructor(address pool, address[] routers, (uint8 kind, address lender)[] lenders)',
+  'function POOL() view returns (address)',
+  `function open(${openV2} p) returns (uint256 collateralSupplied, uint256 debtBorrowed, uint256 healthFactor)`,
+  `function openWithSig(${openV2} p, ${sig} delegation) returns (uint256 collateralSupplied, uint256 debtBorrowed, uint256 healthFactor)`,
+  `function close(${closeV2} p) returns (${closeResult})`,
+  `function closeWithSig(${closeV2} p, ${sig} aTokenPermit) returns (${closeResult})`,
+  'function isRouterAllowed(address) view returns (bool)',
+  'function flashLenderKind(address) view returns (uint8)',
+  'error ZeroAddress()',
+  'error SameAsset()',
+  'error ZeroAmount()',
+  'error Expired(uint256 deadline)',
+  'error HealthFactorTooLow(uint256 healthFactor, uint256 minHealthFactor)',
+  'error InvalidRouter(address router)',
+  'error RouterNotAllowed(address router)',
+  'error InvalidFlashLender(address lender)',
+  'error FlashLenderNotAllowed(address lender)',
+  'error CallerNotLender()',
+  'error InitiatorNotSelf()',
+  'error InvalidFlashLoan()',
+  'error UnexpectedFlashLoan()',
+  'error FlashLoanNotExecuted()',
+  'error InvalidSteps()',
+  'error UnexpectedSteps()',
+  'error WrongFinalToken(address tokenOut, address expected)',
+  'error InsufficientOutput(uint256 received, uint256 minOut)',
+  'error ExcessiveInput(uint256 spent, uint256 maxIn)',
+  'error SellExceedsWithdrawn(uint256 toSell, uint256 withdrawn)',
+  'error InsufficientToRepayFlashLoan(uint256 balance, uint256 owed)',
 ])
 
 export const poolAbi = parseAbi([

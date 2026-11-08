@@ -8,7 +8,11 @@ const USDE = '0x00000000000000000000000000000000000000c1'
 const op = (o: Record<string, unknown>) => toCampaign({ action: 'LEND', name: 'x', identifier: '', tokens: [], ...o } as never)
 
 const collateral = { token: { address: USDE, symbol: 'USDe' }, aToken: A_USDE, variableDebtToken: '0x00000000000000000000000000000000000000e1' } as const
-const debt = { token: { address: '0x00000000000000000000000000000000000000c2', symbol: 'USDC' }, aToken: '0x00000000000000000000000000000000000000a2', variableDebtToken: D_USDC } as const
+const debt = {
+  token: { address: '0x00000000000000000000000000000000000000c2', symbol: 'USDC' },
+  aToken: '0x00000000000000000000000000000000000000a2',
+  variableDebtToken: D_USDC,
+} as const
 
 describe('Merkl campaigns', () => {
   it('skips restricted audiences, keeps BORROW_BL as conditional', () => {
@@ -18,7 +22,12 @@ describe('Merkl campaigns', () => {
   })
 
   it('reads the netted assets from the description', () => {
-    expect(parseNetOf('Earn rewards on your net lending position (USDS supply minus USDS, USDT, USDC, USDe borrows) on Aave')).toEqual(['usds', 'usdt', 'usdc', 'usde'])
+    expect(parseNetOf('Earn rewards on your net lending position (USDS supply minus USDS, USDT, USDC, USDe borrows) on Aave')).toEqual([
+      'usds',
+      'usdt',
+      'usdc',
+      'usde',
+    ])
     expect(parseNetOf('Earn rewards on your net borrowing position (USDC borrow minus USDC, RLUSD supplies) on Aave')).toEqual(['usdc', 'rlusd'])
   })
 
@@ -36,7 +45,14 @@ describe('Merkl campaigns', () => {
   })
 
   it('counts borrow-from-collateral campaigns only with the right collateral', () => {
-    const c = op({ type: 'AAVE_BORROW_FROM_COLLATERAL', action: 'BORROW', identifier: 'cd34', explorerAddress: D_USDC, apr: 1, tokens: [{ address: '0x00000000000000000000000000000000000000c2' }, { address: '0x00000000000000000000000000000000000000ff' }] })!
+    const c = op({
+      type: 'AAVE_BORROW_FROM_COLLATERAL',
+      action: 'BORROW',
+      identifier: 'cd34',
+      explorerAddress: D_USDC,
+      apr: 1,
+      tokens: [{ address: '0x00000000000000000000000000000000000000c2' }, { address: '0x00000000000000000000000000000000000000ff' }],
+    })!
     expect(campaignsForPair([c], collateral, debt).borrow).toHaveLength(0)
   })
 
@@ -59,7 +75,16 @@ describe('Merkl campaigns', () => {
       explorerAddress: A_USDE,
       apr: 4.93,
       latestCampaignEnd: '1793923200',
-      campaigns: [{ params: { hooks: [{ hookType: 17, healthFactorThreshold: '2' }, { hookType: 14, borrowBytesLike: [D_USDE] }] } }],
+      campaigns: [
+        {
+          params: {
+            hooks: [
+              { hookType: 17, healthFactorThreshold: '2' },
+              { hookType: 14, borrowBytesLike: [D_USDE] },
+            ],
+          },
+        },
+      ],
     })!
     expect(c.maxHealthFactor).toBe(2)
     expect(c.forbiddenBorrows).toEqual([D_USDE])

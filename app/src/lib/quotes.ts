@@ -1,5 +1,18 @@
 import { getAddress, hexToBigInt, isAddress, isHex, slice, type Address, type Hex } from 'viem'
-import { AGGREGATORS, KYBER_CHAIN_SLUGS, KYBER_CLIENT_ID, KYBER_INCLUDED_SOURCES, QUOTE_MODE, VELORA_EXCLUDE_DEXS, VELORA_INCLUDE_DEXS, VELORA_PARTNER, aggregatorsFor, type AggregatorChoice, type AggregatorId, type Token } from '../config'
+import {
+  AGGREGATORS,
+  KYBER_CHAIN_SLUGS,
+  KYBER_CLIENT_ID,
+  KYBER_INCLUDED_SOURCES,
+  QUOTE_MODE,
+  VELORA_EXCLUDE_DEXS,
+  VELORA_INCLUDE_DEXS,
+  VELORA_PARTNER,
+  aggregatorsFor,
+  type AggregatorChoice,
+  type AggregatorId,
+  type Token,
+} from '../config'
 import { applySlippage, oracleSwapOut, type Side } from './math'
 
 export type QuoteRequest = {

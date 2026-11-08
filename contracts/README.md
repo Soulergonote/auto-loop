@@ -1,6 +1,6 @@
 # Auto-loop : contrat de levier atomique
 
-Deux versions cohabitent : `LeverageExecutor` (v1, utilisée par l'app et déployée par Azerty sur Plasma) et `LeverageExecutorV2` (v2, voir [la section v2](#v2--leverageexecutorv2), pas encore branchée dans l'app).
+Deux versions cohabitent : `LeverageExecutorV2` (v2, voir [la section v2](#v2--leverageexecutorv2)), que l'app déploie depuis le 08/11/2026, et `LeverageExecutor` (v1, déployée par Azerty sur Plasma), que l'app reconnaît et utilise toujours là où elle est déjà déployée.
 
 `LeverageExecutor` ouvre et ferme une position à levier sur Aave v3 en **une seule transaction**, avec un swap via un agrégateur (Velora, KyberSwap ; 0x et 1inch prévus). Conception : voir `../architecture.md`.
 
@@ -138,7 +138,7 @@ Rapport complet : [Audit interne du contrat v2](https://claude.ai/artifact/61hHE
 
 ### Limites connues (v2)
 
-- **Audit interne seulement.** Pas d'audit externe ; rien n'est déployé sur un réseau réel. L'app utilise toujours la v1 : brancher la v2 (bytecode, vérification on-chain, formulaires) est l'étape suivante.
+- **Audit interne seulement.** Pas d'audit externe ; rien n'est déployé sur un réseau réel. L'app déploie la v2 (avec Morpho Blue comme prêteur gratuit, sans Balancer à cause de L-02) et n'en utilise que `open` et `close` à une étape ; les chaînes de swaps, le capital en un autre token et `swapCollateral` ne sont pas encore proposés dans l'interface.
 - Achat de PT Pendle (`swapExactTokenForPt`) non testé de bout en bout : aucun PT actif n'est listé sur Aave Core Ethereum aujourd'hui (le plus récent, PT-srUSDe-22OCT2026, est arrivé à maturité), ni sur Base. Le même routeur Pendle a été testé pour le remboursement à maturité, avec le même mécanisme (approval exacte, `transferFrom` par le routeur, sortie vers le contrat).
 - Aave de Plasma et de Monad non testés (RPC inaccessibles depuis l'environnement cloud) : version d'Aave et comportement du LTV 0 en eMode à vérifier avant d'y faire des PT.
 - Morpho Blue et Balancer v2 doivent être déployés sur la chaîne pour servir de prêteur gratuit (adresses à vérifier chaîne par chaîne ; sinon `address(POOL)` avec prime).

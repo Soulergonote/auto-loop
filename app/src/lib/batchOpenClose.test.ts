@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { decodeFunctionData, getAddress, maxUint256 } from 'viem'
-import { debtTokenAbi, erc20Abi, executorAbi, poolAbi } from '../abi'
+import { debtTokenAbi, erc20Abi, executorAbi, executorAbiV1, poolAbi } from '../abi'
 import { closeBatchCalls, openBatchCalls, type BatchCall } from './oneClick'
 import type { ClosePlan, OpenPlan } from './execute'
 import type { Quote } from './quotes'
@@ -13,7 +13,8 @@ const USER = a(0x11),
   VDEBT = a(0xd1),
   AWETH = a(0xa0),
   POOL = a(0x9001),
-  ROUTER = a(0x7001)
+  ROUTER = a(0x7001),
+  MORPHO = a(0x8001)
 const quote = (sellAmount: bigint, over: Partial<Quote> = {}): Quote => ({
   aggregator: 'velora',
   router: ROUTER,
@@ -54,6 +55,8 @@ const closePlan = (over: Partial<ClosePlan> = {}): ClosePlan => ({
   aTokensNeeded: 5n * 10n ** 17n,
   aTokenAllowance: 0n,
   quote: quote(5n * 10n ** 17n),
+  flashLender: MORPHO,
+  minHealthFactor: 12n * 10n ** 17n,
   ...over,
 })
 
@@ -99,12 +102,27 @@ describe('openBatchCalls', () => {
     expect(open.args[0]).toMatchObject({
       collateralAsset: WETH,
       debtAsset: USDC,
-      initialCollateral: 10n ** 18n,
+      capitalToken: WETH,
+      capitalAmount: 10n ** 18n,
+      capitalSteps: [],
       debtAmount: 2_000_000_000n,
-      swap: { router: ROUTER, minOut: 9n },
+      steps: [{ router: ROUTER, tokenOut: WETH, data: '0xdeadbeef', minOut: 9n }],
+      guard: { minHealthFactor: 0n },
     })
+    const deadline = (open.args[0] as { guard: { deadline: bigint } }).guard.deadline
+    const now = BigInt(Math.floor(Date.now() / 1000))
+    expect(deadline > now && deadline <= now + 1200n).toBe(true)
     expect(decodeFunctionData({ abi: debtTokenAbi, data: calls[3].data }).args).toEqual([EXECUTOR, 0n])
     expect(decodeFunctionData({ abi: erc20Abi, data: calls[4].data }).args).toEqual([EXECUTOR, 0n])
+  })
+  it('v1 executor: same batch with the v1 parameters', () => {
+    const calls = openBatchCalls(openPlan({ version: 1 }), { collateral: 0n, borrow: 0n })
+    const open = decodeFunctionData({ abi: executorAbiV1, data: calls[2].data })
+    expect(open.args[0]).toMatchObject({ initialCollateral: 10n ** 18n, swap: { router: ROUTER, minOut: 9n } })
+  })
+  it('passes the health factor guard', () => {
+    const calls = openBatchCalls(openPlan({ minHealthFactor: 11n * 10n ** 17n }), { collateral: 0n, borrow: 0n })
+    expect(decodeFunctionData({ abi: executorAbi, data: calls[2].data }).args[0]).toMatchObject({ guard: { minHealthFactor: 11n * 10n ** 17n } })
   })
   it('switches eMode first, inside the batch', () => {
     const calls = openBatchCalls(openPlan({ eModeTarget: 1 }), { collateral: 0n, borrow: 0n })
@@ -137,13 +155,30 @@ describe('closeBatchCalls', () => {
     const calls = closeBatchCalls(closePlan(), 0n)
     expect(calls.map((c) => c.to)).toEqual([AWETH, EXECUTOR, AWETH])
     expect(decodeFunctionData({ abi: erc20Abi, data: calls[0].data }).args).toEqual([EXECUTOR, 5n * 10n ** 17n])
-    expect(decodeFunctionData({ abi: executorAbi, data: calls[1].data }).functionName).toBe('close')
+    const close = decodeFunctionData({ abi: executorAbi, data: calls[1].data })
+    expect(close.functionName).toBe('close')
+    expect(close.args[0]).toMatchObject({
+      repayAmount: 1_000_000_000n,
+      collateralToSell: 5n * 10n ** 17n,
+      steps: [{ router: ROUTER, tokenOut: USDC, minOut: 9n }],
+      flashLender: MORPHO,
+      guard: { minHealthFactor: 12n * 10n ** 17n },
+    })
     expect(decodeFunctionData({ abi: erc20Abi, data: calls[2].data }).args).toEqual([EXECUTOR, 0n])
   })
+  it('v1 executor: the v1 close, no lender needed', () => {
+    const calls = closeBatchCalls(closePlan({ version: 1, flashLender: undefined }), 0n)
+    expect(decodeFunctionData({ abi: executorAbiV1, data: calls[1].data }).args[0]).toMatchObject({ swap: { router: ROUTER, minOut: 9n } })
+  })
+  it('v2 refuses a close without a chosen flash lender', () => expect(() => closeBatchCalls(closePlan({ flashLender: undefined }), 0n)).toThrow(/Prêteur/))
   it('full close: 0,1 % headroom for interest, max repay and withdraw, approval back after', () => {
     const calls = closeBatchCalls(closePlan({ full: true, aTokensNeeded: 10n ** 18n }), 0n)
     expect(decodeFunctionData({ abi: erc20Abi, data: calls[0].data }).args).toEqual([EXECUTOR, 1001n * 10n ** 15n])
-    expect(decodeFunctionData({ abi: executorAbi, data: calls[1].data }).args[0]).toMatchObject({ repayAmount: maxUint256, collateralToWithdraw: maxUint256 })
+    expect(decodeFunctionData({ abi: executorAbi, data: calls[1].data }).args[0]).toMatchObject({
+      repayAmount: maxUint256,
+      collateralToWithdraw: maxUint256,
+      guard: { minHealthFactor: 0n },
+    })
     expect(decodeFunctionData({ abi: erc20Abi, data: calls[2].data }).args).toEqual([EXECUTOR, 0n])
   })
   it('a smaller existing allowance goes through 0 first and comes back exactly', () => {

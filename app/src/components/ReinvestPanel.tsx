@@ -195,6 +195,8 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
       : undefined
   const proj = projected(lq, false)
   const worst = projected(lq, true)
+  // v2 guard: the worst case of the lever's quote, with a little room for prices moving before inclusion
+  const minHf = worst && Number.isFinite(worst.healthFactor) ? BigInt(Math.floor(worst.healthFactor * 0.98 * 1e6)) * 10n ** 12n : 0n
   const correlated = isCorrelated(C, D)
 
   const problems: string[] = []
@@ -259,6 +261,8 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
       debt: D.token,
       variableDebtToken: D.variableDebtToken,
       executor: executor!,
+      version: market.executorVersion,
+      minHealthFactor: minHf,
       collateralAllowance: colAllow,
       borrowAllowance: borrowAllow,
       debtAmount: debt,
@@ -379,6 +383,8 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
         debt: D.token,
         variableDebtToken: D.variableDebtToken,
         executor: executor!,
+        version: market.executorVersion,
+        minHealthFactor: minHf,
         collateralAllowance: 0n,
         borrowAllowance: 0n,
         debtAmount,

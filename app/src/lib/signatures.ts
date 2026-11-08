@@ -21,8 +21,7 @@ async function aaveTokenDomain(chainId: number, token: Address): Promise<{ domai
   if (computed.toLowerCase() !== separator.toLowerCase()) {
     throw new Error(`Domaine EIP-712 inattendu pour ${name} : signature annulée`)
   }
-  const nonceOf = (owner: Address) =>
-    readContract(wagmiConfig, { chainId, address: token, abi: debtTokenAbi, functionName: 'nonces', args: [owner] })
+  const nonceOf = (owner: Address) => readContract(wagmiConfig, { chainId, address: token, abi: debtTokenAbi, functionName: 'nonces', args: [owner] })
   return { domain, nonceOf }
 }
 

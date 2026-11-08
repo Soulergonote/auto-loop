@@ -118,7 +118,7 @@ describe('buildReinvestBatch', () => {
     expect(decodeFunctionData({ abi: debtTokenAbi, data: calls[5].data }).args).toEqual([EXECUTOR, 100_000_000n])
     const open = decodeFunctionData({ abi: executorAbi, data: calls[6].data })
     expect(open.functionName).toBe('open')
-    expect((open.args[0] as { initialCollateral: bigint }).initialCollateral).toBe(VELORA_MIN + 5n)
+    expect((open.args[0] as { capitalAmount: bigint }).capitalAmount).toBe(VELORA_MIN + 5n)
     expect(decodeFunctionData({ abi: debtTokenAbi, data: calls[7].data }).args).toEqual([EXECUTOR, 0n])
     expect(decodeApprove(calls[8].data)).toEqual([EXECUTOR, 0n])
   })

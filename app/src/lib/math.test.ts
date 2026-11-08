@@ -14,7 +14,7 @@ import {
   EMPTY_ACCOUNT,
 } from './math'
 import { decodeReserveConfig, rayAprToApy } from './aave'
-import { executorAbi } from '../abi'
+import { executorAbi, executorAbiV1 } from '../abi'
 
 const WETH = { price: 2500n * 10n ** 8n, decimals: 18 }
 const USDC = { price: 1n * 10n ** 8n, decimals: 6 }
@@ -86,12 +86,33 @@ describe('Aave decoding', () => {
   })
 })
 
+/** forge inspect LeverageExecutorV2 methodIdentifiers, in the ABI's order */
+const SELECTORS_V2 = ['0x7535d246', '0x926ee4eb', '0x68883fad', '0x64cdaee6', '0xf48d7888', '0x61771e49', '0x7778ffdd']
+
 describe('executor ABI', () => {
-  it('matches the Solidity signatures of LeverageExecutor', () => {
+  // selectors checked against forge's methodIdentifiers for LeverageExecutorV2 (2026-11-08)
+  it('matches the Solidity signatures of LeverageExecutorV2', () => {
     const sigs = executorAbi.filter((x) => x.type === 'function').map((f) => toFunctionSignature(f))
+    const STEP = '(address,address,bytes,uint256)'
+    const GUARD = '(uint256,uint256)'
+    const SIG = '(uint256,uint256,uint8,bytes32,bytes32)'
+    const OPEN = `(address,address,address,uint256,${STEP}[],uint256,${STEP}[],${GUARD})`
+    const CLOSE = `(address,address,uint256,uint256,uint256,${STEP}[],address,${GUARD})`
+    expect(sigs).toEqual([
+      'POOL()',
+      `open(${OPEN})`,
+      `openWithSig(${OPEN},${SIG})`,
+      `close(${CLOSE})`,
+      `closeWithSig(${CLOSE},${SIG})`,
+      'isRouterAllowed(address)',
+      'flashLenderKind(address)',
+    ])
+    expect(sigs.map((s) => toFunctionSelector(s))).toEqual(SELECTORS_V2)
+  })
+  it('keeps the v1 signatures for executors deployed before v2', () => {
     const S = '(address,bytes,uint256)'
     const G = '(uint256,uint256,uint8,bytes32,bytes32)'
-    expect(sigs).toEqual([
+    expect(executorAbiV1.filter((x) => x.type === 'function').map((f) => toFunctionSignature(f))).toEqual([
       'POOL()',
       `open((address,address,uint256,uint256,${S}))`,
       `openWithSig((address,address,uint256,uint256,${S}),${G})`,
@@ -99,7 +120,6 @@ describe('executor ABI', () => {
       `closeWithSig((address,address,uint256,uint256,uint256,${S}),${G})`,
       'isRouterAllowed(address)',
     ])
-    expect(toFunctionSelector(sigs[1])).toMatch(/^0x[0-9a-f]{8}$/)
   })
 })
 

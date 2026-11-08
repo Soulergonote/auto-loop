@@ -109,7 +109,10 @@ export function App() {
   const declared = useMemo(() => getMarket(marketId, localExecutors), [marketId, localExecutors])
   // an executor is only offered for signing once its on-chain code is checked to be exactly this contract
   const check = useExecutorCheck(declared)
-  const market = useMemo(() => (declared.executor && check.data !== true ? { ...declared, executor: undefined } : declared), [declared, check.data])
+  const market = useMemo(
+    () => (!declared.executor ? declared : check.data ? { ...declared, executorVersion: check.data } : { ...declared, executor: undefined }),
+    [declared, check.data],
+  )
   function setLocalExecutor(id: string, a?: Address) {
     const next = { ...localExecutors }
     if (a) next[id] = a
@@ -217,6 +220,7 @@ export function App() {
             <a href={`${market.chain.blockExplorers?.default.url}/address/${market.executor}`} target="_blank" rel="noreferrer" title={market.executor}>
               {fmtAddress(market.executor)}
             </a>
+            {market.executorVersion === 1 && ' (v1)'}
             {market.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
           </>
         )}
@@ -242,6 +246,9 @@ export function App() {
         </Notice>
       )}
       {!DEMO && !declared.executor && <DeployPanel market={market} onReady={(a) => setLocalExecutor(market.id, a)} />}
+      {!DEMO && market.executorVersion === 1 && market.executorSource === 'wallet' && (
+        <DeployPanel market={market} upgrade onReady={(a) => setLocalExecutor(market.id, a)} />
+      )}
     </>
   )
 
