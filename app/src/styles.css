@@ -210,3 +210,5 @@ footer { text-align: center; }
   table.cards td.lead::before { content: none; }
   table.cards td:empty { display: none; }
 }
+.inputrow { display: flex; gap: 8px; }
+.inputrow select { width: auto; flex: 0 0 auto; max-width: 45%; }

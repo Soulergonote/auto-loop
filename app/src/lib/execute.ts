@@ -18,9 +18,16 @@ export type OpenPlan = {
   collateral: Address
   debt: Address
   variableDebtToken: Address
+  /** capital pulled from the wallet, in `capitalToken` (the collateral when not set) */
   initialCollateral: bigint
+  /** v2: token of the capital; the debt asset is sold with the borrowed amount, any other token is swapped first */
+  capitalToken?: Address
+  /** v2: swap of the capital to the collateral, when the capital is neither the collateral nor the debt asset */
+  capitalQuote?: Quote
   debtAmount: bigint
+  /** debt asset -> collateral; sells debtAmount (+ the capital when it is the debt asset) */
   quote: Quote
+  /** allowance of the capital token to the executor */
   collateralAllowance: bigint
   borrowAllowance: bigint
   /** Aave pool, for the eMode switch */
@@ -64,14 +71,28 @@ export function openArgsV1(p: OpenPlan) {
   } as const
 }
 
-/** v2 parameters: the capital is the collateral itself, one swap step from the debt asset to the collateral. */
+/** Token of the capital: the collateral unless the plan names another one. */
+export const capitalTokenOf = (p: Pick<OpenPlan, 'capitalToken' | 'collateral'>): Address => p.capitalToken ?? p.collateral
+
+/**
+ * v2 parameters. The capital is the collateral, the debt asset (sold in the same swap as the borrowed amount) or
+ * another token swapped to the collateral first; then one swap step from the debt asset to the collateral.
+ */
 export function openArgs(p: OpenPlan) {
+  const capital = capitalTokenOf(p)
+  const same = (a: Address, b: Address) => a.toLowerCase() === b.toLowerCase()
+  const swapped = p.initialCollateral > 0n && !same(capital, p.collateral) && !same(capital, p.debt)
+  if (swapped && !p.capitalQuote) throw new Error('Devis du capital manquant')
+  if (swapped && p.capitalQuote!.sellAmount !== p.initialCollateral) throw new Error('Devis du capital pour un autre montant')
+  const sold = p.debtAmount + (same(capital, p.debt) ? p.initialCollateral : 0n)
+  if (p.quote.sellAmount !== sold) throw new Error('Devis pour un autre montant que l’emprunt')
+  const cq = p.capitalQuote
   return {
     collateralAsset: p.collateral,
     debtAsset: p.debt,
-    capitalToken: p.collateral,
+    capitalToken: capital,
     capitalAmount: p.initialCollateral,
-    capitalSteps: [],
+    capitalSteps: swapped ? [{ router: cq!.router, tokenOut: p.collateral, data: cq!.data, minOut: cq!.minOut }] : [],
     debtAmount: p.debtAmount,
     steps: [{ router: p.quote.router, tokenOut: p.collateral, data: p.quote.data, minOut: p.quote.minOut }],
     guard: { minHealthFactor: p.minHealthFactor ?? 0n, deadline: callDeadline() },
@@ -107,6 +128,7 @@ type Call = { abi: typeof executorAbi | typeof executorAbiV1; functionName: stri
 /** The executor call of an open, for the plan's contract version, with or without the delegation signature. */
 export function openCall(p: OpenPlan, sig?: ExecutorSignature): Call {
   const v1 = p.version === 1
+  if (v1 && capitalTokenOf(p).toLowerCase() !== p.collateral.toLowerCase()) throw new Error('Le contrat v1 ne prend que le collatéral comme capital')
   const args = v1 ? openArgsV1(p) : openArgs(p)
   return { abi: v1 ? executorAbiV1 : executorAbi, functionName: sig ? 'openWithSig' : 'open', args: sig ? [args, sig] : [args] }
 }
@@ -129,7 +151,7 @@ async function send(chainId: number, user: Address, executor: Address, c: Call, 
 }
 
 async function approve(chainId: number, token: Address, spender: Address, amount: bigint, account: Address, onStep: Progress) {
-  onStep('Approbation du collatéral (transaction)…')
+  onStep('Approbation du capital (transaction)…')
   const { request } = await simulateContract(wagmiConfig, {
     chainId,
     account,
@@ -160,10 +182,11 @@ async function setEMode(p: OpenPlan, categoryId: number, onStep: Progress) {
 
 /** Opens the position: eMode switch if needed, approval if needed, credit delegation by signature if needed, then one transaction. */
 export async function executeOpen(p: OpenPlan, onStep: Progress): Promise<Hash> {
-  if (p.quote.simulated) throw new Error('Devis simulé : impossible à exécuter')
+  if (p.quote.simulated || p.capitalQuote?.simulated) throw new Error('Devis simulé : impossible à exécuter')
+  openCall(p) // checks the plan before anything is signed
   if (p.eModeTarget !== undefined) await setEMode(p, p.eModeTarget, onStep)
   if (p.initialCollateral > 0n && p.collateralAllowance < p.initialCollateral) {
-    await approve(p.chainId, p.collateral, p.executor, p.initialCollateral, p.user, onStep)
+    await approve(p.chainId, capitalTokenOf(p), p.executor, p.initialCollateral, p.user, onStep)
   }
 
   let hash: Hash

@@ -282,6 +282,7 @@ export function App() {
             collateral={pair.collateral}
             debt={pair.debt}
             nativeToken={wrappedNative(tokens, market.chain)?.address}
+            tokens={tokens}
             account={address}
             aggregator={aggregator}
             selectors={selectors}
@@ -344,6 +345,8 @@ type PairViewProps = {
   collateral: Token
   debt: Token
   nativeToken?: Address
+  /** the market's tokens */
+  tokens?: Token[]
   account?: Address
   aggregator: AggregatorChoice
   selectors: ReactNode
@@ -352,7 +355,7 @@ type PairViewProps = {
   seed?: { emode: number; leverage: number; tab?: 'reinvest' }
 }
 
-function PairView({ market: m, collateral, debt, nativeToken, account, aggregator, selectors, common, notes, seed }: PairViewProps) {
+function PairView({ market: m, collateral, debt, nativeToken, tokens, account, aggregator, selectors, common, notes, seed }: PairViewProps) {
   const [tab, setTab] = useState<'open' | 'close' | 'reinvest'>(seed?.tab ?? 'open')
   // filled by the reinvest flow's last step: "Augmenter" with the capital it gained
   const [augment, setAugment] = useState<{ emode: number; leverage: number; amount: string }>()
@@ -481,6 +484,7 @@ function PairView({ market: m, collateral, debt, nativeToken, account, aggregato
   return tab === 'open' ? (
     <OpenPanel
       reserves={r}
+      tokens={tokens}
       emodes={emodes}
       seed={augment ?? seed}
       user={market.user}

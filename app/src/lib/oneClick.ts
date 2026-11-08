@@ -22,7 +22,7 @@ import type { Token } from '../config'
 import { getQuote, QuoteError, type Quote, type QuoteRequest } from './quotes'
 import { distributorAbi, MERKL_DISTRIBUTOR, type Claimable } from './reinvest'
 import { walletSwapProblem, swapTerms } from './swapCalldata'
-import { closeCall, encodeCall, openCall, type ClosePlan, type OpenPlan, type Progress } from './execute'
+import { capitalTokenOf, closeCall, encodeCall, openCall, type ClosePlan, type OpenPlan, type Progress } from './execute'
 
 const withdrawAbi = parseAbi(['function withdraw(address asset, uint256 amount, address to) returns (uint256)'])
 
@@ -206,9 +206,9 @@ export async function sendBatch(chainId: number, user: Address, calls: BatchCall
  * the approval and the delegation back to their previous values. Same contract call as the step flow.
  */
 export function openBatchCalls(p: OpenPlan, allowances: { collateral: bigint; borrow: bigint }): BatchCall[] {
-  if (p.quote.simulated) throw new Error('Devis simulé : impossible à exécuter')
-  if (p.quote.sellAmount !== p.debtAmount) throw new Error('Devis pour un autre montant que l’emprunt')
-  const col = allowanceCalls('erc20', p.collateral, p.executor, p.initialCollateral, allowances.collateral, {
+  if (p.quote.simulated || p.capitalQuote?.simulated) throw new Error('Devis simulé : impossible à exécuter')
+  const open = encodeCall(openCall(p)) // also checks the amounts of the quotes
+  const col = allowanceCalls('erc20', capitalTokenOf(p), p.executor, p.initialCollateral, allowances.collateral, {
     set: 'Autoriser le contrat à prendre le capital (montant exact)',
     reset: 'Remettre l’autorisation du capital à sa valeur',
   })
@@ -226,14 +226,7 @@ export function openBatchCalls(p: OpenPlan, allowances: { collateral: bigint; bo
             label: p.eModeTarget === 0 ? 'Sortir de l’eMode sur le compte Aave' : 'Passer le compte Aave en eMode',
           },
         ]
-  return [
-    ...emode,
-    ...col.before,
-    ...del.before,
-    { to: p.executor, data: encodeCall(openCall(p)), label: 'Ouvrir : flash loan, swap et dépôt' },
-    ...del.after,
-    ...col.after,
-  ]
+  return [...emode, ...col.before, ...del.before, { to: p.executor, data: open, label: 'Ouvrir : flash loan, swap et dépôt' }, ...del.after, ...col.after]
 }
 
 /** "Fermer" as one batch: exact aToken approval (a little headroom on a full close), `close`, approval back after. */
@@ -261,7 +254,7 @@ export function closeBatchCalls(p: ClosePlan, aTokenAllowance: bigint): BatchCal
 export async function executeOpenBatch(p: OpenPlan, onStep: Progress): Promise<Hash | undefined> {
   onStep('Lecture des autorisations…')
   const [collateral, borrow] = await Promise.all([
-    readContract(wagmiConfig, { chainId: p.chainId, address: p.collateral, abi: erc20Abi, functionName: 'allowance', args: [p.user, p.executor] }),
+    readContract(wagmiConfig, { chainId: p.chainId, address: capitalTokenOf(p), abi: erc20Abi, functionName: 'allowance', args: [p.user, p.executor] }),
     readContract(wagmiConfig, {
       chainId: p.chainId,
       address: p.variableDebtToken,

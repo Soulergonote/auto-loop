@@ -151,13 +151,19 @@ const anvil = async (method, params) =>
     await page.waitForTimeout(3000)
     await page.locator('input[type=range]').first().fill('2')
   }
+  // CAPITAL=USDC|wstETH (v2): the capital token, AMOUNT its amount (default 1, or 0 for "increase")
+  if ((mode === 'open' || mode === 'increase') && process.env.CAPITAL) {
+    const sel = page.locator('select[aria-label="Token du capital"]')
+    await sel.waitFor({ timeout: 30000 })
+    await sel.selectOption({ label: process.env.CAPITAL })
+  }
   if (mode === 'open') {
-    await page.locator('input[inputmode=decimal]').fill('1')
+    await page.locator('input[inputmode=decimal]').fill(process.env.AMOUNT || '1')
     await page.locator('input[type=range]').fill('3')
   }
   if (mode === 'increase') {
     await page.waitForSelector('h2:has-text("Augmenter la position")', { timeout: 30000 })
-    await page.locator('input[inputmode=decimal]').fill('0')
+    await page.locator('input[inputmode=decimal]').fill(process.env.AMOUNT || '0')
     await page.locator('input[type=range]').fill('4')
   }
   await page.waitForTimeout(8000)
@@ -167,6 +173,13 @@ const anvil = async (method, params) =>
   console.log('notices:', (await page.locator('.notice').allTextContents()).join(' | '))
   console.log('metrics:', (await page.locator('.metric, .sum-item').allInnerTexts()).map((t) => t.replace(/\n/g, ' ')).join(' | '))
   console.log('quotes:', (await page.locator('p:has-text("Devis comparés")').allTextContents()).join(' | '))
+  if (process.env.CAPITAL) {
+    await page.locator('summary', { hasText: 'Devis' }).click()
+    console.log('quote lines:', (await page.locator('p:has-text("Capital :"), p:has-text("Emprunt :")').allTextContents()).join(' | '))
+    console.log('steps:', (await page.locator('.steps li, ol li').allTextContents()).join(' | '))
+    // closed again: its calldata would look like a transaction hash to the wait below
+    await page.locator('summary', { hasText: 'Devis' }).click()
+  }
   console.log('reason:', (await page.locator('.sum-reason').allTextContents()).join(' | '))
   if (await btn.isEnabled()) {
     await btn.click()

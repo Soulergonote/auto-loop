@@ -28,4 +28,14 @@ else
 fi
 fi
 cast send --rpc-url $R --unlocked --from $U 0x4200000000000000000000000000000000000006 "deposit()" --value 1.5ether >/dev/null
-echo "fork block $(cast block-number --rpc-url $R), user $U: 1.5 WETH"
+# FUND=1: also 5000 USDC and 1 wstETH, taken from their Aave aToken contracts (they hold the underlying)
+if [ -n "${FUND:-}" ]; then
+  POOL=0xA238Dd80C259a72e81d7e4664a9801593F98d1c5
+  for T in 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913:5000000000 0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452:1000000000000000000; do
+    A=$(cast call --rpc-url $R $POOL "getReserveAToken(address)(address)" ${T%%:*})
+    cast rpc --rpc-url $R anvil_impersonateAccount $A >/dev/null
+    cast rpc --rpc-url $R anvil_setBalance $A 0xDE0B6B3A7640000 >/dev/null
+    cast send --rpc-url $R --unlocked --from $A ${T%%:*} "transfer(address,uint256)" $U ${T##*:} >/dev/null
+  done
+fi
+echo "fork block $(cast block-number --rpc-url $R), user $U: 1.5 WETH${FUND:+, 5000 USDC, 1 wstETH}"

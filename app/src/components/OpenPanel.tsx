@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useGasPrice } from 'wagmi'
 import { parseUnits, type Address, type Hash } from 'viem'
-import { AGGREGATORS, type AggregatorChoice } from '../config'
+import { AGGREGATORS, type AggregatorChoice, type Token } from '../config'
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../lib/merkl'
 import { CampaignTable } from './CampaignTable'
 import { RiskPanel } from './RiskPanel'
@@ -15,6 +15,7 @@ import { extraDebtForTarget, maxLeverage, netApy, positionLeverage, project, rou
 import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
 import { encodeCall, executeOpen, explainError, openCall, type OpenPlan } from '../lib/execute'
 import { executeOpenBatch, useAtomicBatch } from '../lib/oneClick'
+import { capitalKind, useWalletTokens } from '../lib/capital'
 import { fmtAmount, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
@@ -38,9 +39,11 @@ type Props = {
   /** eMode and leverage to start with (pair picked in the scanner) */
   /** from the scanner, the positions or the reinvest flow; amount = capital to fill in, as typed text */
   seed?: { emode: number; leverage: number; amount?: string }
+  /** the market's tokens, offered as capital with a v2 contract */
+  tokens?: Token[]
 }
 
-export function OpenPanel({ reserves: base, emodes, user, account, aggregator, onDone, seed, common, head }: Props) {
+export function OpenPanel({ reserves: base, emodes, user, account, aggregator, onDone, seed, common, head, tokens }: Props) {
   const eligible = eligibleEModes(emodes, base.collateral, base.debt)
   // default: the account's current category when it fits the pair, otherwise the best one (highest LTV)
   const [chosenEMode, setChosenEMode] = useState<number | undefined>(seed?.emode)
@@ -58,6 +61,17 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const { market, collateral: C, debt: D } = reserves
   const executor = market.executor
   const [amountText, setAmountText] = useState(seed?.amount ?? '1')
+  // capital in any token (contract v2): the collateral, the debt asset or another token the wallet holds
+  const v2 = market.executorVersion !== 1
+  const wallet = useWalletTokens(market, tokens, C.token, D.token, account, v2)
+  const [capitalChoice, setCapitalChoice] = useState<string>()
+  const capitalOptions = v2 ? (wallet.data ?? []) : []
+  const capitalPick = capitalOptions.find((t) => t.token.address === capitalChoice)
+  const K = capitalPick?.token ?? C.token
+  const kind = capitalKind(K.address, C.token.address, D.token.address)
+  const capSide = kind === 'collateral' ? C.side : kind === 'debt' ? D.side : capitalPick!.side
+  const capBalance = kind === 'collateral' ? user?.collateralBalance : capitalPick?.balance
+  const capAllowance = kind === 'collateral' ? (user?.collateralAllowance ?? 0n) : (capitalPick?.allowance ?? 0n)
   const [leverage, setLeverage] = useState(seed ? Math.floor(seed.leverage * 20) / 20 : 2)
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
   const [horizonText, setHorizon] = useState('90')
@@ -83,17 +97,49 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
 
   const initial = useMemo(() => {
     try {
-      return parseUnits(amountText.replace(',', '.') || '0', C.token.decimals)
+      return parseUnits(amountText.replace(',', '.') || '0', K.decimals)
     } catch {
       return undefined
     }
-  }, [amountText, C.token.decimals])
+  }, [amountText, K.decimals])
 
   const debouncedInitial = useDebounced(initial)
   const debouncedLevBps = useDebounced(BigInt(Math.round(lev * 10_000)))
+
+  // another token as capital: swapped to the collateral by the contract before the loop
+  const capitalReq =
+    kind === 'swap' && debouncedInitial
+      ? {
+          aggregator,
+          chainId: market.chain.id,
+          sell: K,
+          buy: C.token,
+          sellAmount: debouncedInitial,
+          taker: market.quoteTaker,
+          slippageBps: BigInt(slippage),
+          oracle: { sell: capSide, buy: C.side },
+        }
+      : undefined
+  const capitalQuote = useQuote(capitalReq)
+  const cq = kind === 'swap' ? capitalQuote.data : undefined
+  // collateral the capital brings itself (expected, and the worst case the contract enforces); the debt asset as
+  // capital is sold in the debt swap, so it brings none here
+  const capColl = kind === 'collateral' ? debouncedInitial : kind === 'debt' ? 0n : cq?.buyAmount
+  const capCollMin = kind === 'swap' ? cq?.minOut : capColl
+  // value of the capital the leverage applies to
+  const capitalAddedBase =
+    debouncedInitial === undefined
+      ? undefined
+      : kind === 'swap'
+        ? cq
+          ? toBase(cq.buyAmount, C.side)
+          : debouncedInitial === 0n
+            ? 0n
+            : undefined
+        : toBase(debouncedInitial, capSide)
   // rounded so that interest accruing on the existing debt does not re-quote at every block
-  const debtAmount =
-    debouncedInitial !== undefined ? roundSignificant(extraDebtForTarget(position, toBase(debouncedInitial, C.side), debouncedLevBps, D.side), 5) : 0n
+  const debtAmount = capitalAddedBase !== undefined ? roundSignificant(extraDebtForTarget(position, capitalAddedBase, debouncedLevBps, D.side), 5) : 0n
+  const debtSold = debtAmount + (kind === 'debt' ? (debouncedInitial ?? 0n) : 0n)
 
   const quoteReq =
     debtAmount > 0n
@@ -102,7 +148,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           chainId: market.chain.id,
           sell: D.token,
           buy: C.token,
-          sellAmount: debtAmount,
+          sellAmount: debtSold,
           taker: market.quoteTaker,
           slippageBps: BigInt(slippage),
           oracle: { sell: D.side, buy: C.side },
@@ -112,14 +158,9 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const q = quote.data
 
   const account0 = user?.account ?? EMPTY_ACCOUNT
-  const proj =
-    q && debouncedInitial !== undefined
-      ? project(account0, debouncedInitial + q.buyAmount, C.side, C.config.liquidationThresholdBps, debtAmount, D.side)
-      : undefined
+  const proj = q && capColl !== undefined ? project(account0, capColl + q.buyAmount, C.side, C.config.liquidationThresholdBps, debtAmount, D.side) : undefined
   const worst =
-    q && debouncedInitial !== undefined
-      ? project(account0, debouncedInitial + q.minOut, C.side, C.config.liquidationThresholdBps, debtAmount, D.side)
-      : undefined
+    q && capCollMin !== undefined ? project(account0, capCollMin + q.minOut, C.side, C.config.liquidationThresholdBps, debtAmount, D.side) : undefined
   // Aave checks the borrow against the LTV (not the liquidation threshold) when it mints the debt
   const maxLtv = C.config.ltvBps / 10_000
 
@@ -134,11 +175,13 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   if (C.config.ltvBps === 0) problems.push(`${C.token.symbol} n’est pas accepté comme collatéral (LTV 0).`)
   if (C.config.isolated) problems.push(`${C.token.symbol} est en isolation mode : non supporté par le contrat v1.`)
   if (worst && worst.ltv > maxLtv) problems.push(`LTV projetée ${fmtPct(worst.ltv)} au-dessus du maximum ${fmtPct(maxLtv)}. Baisser le levier.`)
-  if (user && initial && initial > user.collateralBalance) problems.push(`Solde ${C.token.symbol} insuffisant.`)
+  if (user && initial && capBalance !== undefined && initial > capBalance) problems.push(`Solde ${K.symbol} insuffisant.`)
 
   const warnings: string[] = []
-  const lossIssue = q && swapLossProblem(swapLoss(debtAmount, D.side, q.buyAmount, C.side), D.token.symbol, C.token.symbol, q.simulated)
+  const lossIssue = q && swapLossProblem(swapLoss(q.sellAmount, D.side, q.buyAmount, C.side), D.token.symbol, C.token.symbol, q.simulated)
   if (lossIssue) (lossIssue.block ? problems : warnings).push(lossIssue.text)
+  const capLossIssue = cq && swapLossProblem(swapLoss(cq.sellAmount, capSide, cq.buyAmount, C.side), K.symbol, C.token.symbol, cq.simulated)
+  if (capLossIssue) (capLossIssue.block ? problems : warnings).push(capLossIssue.text)
   const correlated = isCorrelated(C, D)
   if (proj && proj.healthFactor < hfThresholds(correlated).ok)
     warnings.push(
@@ -149,12 +192,14 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
     warnings.push(
       `Le compte Aave est en eMode « ${emodes.find((c) => c.id === currentEMode)?.label ?? currentEMode} » : le changer s’applique à toutes ses positions sur ce marché.`,
     )
+  if (cq?.simulated)
+    warnings.push(`Devis du capital simulé au prix de l’oracle${cq.fallbackReason ? ` (${cq.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
   if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
 
-  const needsApprove = !!user && !!initial && user.collateralAllowance < initial
+  const needsApprove = !!user && !!initial && capAllowance < initial
   const needsDelegation = !user || user.borrowAllowance < debtAmount
   const soldBase = toBase(debtAmount, D.side)
-  const addedCollBase = q && debouncedInitial !== undefined ? toBase(debouncedInitial + q.buyAmount, C.side) : 0n
+  const addedCollBase = q && capColl !== undefined ? toBase(capColl + q.buyAmount, C.side) : 0n
   // leverage of the whole position on the pair once this transaction is done (existing position included)
   const loopLev = proj
     ? hasPosition
@@ -182,12 +227,14 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const apyParts = [nativeApy !== 0 && `${fmtPct(nativeApy)} token`, rewardsApy !== 0 && `${fmtPct(rewardsApy)} Merkl`].filter(Boolean)
 
   // one-off costs, and the yield once they are paid, over the planned holding time
-  const capitalBase = (debouncedInitial !== undefined ? toBase(debouncedInitial, C.side) : 0n) + position.collateralBase - position.debtBase
+  const capitalBase = (debouncedInitial !== undefined ? toBase(debouncedInitial, capSide) : 0n) + position.collateralBase - position.debtBase
+  // the capital's own swap counts in the entry cost; the exit swap only sells back what the debt needs
+  const capitalSwapBase = cq ? swapCostBase(cq.sellAmount, capSide, cq.buyAmount, C.side) : 0n
   const costs =
-    q && debouncedInitial !== undefined
+    q && capColl !== undefined
       ? loopCosts({
-          entrySoldBase: soldBase,
-          entrySwapBase: swapCostBase(debtAmount, D.side, q.buyAmount, C.side),
+          entrySoldBase: toBase(q.sellAmount, D.side),
+          entrySwapBase: swapCostBase(q.sellAmount, D.side, q.buyAmount, C.side) + capitalSwapBase,
           debtBase: soldBase,
           premiumBps: reserves.premiumBps,
           gasPriceWei: gasPrice.data,
@@ -230,7 +277,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   if (costs && horizonYield !== undefined && horizonYield < 0 && apy !== undefined && apy > 0)
     warnings.push(`Les coûts fixes (${fmtUsd(costs.total)}) dépassent le rendement sur ${fmtDays(horizon)} avec ce capital. Augmenter le capital ou la durée.`)
 
-  const plan = (quoteOverride = q): OpenPlan | undefined =>
+  const plan = (quoteOverride = q, capitalOverride = cq): OpenPlan | undefined =>
     quoteOverride && account && initial !== undefined
       ? {
           chainId: market.chain.id,
@@ -243,35 +290,46 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           debt: D.token.address,
           variableDebtToken: D.variableDebtToken,
           initialCollateral: debouncedInitial ?? 0n,
+          capitalToken: K.address,
+          capitalQuote: capitalOverride,
           debtAmount,
           quote: quoteOverride,
-          collateralAllowance: user?.collateralAllowance ?? 0n,
+          collateralAllowance: capAllowance,
           borrowAllowance: user?.borrowAllowance ?? 0n,
           pool: market.pool,
           eModeTarget: switchEMode ? emodeId : undefined,
         }
       : undefined
 
-  const preview = q
-    ? encodeCall(
-        openCall({
-          version: market.executorVersion,
-          collateral: C.token.address,
-          debt: D.token.address,
-          initialCollateral: debouncedInitial ?? 0n,
-          debtAmount,
-          quote: q,
-        } as OpenPlan),
-      )
-    : undefined
+  const preview = (() => {
+    try {
+      return q && (kind !== 'swap' || cq)
+        ? encodeCall(
+            openCall({
+              version: market.executorVersion,
+              collateral: C.token.address,
+              debt: D.token.address,
+              initialCollateral: debouncedInitial ?? 0n,
+              capitalToken: K.address,
+              capitalQuote: cq,
+              debtAmount,
+              quote: q,
+            } as OpenPlan),
+          )
+        : undefined
+    } catch {
+      return undefined // quotes of a previous amount, until the new ones arrive
+    }
+  })()
 
-  const stale = initial !== debouncedInitial || quote.isFetching
-  const canSign = !!executor && !!account && !!q && !q.simulated && problems.length === 0 && !stale && !busy
+  const stale = initial !== debouncedInitial || quote.isFetching || capitalQuote.isFetching
+  const canSign =
+    !!executor && !!account && !!q && !q.simulated && (kind !== 'swap' || (!!cq && !cq.simulated)) && !!preview && problems.length === 0 && !stale && !busy
   const disabledReason = !executor
     ? 'Contrat pas encore déployé'
     : !account
       ? 'Connecter le portefeuille'
-      : q?.simulated
+      : q?.simulated || cq?.simulated
         ? 'Devis simulé'
         : problems.length
           ? 'Bloqué : voir le bandeau rouge'
@@ -281,12 +339,14 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
     setResult(undefined)
     try {
       setBusy('Nouvelle cotation…')
-      // quotes expire within a few blocks: always re-quote right before signing
-      const fresh = await getQuote(quoteReq!)
-      if (fresh.simulated) throw new Error('Plus de devis réel disponible')
-      const hash = batch ? await executeOpenBatch(plan(fresh)!, setBusy) : await executeOpen(plan(fresh)!, setBusy)
+      // quotes expire within a few blocks: always re-quote right before signing (same debt, same capital)
+      const [fresh, freshCapital] = await Promise.all([getQuote(quoteReq!), capitalReq ? getQuote(capitalReq) : undefined])
+      if (fresh.simulated || freshCapital?.simulated) throw new Error('Plus de devis réel disponible')
+      const p = plan(fresh, freshCapital)!
+      const hash = batch ? await executeOpenBatch(p, setBusy) : await executeOpen(p, setBusy)
       setResult({ ok: true, text: hasPosition ? 'Position augmentée.' : 'Position ouverte.', hash })
       onDone()
+      void wallet.refetch()
     } catch (e) {
       setResult({ ok: false, text: explainError(e) })
     } finally {
@@ -308,15 +368,20 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       : []),
     ...(batch
       ? [
-          ...(needsApprove || !user ? [{ label: `Autoriser le contrat à prendre ${amountText || 0} ${C.token.symbol} (montant exact)` }] : []),
+          ...(needsApprove || !user ? [{ label: `Autoriser le contrat à prendre ${amountText || 0} ${K.symbol} (montant exact)` }] : []),
           ...(needsDelegation ? [{ label: `Déléguer l’emprunt de ${D.token.symbol} au contrat (montant exact)` }] : []),
-          { label: 'Ouvrir : flash loan, swap et dépôt' },
+          { label: kind === 'swap' ? `Ouvrir : swap ${K.symbol} → ${C.token.symbol}, flash loan, swap et dépôt` : 'Ouvrir : flash loan, swap et dépôt' },
           ...(needsApprove || needsDelegation || !user ? [{ label: 'Remettre l’autorisation et la délégation à leur valeur' }] : []),
         ]
       : [
-          ...(needsApprove || !user ? [{ label: `Autoriser le contrat à prendre ${amountText || 0} ${C.token.symbol} (transaction, une fois)` }] : []),
+          ...(needsApprove || !user ? [{ label: `Autoriser le contrat à prendre ${amountText || 0} ${K.symbol} (transaction, une fois)` }] : []),
           ...(needsDelegation ? [{ label: `Signer la délégation de crédit ${D.token.symbol} (signature, sans gas)` }] : []),
-          { label: 'Signer la transaction : flash loan, swap et dépôt en une fois' },
+          {
+            label:
+              kind === 'swap'
+                ? `Signer la transaction : swap ${K.symbol} → ${C.token.symbol}, flash loan, swap et dépôt en une fois`
+                : 'Signer la transaction : flash loan, swap et dépôt en une fois',
+          },
         ]),
   ]
   const liqPrice =
@@ -375,21 +440,36 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           </p>
         )}
         <div className="grid2">
-          <label className="field">
+          <div className="field">
             <span>
-              Capital en {C.token.symbol}
-              {user && (
-                <button
-                  className="link"
-                  onClick={() => setAmountText(fmtAmount(user.collateralBalance, C.token.decimals, 8).replace(/\s/g, '').replace(',', '.'))}
-                >
-                  solde {fmtAmount(user.collateralBalance, C.token.decimals)}
+              {capitalOptions.length > 1 ? 'Capital' : `Capital en ${C.token.symbol}`}
+              {capBalance !== undefined && (
+                <button className="link" onClick={() => setAmountText(fmtAmount(capBalance, K.decimals, 8).replace(/\s/g, '').replace(',', '.'))}>
+                  solde {fmtAmount(capBalance, K.decimals)}
                 </button>
               )}
             </span>
-            <input inputMode="decimal" value={amountText} onChange={(e) => setAmountText(e.target.value)} />
-            {initial !== undefined && <span className="muted small">≈ {fmtUsd((initial * C.price) / 10n ** BigInt(C.token.decimals))}</span>}
-          </label>
+            <div className="inputrow">
+              {capitalOptions.length > 1 && (
+                <select
+                  aria-label="Token du capital"
+                  value={K.address}
+                  onChange={(e) => {
+                    setCapitalChoice(e.target.value)
+                    setAmountText('')
+                  }}
+                >
+                  {capitalOptions.map((t) => (
+                    <option key={t.token.address} value={t.token.address}>
+                      {t.token.symbol}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <input aria-label="Montant du capital" inputMode="decimal" value={amountText} onChange={(e) => setAmountText(e.target.value)} />
+            </div>
+            {initial !== undefined && <span className="muted small">≈ {fmtUsd(toBase(initial, capSide))}</span>}
+          </div>
           <label className="field">
             <span>
               Levier <strong className="lev">{fmtX(lev)}</strong>
@@ -409,8 +489,13 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           />
           <Metric
             label="Collatéral déposé"
-            value={q && debouncedInitial !== undefined ? `${fmtAmount(debouncedInitial + q.buyAmount, C.token.decimals)} ${C.token.symbol}` : undefined}
-            sub={q && `dont ${fmtAmount(q.buyAmount, C.token.decimals)} via ${AGGREGATORS[q.aggregator].label}`}
+            value={q && capColl !== undefined ? `${fmtAmount(capColl + q.buyAmount, C.token.decimals)} ${C.token.symbol}` : undefined}
+            sub={
+              q &&
+              (kind === 'swap' && cq
+                ? `dont ${fmtAmount(cq.buyAmount, C.token.decimals)} via le capital`
+                : `dont ${fmtAmount(q.buyAmount, C.token.decimals)} via ${AGGREGATORS[q.aggregator].label}`)
+            }
           />
           <Metric label="Levier effectif" value={loopLev !== undefined ? fmtX(loopLev) : undefined} sub={hasPosition ? 'toute la position' : 'après le swap'} />
           <Metric
@@ -422,6 +507,11 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
         </div>
 
         {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
+        {kind === 'swap' && capitalQuote.isError && (
+          <Notice tone="bad">
+            Cotation {K.symbol} → {C.token.symbol} impossible : {(capitalQuote.error as Error).message}
+          </Notice>
+        )}
         {problems.map((p) => (
           <Notice key={p} tone="bad">
             {p}
@@ -484,14 +574,30 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
         )}
 
         {q && (
-          <Fold title="Devis" value={`${AGGREGATORS[q.aggregator].label} · minimum ${fmtAmount(q.minOut, C.token.decimals)} ${C.token.symbol}`}>
+          <Fold
+            title="Devis"
+            value={`${AGGREGATORS[q.aggregator].label} · minimum ${fmtAmount((capCollMin ?? 0n) + q.minOut, C.token.decimals)} ${C.token.symbol}`}
+          >
+            {cq && (
+              <p className="small">
+                Capital : {fmtAmount(cq.sellAmount, K.decimals)} {K.symbol} → {fmtAmount(cq.buyAmount, C.token.decimals)} {C.token.symbol} via{' '}
+                {AGGREGATORS[cq.aggregator].label}, minimum {fmtAmount(cq.minOut, C.token.decimals)}.
+              </p>
+            )}
+            {cq && <QuoteCompare quote={cq} token={C.token} />}
+            {cq && (
+              <p className="small">
+                Emprunt : {fmtAmount(q.sellAmount, D.token.decimals)} {D.token.symbol} → {fmtAmount(q.buyAmount, C.token.decimals)} {C.token.symbol} via{' '}
+                {AGGREGATORS[q.aggregator].label}, minimum {fmtAmount(q.minOut, C.token.decimals)}.
+              </p>
+            )}
             <QuoteCompare quote={q} token={C.token} />
             {preview && (
               <dl className="preview">
                 <dt>Contrat</dt>
                 <dd>{executor ?? `${market.quoteTaker} (adresse des tests sur fork, contrat non déployé)`}</dd>
                 <dt>Routeur</dt>
-                <dd>{q.router}</dd>
+                <dd>{cq && cq.router !== q.router ? `${cq.router} puis ${q.router}` : q.router}</dd>
                 <dt>Calldata open()</dt>
                 <dd className="mono">{preview}</dd>
               </dl>
