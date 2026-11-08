@@ -1,17 +1,18 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { type Address, type Hash } from 'viem'
 import { useReadContract } from 'wagmi'
-import { AGGREGATORS, MORPHO_BLUE, type AggregatorChoice } from '../config'
+import { MORPHO_BLUE, type AggregatorChoice } from '../config'
 import { erc20Abi } from '../abi'
 import type { Reserves, UserState } from '../lib/useMarket'
 import { useQuote } from '../lib/useQuote'
-import { getQuote } from '../lib/quotes'
+import { getQuote, quoteLabel } from '../lib/quotes'
+import { daysToMaturity, isExpired } from '../lib/pendle'
 import { collateralToSellForRepay, flashLoanOwed, pairPosition, positionLeverage, repayForTarget, roundSignificant, toBase } from '../lib/math'
 import { useDebounced } from '../lib/useDebounced'
 import { swapLoss, swapLossProblem } from '../lib/economics'
 import { closeCall, encodeCall, executeClose, explainError, type ClosePlan } from '../lib/execute'
 import { executeCloseBatch, useAtomicBatch } from '../lib/oneClick'
-import { fmtAmount, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { fmtAmount, fmtDate, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/format'
 import { outcomeLines, readOutcome } from '../lib/outcome'
 import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
@@ -152,7 +153,13 @@ function ClosePanelInner(p: {
   const flashLender: Address = viaMorpho ? morpho! : market.pool
   const premiumBps = viaMorpho ? 0n : p.premiumBps
   const owed = flashLoanOwed(repay, premiumBps)
+  // a PT trades at Pendle's price, not Aave's: the amount to sell is first sized at Aave's price, then corrected by the
+  // quote (see the effect below) until its minimum just covers the flash loan
+  const pt = C.pt
+  const ptExpired = !!pt && isExpired(pt)
+  const [ptScale, setPtScale] = useState(1)
   let toSell = collateralToSellForRepay(repay, premiumBps, BigInt(slippage), C.side, D.side)
+  if (pt) toSell = (toSell * BigInt(Math.round(ptScale * 1e6))) / 1_000_000n
   if (toSell > user.aTokenBalance) toSell = user.aTokenBalance
 
   const quoteReq =
@@ -174,6 +181,12 @@ function ClosePanelInner(p: {
   // full close: debt keeps accruing until execution, keep a small margin over what the flash loan will claim
   const required = full ? (owed * 10_005n) / 10_000n : owed
   const coversDebt = q ? q.minOut >= required : undefined
+  useEffect(() => {
+    if (!pt || !q || q.simulated || q.sellAmount !== toSell || q.minOut === 0n) return
+    const ratio = Number(required) / Number(q.minOut)
+    // short of the repayment, or selling more than 1 % too much: resize (0,1 % of room), at most the whole balance
+    if (ratio > 1 || (ratio < 0.99 && !full)) setPtScale((x) => Math.min(x * ratio * 1.001, 10))
+  }, [pt, q, toSell, required, full])
 
   const remainingDebtBase = user.account.debtBase - toBase(repay, D.side)
   const hfAfter =
@@ -211,6 +224,19 @@ function ClosePanelInner(p: {
   if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
   const correlated = isCorrelated(C, D)
   if (!full && hfAfter < hfThresholds(correlated).ok) warnings.push(`Health factor après réduction : ${fmtHf(hfAfter)}, encore proche de la liquidation.`)
+  // a PT sold before maturity: the exit costs the pool's price, against what holding it to maturity would still earn
+  const exitCostBase = q && !q.simulated ? toBase(toSell, C.side) - toBase(q.buyAmount, D.side) : undefined
+  const ptDays = pt ? daysToMaturity(pt) : 0
+  const accretion = pt && !ptExpired ? (pt.discount ?? pt.impliedApy ?? 0) * (ptDays / 365) : 0
+  const remainingGainBase =
+    pt && !ptExpired
+      ? Number(toBase(user.aTokenBalance, C.side)) * (accretion / Math.max(1e-9, 1 - accretion)) -
+        Number(toBase(user.debtBalance, D.side)) * D.borrowApy * (ptDays / 365)
+      : undefined
+  if (exitCostBase !== undefined && remainingGainBase !== undefined && full && Number(exitCostBase) > remainingGainBase && remainingGainBase > 0)
+    warnings.push(
+      `Sortir avant l’échéance coûte ${fmtUsd(exitCostBase > 0n ? exitCostBase : 0n)}, plus que ce que le PT rapporterait encore d’ici le ${fmtDate(pt!.expiry)} (${fmtUsd(BigInt(Math.round(remainingGainBase)))}).`,
+    )
   if (user.account.collateralBase > toBase(user.aTokenBalance, C.side) + 100n * 10n ** 8n)
     warnings.push('Le compte Aave a d’autres collatéraux : le health factor affiché tient compte de tout le compte.')
 
@@ -322,6 +348,15 @@ function ClosePanelInner(p: {
               : undefined,
           sub: full ? (q ? `+ ${fmtAmount(debtBack, D.token.decimals)} ${D.token.symbol}` : undefined) : 'surplus du swap',
         },
+        ...(pt
+          ? [
+              {
+                label: 'Coût de sortie',
+                value: exitCostBase !== undefined ? fmtUsd(exitCostBase > 0n ? exitCostBase : 0n) : undefined,
+                sub: ptExpired ? 'rachat 1 pour 1 par Pendle' : 'vente dans le pool Pendle',
+              },
+            ]
+          : []),
       ]}
       action={
         <button className="btn primary" disabled={!canSign} onClick={onClose} title={disabledReason}>
@@ -371,19 +406,34 @@ function ClosePanelInner(p: {
           value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan Aave ${fmtPct(Number(premiumBps) / 10_000)}`}`}
         >
           {p.common}
-          <div className="field">
-            <span>Slippage max</span>
-            <Segmented value={slippage} onChange={p.setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000) }))} />
-          </div>
+          {/* after maturity the PT is redeemed 1 for 1: no pool, nothing to slip */}
+          {!ptExpired && (
+            <div className="field">
+              <span>Slippage max</span>
+              <Segmented value={slippage} onChange={p.setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000) }))} />
+            </div>
+          )}
         </Fold>
 
         {q && (
-          <Fold title="Devis" value={`${AGGREGATORS[q.aggregator].label} · minimum ${fmtAmount(q.minOut, D.token.decimals)} ${D.token.symbol}`}>
+          <Fold title="Devis" value={`${quoteLabel(q)} · minimum ${fmtAmount(q.minOut, D.token.decimals)} ${D.token.symbol}`}>
             <QuoteCompare quote={q} token={D.token} />
+            {q.route && (
+              <p className="small">
+                Route :{' '}
+                {q.route
+                  .map(
+                    (l) =>
+                      `${l.sell.symbol} → ${l.buy.symbol} (${l.via === 'pendle' ? (q.pendle?.kind === 'redeem' ? 'rachat Pendle' : 'Pendle') : quoteLabel({ ...q, route: undefined, aggregator: l.via })})`,
+                  )
+                  .join(', ')}
+                .
+              </p>
+            )}
             {preview && (
               <dl className="preview">
                 <dt>Routeur</dt>
-                <dd>{q.router}</dd>
+                <dd>{q.route ? [...new Set(q.route.map((l) => l.router))].join(' puis ') : q.router}</dd>
                 <dt>Calldata close()</dt>
                 <dd className="mono">{preview}</dd>
               </dl>

@@ -8,7 +8,9 @@ import { RiskPanel } from './RiskPanel'
 import { eligibleEModes, withEMode, type EModeCategory, type Reserves, type UserState } from '../lib/useMarket'
 import { useQuote } from '../lib/useQuote'
 import { useDebounced } from '../lib/useDebounced'
-import { getQuote } from '../lib/quotes'
+import { getQuote, quoteLabel } from '../lib/quotes'
+import { daysToMaturity, hfAtMaturity, isExpired } from '../lib/pendle'
+import { PtPrices } from './PtPrices'
 import { loopNativeApy } from '../lib/nativeYield'
 import { WINDOWS, isRateSpike, useRateAverages } from '../lib/rateHistory'
 import {
@@ -23,12 +25,12 @@ import {
   EMPTY_ACCOUNT,
   NO_POSITION,
 } from '../lib/math'
-import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
+import { GAS_UNITS_PT, HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
 import { encodeCall, executeOpen, explainError, openCall, type OpenPlan } from '../lib/execute'
 import { executeOpenBatch, useAtomicBatch } from '../lib/oneClick'
 import { capitalKind, useWalletTokens } from '../lib/capital'
 import { outcomeLines, readOutcome } from '../lib/outcome'
-import { fmtAmount, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX } from '../lib/format'
+import { fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
 import { Card, Fold, LoopLayout, QuoteCompare, Metric, Notice, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
@@ -87,7 +89,11 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const [leverage, setLeverage] = useState(seed ? Math.floor(seed.leverage * 20) / 20 : 2)
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
   const [horizonText, setHorizon] = useState('90')
-  const horizon = Number(horizonText)
+  // a Pendle PT: its fixed yield runs until maturity, which is also the holding time the costs are spread over
+  const pt = C.pt
+  const ptDays = pt ? daysToMaturity(pt) : undefined
+  const ptExpired = !!pt && isExpired(pt)
+  const horizon = ptDays !== undefined ? Math.max(1, Math.floor(ptDays)) : Number(horizonText)
   const averages = useRateAverages(market.chain.id, market.pool, [C.token.address, D.token.address]).data
   const avgC = averages?.get(C.token.address.toLowerCase())
   const avgD = averages?.get(D.token.address.toLowerCase())
@@ -168,6 +174,9 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       : undefined
   const quote = useQuote(quoteReq)
   const q = quote.data
+  // a PT's yield is the one its price locks in: the quote's (price paid), the market's implied APY until it arrives
+  const fixedApy = pt && !ptExpired ? (q?.pendle?.kind === 'buy' && q.pendle.fixedApy !== undefined ? q.pendle.fixedApy : C.native?.apy) : undefined
+  const cNative = pt ? (fixedApy !== undefined ? { apy: fixedApy, since: 0, fixedUntil: pt.expiry } : undefined) : C.native
 
   const account0 = user?.account ?? EMPTY_ACCOUNT
   const proj = q && capColl !== undefined ? project(account0, capColl + q.buyAmount, C.side, C.config.liquidationThresholdBps, debtAmount, D.side) : undefined
@@ -188,6 +197,11 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   if (C.config.isolated) problems.push(`${C.token.symbol} est en isolation mode : non supporté par le contrat v1.`)
   if (worst && worst.ltv > maxLtv) problems.push(`LTV projetée ${fmtPct(worst.ltv)} au-dessus du maximum ${fmtPct(maxLtv)}. Baisser le levier.`)
   if (user && initial && capBalance !== undefined && initial > capBalance) problems.push(`Solde ${K.symbol} insuffisant.`)
+  if (ptExpired) problems.push(`${C.token.symbol} est échu : il ne s’achète plus. Le fermer ou le renouveler.`)
+  else if (pt && !pt.market) problems.push(`Aucun marché Pendle connu pour ${C.token.symbol} : achat impossible.`)
+  if (pt && executor && market.executorVersion === 1) problems.push('Le contrat v1 ne fait qu’un swap : un PT demande le contrat v2.')
+  else if (pt && executor && !market.executorPendle)
+    problems.push('Ce contrat n’autorise pas le routeur Pendle : déployer le nouveau contrat (bandeau en haut).')
 
   const warnings: string[] = []
   const lossIssue = q && swapLossProblem(swapLoss(q.sellAmount, D.side, q.buyAmount, C.side), D.token.symbol, C.token.symbol, q.simulated)
@@ -195,6 +209,10 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const capLossIssue = cq && swapLossProblem(swapLoss(cq.sellAmount, capSide, cq.buyAmount, C.side), K.symbol, C.token.symbol, cq.simulated)
   if (capLossIssue) (capLossIssue.block ? problems : warnings).push(capLossIssue.text)
   const correlated = isCorrelated(C, D)
+  if (pt && ptDays !== undefined && !ptExpired && ptDays < 14)
+    warnings.push(`Échéance dans ${Math.floor(ptDays)} j : le rendement fixe ne court plus que jusqu’au ${fmtDate(pt.expiry)}.`)
+  if (fixedApy !== undefined && D.borrowApy + (D.native?.apy ?? 0) > fixedApy)
+    warnings.push(`L’emprunt ${D.token.symbol} (${fmtPct(D.borrowApy)}) coûte plus que l’APY fixe du PT (${fmtPct(fixedApy)}) : la boucle perd chaque jour.`)
   if (proj && proj.healthFactor < hfThresholds(correlated).ok)
     warnings.push(
       `Health factor ${fmtHf(proj.healthFactor)} : une baisse de ${fmtPct(proj.dropToLiquidation, 1)} de ${C.token.symbol} face à ${D.token.symbol} suffit à liquider la position.`,
@@ -225,7 +243,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const yields = loopLev !== undefined && eligibility ? campaignYields(eligibility.pair, loopLev, C, D) : []
   const rewardsApy = yields.reduce((sum, y) => sum + y.apy, 0)
   // the intrinsic yield of yield-bearing legs lasts like the Aave rates: it counts with them over the horizon
-  const nativeApy = loopLev !== undefined ? loopNativeApy(loopLev, C.native, D.native) : 0
+  const nativeApy = loopLev !== undefined ? loopNativeApy(loopLev, cNative, D.native) : 0
   const ratesApy = loopLev !== undefined ? netApy(loopLev, C.supplyApy, D.borrowApy) + nativeApy : undefined
   const apy = ratesApy !== undefined ? ratesApy + rewardsApy : undefined
   // the same loop priced on the 7- and 30-day average Aave rates instead of today's
@@ -236,7 +254,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       return loopLev !== undefined && supply !== undefined && borrow !== undefined ? [[w, netApy(loopLev, supply, borrow) + nativeApy + rewardsApy]] : []
     }),
   )
-  const apyParts = [nativeApy !== 0 && `${fmtPct(nativeApy)} token`, rewardsApy !== 0 && `${fmtPct(rewardsApy)} Merkl`].filter(Boolean)
+  const apyParts = [nativeApy !== 0 && `${fmtPct(nativeApy)} ${pt ? 'fixe' : 'token'}`, rewardsApy !== 0 && `${fmtPct(rewardsApy)} Merkl`].filter(Boolean)
 
   // one-off costs, and the yield once they are paid, over the planned holding time
   const capitalBase = (debouncedInitial !== undefined ? toBase(debouncedInitial, capSide) : 0n) + position.collateralBase - position.debtBase
@@ -251,6 +269,11 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           premiumBps: reserves.premiumBps,
           gasPriceWei: gasPrice.data,
           nativePriceBase: reserves.nativePrice,
+          ...(pt && {
+            gasUnits: GAS_UNITS_PT.open + GAS_UNITS_PT.close,
+            // held to maturity, the PT is redeemed 1 for 1: no pool to cross, and no swap when its SY gives the debt asset
+            freeExit: pt.tokensOut.some((t) => t.address.toLowerCase() === D.token.address.toLowerCase()),
+          }),
         })
       : undefined
   // the APYs above are on the equity left after the swap; over the horizon everything is measured against the
@@ -510,18 +533,49 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
             value={q && capColl !== undefined ? `${fmtAmount(capColl + q.buyAmount, C.token.decimals)} ${C.token.symbol}` : undefined}
             sub={
               q &&
-              (kind === 'swap' && cq
-                ? `dont ${fmtAmount(cq.buyAmount, C.token.decimals)} via le capital`
-                : `dont ${fmtAmount(q.buyAmount, C.token.decimals)} via ${AGGREGATORS[q.aggregator].label}`)
+              (pt && loopLev !== undefined
+                ? `levier effectif ${fmtX(loopLev)}`
+                : kind === 'swap' && cq
+                  ? `dont ${fmtAmount(cq.buyAmount, C.token.decimals)} via le capital`
+                  : `dont ${fmtAmount(q.buyAmount, C.token.decimals)} via ${quoteLabel(q)}`)
             }
           />
-          <Metric label="Levier effectif" value={loopLev !== undefined ? fmtX(loopLev) : undefined} sub={hasPosition ? 'toute la position' : 'après le swap'} />
-          <Metric
-            label={`APY sur ${fmtDays(horizon)}`}
-            value={horizonYield !== undefined ? fmtPct(horizonYield) : undefined}
-            sub={breakEven === undefined ? 'coûts compris' : Number.isFinite(breakEven) ? `rentable après ${Math.ceil(breakEven)} j` : 'jamais rentable'}
-            tone={apyTone(horizonYield)}
-          />
+          {pt ? (
+            <>
+              <Metric
+                label="APY fixe"
+                value={fixedApy !== undefined ? fmtPct(fixedApy) : ptExpired ? '—' : undefined}
+                sub={ptExpired ? 'PT échu' : `jusqu’au ${fmtDate(pt.expiry)}`}
+                tone={apyTone(fixedApy)}
+              />
+              <Metric
+                label="Échéance"
+                value={ptExpired ? 'échu' : fmtDays(Math.floor(ptDays!))}
+                sub={
+                  ptExpired
+                    ? 'à fermer ou renouveler'
+                    : horizonYield !== undefined
+                      ? `${fmtDate(pt.expiry)}, ${fmtPct(horizonYield)} coûts compris`
+                      : fmtDate(pt.expiry)
+                }
+                tone={ptExpired ? 'bad' : ptDays! < 14 ? 'warn' : undefined}
+              />
+            </>
+          ) : (
+            <>
+              <Metric
+                label="Levier effectif"
+                value={loopLev !== undefined ? fmtX(loopLev) : undefined}
+                sub={hasPosition ? 'toute la position' : 'après le swap'}
+              />
+              <Metric
+                label={`APY sur ${fmtDays(horizon)}`}
+                value={horizonYield !== undefined ? fmtPct(horizonYield) : undefined}
+                sub={breakEven === undefined ? 'coûts compris' : Number.isFinite(breakEven) ? `rentable après ${Math.ceil(breakEven)} j` : 'jamais rentable'}
+                tone={apyTone(horizonYield)}
+              />
+            </>
+          )}
         </div>
 
         {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
@@ -539,17 +593,22 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           <Notice key={w}>{w}</Notice>
         ))}
 
-        <Fold title="Réglages" value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)} · ${fmtDays(horizon)} · ${emodeLabel}`}>
+        <Fold
+          title="Réglages"
+          value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)}${pt ? '' : ` · ${fmtDays(horizon)}`} · ${emodeLabel}`}
+        >
           {common}
           <div className="grid2">
             <div className="field">
               <span>Slippage max</span>
               <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000) }))} />
             </div>
-            <div className="field">
-              <span>Durée prévue</span>
-              <Segmented value={horizonText} onChange={setHorizon} options={HORIZONS.map((h) => ({ value: String(h), label: fmtDays(h) }))} />
-            </div>
+            {!pt && (
+              <div className="field">
+                <span>Durée prévue</span>
+                <Segmented value={horizonText} onChange={setHorizon} options={HORIZONS.map((h) => ({ value: String(h), label: fmtDays(h) }))} />
+              </div>
+            )}
           </div>
           {eligible.length > 0 && (
             <label className="field">
@@ -572,15 +631,22 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
             debt={D.token.symbol}
             healthFactor={proj.healthFactor}
             leverage={loopLev}
-            supplyApy={C.supplyApy + (C.native?.apy ?? 0)}
+            supplyApy={C.supplyApy + (cNative?.apy ?? 0)}
             borrowApy={D.borrowApy}
             debtNativeApy={D.native?.apy ?? 0}
             rewardsApy={rewardsApy}
             correlated={correlated}
             apy={apy}
             averageApy={averageApy}
+            maturity={
+              pt && pt.discount !== undefined && ptDays !== undefined && !ptExpired
+                ? { days: ptDays, healthFactor: hfAtMaturity(proj.healthFactor, pt.discount, D.borrowApy, ptDays) }
+                : undefined
+            }
           />
         )}
+
+        {pt && <PtPrices market={market} reserve={C} quote={q} />}
 
         {pairCampaigns.supply.length + pairCampaigns.borrow.length > 0 && (
           <Fold
@@ -592,30 +658,36 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
         )}
 
         {q && (
-          <Fold
-            title="Devis"
-            value={`${AGGREGATORS[q.aggregator].label} · minimum ${fmtAmount((capCollMin ?? 0n) + q.minOut, C.token.decimals)} ${C.token.symbol}`}
-          >
+          <Fold title="Devis" value={`${quoteLabel(q)} · minimum ${fmtAmount((capCollMin ?? 0n) + q.minOut, C.token.decimals)} ${C.token.symbol}`}>
             {cq && (
               <p className="small">
-                Capital : {fmtAmount(cq.sellAmount, K.decimals)} {K.symbol} → {fmtAmount(cq.buyAmount, C.token.decimals)} {C.token.symbol} via{' '}
-                {AGGREGATORS[cq.aggregator].label}, minimum {fmtAmount(cq.minOut, C.token.decimals)}.
+                Capital : {fmtAmount(cq.sellAmount, K.decimals)} {K.symbol} → {fmtAmount(cq.buyAmount, C.token.decimals)} {C.token.symbol} via {quoteLabel(cq)},
+                minimum {fmtAmount(cq.minOut, C.token.decimals)}.
               </p>
             )}
             {cq && <QuoteCompare quote={cq} token={C.token} />}
             {cq && (
               <p className="small">
                 Emprunt : {fmtAmount(q.sellAmount, D.token.decimals)} {D.token.symbol} → {fmtAmount(q.buyAmount, C.token.decimals)} {C.token.symbol} via{' '}
-                {AGGREGATORS[q.aggregator].label}, minimum {fmtAmount(q.minOut, C.token.decimals)}.
+                {quoteLabel(q)}, minimum {fmtAmount(q.minOut, C.token.decimals)}.
               </p>
             )}
             <QuoteCompare quote={q} token={C.token} />
+            {q.route && (
+              <p className="small">
+                Route : {q.route.map((l) => `${l.sell.symbol} → ${l.buy.symbol} (${l.via === 'pendle' ? 'Pendle' : AGGREGATORS[l.via].label})`).join(', ')}.
+              </p>
+            )}
             {preview && (
               <dl className="preview">
                 <dt>Contrat</dt>
                 <dd>{executor ?? `${market.quoteTaker} (adresse des tests sur fork, contrat non déployé)`}</dd>
                 <dt>Routeur</dt>
-                <dd>{cq && cq.router !== q.router ? `${cq.router} puis ${q.router}` : q.router}</dd>
+                <dd>
+                  {[...new Set([...(cq?.route?.map((l) => l.router) ?? (cq ? [cq.router] : [])), ...(q.route?.map((l) => l.router) ?? [q.router])])].join(
+                    ' puis ',
+                  )}
+                </dd>
                 <dt>Calldata open()</dt>
                 <dd className="mono">{preview}</dd>
               </dl>

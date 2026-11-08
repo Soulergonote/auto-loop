@@ -9,6 +9,8 @@ const BPS = 10_000n
 
 /** Gas used by the executor, measured on a Base fork (2026-10-18 e2e: ~733k to open, ~1.7M to close; 2026-11-08: ~1.14M to change the collateral), rounded up. */
 export const GAS_UNITS = { open: 800_000n, close: 1_700_000n, swapCollateral: 1_200_000n }
+/** A loop on a Pendle PT, measured on an Ethereum fork (2026-11-08: ~1.25M to open through an aggregator and Pendle, ~1.05M to close), rounded up. */
+export const GAS_UNITS_PT = { open: 1_300_000n, close: 1_100_000n, swapCollateral: 1_400_000n }
 
 export const HORIZONS = [30, 90, 180, 365] as const
 export type Horizon = (typeof HORIZONS)[number]
@@ -69,13 +71,15 @@ export function loopCosts(p: {
   gasPriceWei?: bigint
   /** price of the chain's native token, base units */
   nativePriceBase?: bigint
+  /** gas of the open and the close, when not the plain loop's (GAS_UNITS) */
+  gasUnits?: bigint
+  /** the exit needs no swap (a PT redeemed at maturity straight into the debt asset) */
+  freeExit?: boolean
 }): Costs {
   const exitPremium = (p.debtBase * p.premiumBps) / BPS
-  const exitSwap = p.entrySoldBase > 0n ? (p.debtBase * p.entrySwapBase) / p.entrySoldBase : 0n
-  const gas =
-    p.gasPriceWei !== undefined && p.nativePriceBase !== undefined
-      ? ((GAS_UNITS.open + GAS_UNITS.close) * p.gasPriceWei * p.nativePriceBase) / 10n ** 18n
-      : undefined
+  const exitSwap = p.freeExit ? 0n : p.entrySoldBase > 0n ? (p.debtBase * p.entrySwapBase) / p.entrySoldBase : 0n
+  const units = p.gasUnits ?? GAS_UNITS.open + GAS_UNITS.close
+  const gas = p.gasPriceWei !== undefined && p.nativePriceBase !== undefined ? (units * p.gasPriceWei * p.nativePriceBase) / 10n ** 18n : undefined
   return { entrySwap: p.entrySwapBase, exitPremium, exitSwap, gas, total: p.entrySwapBase + exitPremium + exitSwap + (gas ?? 0n) }
 }
 

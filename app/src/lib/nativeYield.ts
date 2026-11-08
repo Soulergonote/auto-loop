@@ -16,6 +16,8 @@ export type NativeYield = {
   apy: number
   /** unix seconds of the snapshot the average starts from */
   since: number
+  /** a Pendle PT: the market's fixed yield, which lasts until this date (unix seconds) */
+  fixedUntil?: number
 }
 
 export const sourceAbi = parseAbi(['function getSourceOfAsset(address asset) view returns (address)'])

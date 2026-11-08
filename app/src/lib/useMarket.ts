@@ -3,12 +3,13 @@ import { useReadContract, useReadContracts } from 'wagmi'
 import { useQuery } from '@tanstack/react-query'
 import { zeroAddress, type Address } from 'viem'
 import { poolAbi, providerAbi, oracleAbi, erc20Abi, debtTokenAbi } from '../abi'
-import { DEMO, DEMO_TOKENS, type Market, type Token } from '../config'
+import { DEMO, DEMO_TOKENS, pendleChain, type Market, type Token } from '../config'
 import { demoReserve, demoUser } from './demo'
 import { decodeReserveConfig, rayAprToApy, type ReserveConfig } from './aave'
 import type { Account, Side } from './math'
 import { headlineRewards, type Campaign } from './merkl'
 import { nativeYieldQuery, type NativeYield } from './nativeYield'
+import { ptInfosQuery, ptYield, readFeedDiscount, type PtInfo } from './pendle'
 
 export type Reserve = {
   token: Token
@@ -24,6 +25,8 @@ export type Reserve = {
   borrowRewardApr: number
   /** exchange-rate yield of a yield-bearing token (wstETH, sUSDe…), from its Aave price adapter */
   native?: NativeYield
+  /** a Pendle PT: its SY, maturity and market; `discount` = annual discount of its Aave price feed, when read */
+  pt?: PtInfo & { discount?: number }
   price: bigint
   side: Side
 }
@@ -82,10 +85,12 @@ type ReserveData = {
 }
 
 /** A reserve as the app uses it, from the pool's `getReserveData` and the oracle price. */
-export function toReserve(token: Token, r: ReserveData, price: bigint, native?: NativeYield): Reserve {
+export function toReserve(token: Token, r: ReserveData, price: bigint, native?: NativeYield, pt?: Reserve['pt']): Reserve {
   const config = decodeReserveConfig(r.configuration)
   return {
-    native,
+    // a PT's yield is the fixed rate of its Pendle market, until maturity
+    native: pt ? ptYield(pt) : native,
+    pt,
     token: { ...token, decimals: config.decimals },
     config,
     id: r.id,
@@ -133,14 +138,22 @@ export function useAllReserves(market: Market, tokens: Token[] | undefined, enab
       list.map((t) => t.address),
     ),
   )
+  const pts = useQuery({
+    ...ptInfosQuery(
+      chainId,
+      list.map((t) => t.address),
+    ),
+    enabled: on && pendleChain(chainId),
+  })
   const reserves = useMemo(() => {
     if (!prices.data || !data.data) return undefined
     return list.flatMap((t, i) => {
       const r = data.data[i]?.result
       const price = prices.data[i] ?? 0n
-      return r && r.aTokenAddress !== zeroAddress && price > 0n ? [toReserve(t, r, price, native.data?.get(t.address.toLowerCase()))] : []
+      const key = t.address.toLowerCase()
+      return r && r.aTokenAddress !== zeroAddress && price > 0n ? [toReserve(t, r, price, native.data?.get(key), pts.data?.get(key))] : []
     })
-  }, [list, prices.data, data.data, native.data])
+  }, [list, prices.data, data.data, native.data, pts.data])
   return { reserves, error: provider.error ?? oracle.error ?? prices.error ?? data.error }
 }
 
@@ -175,12 +188,25 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
   })
   // a failed read only leaves the intrinsic yield out
   const native = useQuery(nativeYieldQuery(chainId, DEMO ? undefined : oracle.data, [collateral.address, debt.address]))
+  // Pendle PTs: maturity, market and fixed yield; the collateral's Aave price discount for the health factor at maturity
+  const pts = useQuery({ ...ptInfosQuery(chainId, [collateral.address, debt.address]), enabled: !DEMO && pendleChain(chainId) })
+  const collateralPt = pts.data?.get(collateral.address.toLowerCase())
+  const discount = useQuery({
+    queryKey: ['pt-discount', chainId, oracle.data, collateral.address],
+    queryFn: () => readFeedDiscount(chainId, oracle.data!, collateral.address),
+    enabled: !!oracle.data && !!collateralPt,
+    staleTime: 600_000,
+  })
 
   const reserves = useMemo(() => {
     if (DEMO) return { market, collateral: demoReserve(collateral), debt: demoReserve(debt), premiumBps: 5n, nativePrice: undefined }
     if (!reads.data) return undefined
     const [rc, rd, premium, prices] = reads.data
-    const build = (token: Token, r: typeof rc, price: bigint) => toReserve(token, r, price, native.data?.get(token.address.toLowerCase()))
+    const ptOf = (token: Token) => {
+      const pt = pts.data?.get(token.address.toLowerCase())
+      return pt && token.address === collateral.address ? { ...pt, discount: discount.data } : pt
+    }
+    const build = (token: Token, r: typeof rc, price: bigint) => toReserve(token, r, price, native.data?.get(token.address.toLowerCase()), ptOf(token))
     if (rc.aTokenAddress === zeroAddress || rd.aTokenAddress === zeroAddress) return null // not listed
     return {
       market,
@@ -189,7 +215,7 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
       premiumBps: BigInt(premium),
       nativePrice: nativeToken ? prices[2] : undefined,
     }
-  }, [reads.data, native.data, market, collateral, debt, nativeToken])
+  }, [reads.data, native.data, pts.data, discount.data, market, collateral, debt, nativeToken])
 
   const executor = market.executor
   const spender = executor ?? zeroAddress

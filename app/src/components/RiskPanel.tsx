@@ -22,6 +22,8 @@ type Props = {
   /** net APY today, and priced on the 7- and 30-day average Aave rates when they could be read */
   apy?: number
   averageApy?: Partial<Record<Window, number>>
+  /** a Pendle PT: days to maturity and the health factor then (Aave's PT price at par, debt grown) */
+  maturity?: { days: number; healthFactor: number }
 }
 
 /** What would hurt the loop: a price move, a rate rise, or simply time while interest accrues. */
@@ -37,6 +39,7 @@ export function RiskPanel({
   correlated,
   apy,
   averageApy = {},
+  maturity,
 }: Props) {
   const hfClass = (hf: number) => hfTone(hf, correlated)
   if (!Number.isFinite(healthFactor)) return null
@@ -92,6 +95,18 @@ export function RiskPanel({
                     sur {w} j : {averageApy[w] !== undefined ? fmtPct(averageApy[w]!) : 'non lu'}
                   </td>
                 ))}
+              </tr>
+            </>
+          )}
+          {maturity && (
+            <>
+              <tr>
+                <th colSpan={DROPS.length + 1}>Health factor à l’échéance du PT, prix Aave au pair et dette aux taux actuels</th>
+              </tr>
+              <tr>
+                <td colSpan={DROPS.length + 1} className={hfClass(maturity.healthFactor)}>
+                  dans {Math.max(0, Math.floor(maturity.days))} j : {fmtHf(maturity.healthFactor)}
+                </td>
               </tr>
             </>
           )}

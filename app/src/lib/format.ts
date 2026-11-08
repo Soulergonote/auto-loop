@@ -62,3 +62,9 @@ export const fmtDays = (days: number) =>
 
 /** "0x6A00…1068": 0x, the next 4 characters, the last 4. */
 export const fmtAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`
+
+/** Time to a PT's maturity: "J−32", "J−0" on the day, "échu" after. */
+export function fmtMaturity(expirySec: number, nowSec = Date.now() / 1000): string {
+  const days = (expirySec - nowSec) / 86_400
+  return days > 0 ? `J${MINUS}${Math.floor(days)}` : 'échu'
+}

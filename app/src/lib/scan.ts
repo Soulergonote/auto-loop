@@ -92,7 +92,9 @@ export type ScanOptions = {
   nowMs?: number
 }
 
-const canBeCollateral = (r: SnapReserve) => r.config.active && !r.config.paused && !r.config.frozen && !r.config.isolated
+/** A PT is only looped while it can still be bought: before maturity, through a known Pendle market. */
+const canBeCollateral = (r: SnapReserve) =>
+  r.config.active && !r.config.paused && !r.config.frozen && !r.config.isolated && (!r.pt || (!!r.pt.market && !r.pt.expired && !!r.native))
 const canBeBorrowed = (r: SnapReserve) => r.config.active && !r.config.paused && !r.config.frozen && r.config.borrowingEnabled && r.config.flashLoanEnabled
 
 /** What is left under a cap (whole tokens, 0 = none), in base units. */

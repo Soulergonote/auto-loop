@@ -10,6 +10,7 @@ import type { Market, Token } from '../config'
 import { decodeReserveConfig, rayAprToApy } from './aave'
 import { toBase } from './math'
 import { readNativeYields } from './nativeYield'
+import { ptYield, readPtInfos } from './pendle'
 import type { EModeCategory, Reserve } from './useMarket'
 import type { Holding } from './positions'
 
@@ -78,7 +79,7 @@ export async function loadSnapshot(market: Market): Promise<Snapshot> {
     return [{ token, rd, config, price }]
   })
 
-  const [amounts, native] = await Promise.all([
+  const [amounts, native, pts] = await Promise.all([
     readContracts(wagmiConfig, {
       contracts: base.flatMap(({ token, rd }) => [
         { chainId, address: token.address, abi: erc20Abi, functionName: 'balanceOf', args: [rd.aTokenAddress] } as const,
@@ -93,14 +94,21 @@ export async function loadSnapshot(market: Market): Promise<Snapshot> {
       oracle,
       base.map((b) => b.token.address),
     ).catch(() => new Map()),
+    // Pendle PTs (maturity, fixed yield); a failed read leaves them as plain tokens
+    readPtInfos(
+      chainId,
+      base.map((b) => b.token.address),
+    ).catch(() => new Map()),
   ])
 
   const reserves: SnapReserve[] = base.map(({ token, rd, config, price }, i) => {
     const side = { price, decimals: config.decimals }
     const amount = (k: number) => toBase((amounts[3 * i + k].result as bigint | undefined) ?? 0n, side)
+    const pt = pts.get(token.address.toLowerCase())
     return {
       token,
-      native: native.get(token.address.toLowerCase()),
+      native: pt ? ptYield(pt) : native.get(token.address.toLowerCase()),
+      pt,
       id: rd.id,
       config,
       aToken: rd.aTokenAddress,

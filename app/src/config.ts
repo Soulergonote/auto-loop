@@ -195,6 +195,8 @@ export const PENDLE_MARKETS: Record<number, Address[]> = {
   ],
 }
 export const pendleChain = (chainId: number) => !!PENDLE_ROUTER_STATIC[chainId]
+/** Pendle's PT oracle (TWAP of the market's implied rate), read for the "Prix du PT" block. */
+export const PENDLE_PY_ORACLE: Record<number, Address> = { 1: '0x9a9Fa8338dd5E5B2188006f1Cd2Ef26d921650C2' }
 
 /** Free flash lenders a new executor registers on a chain (kind 1 = Morpho), fixed for good like the routers. */
 export function executorLenders(chainId: number): { kind: number; lender: Address }[] {

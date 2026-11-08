@@ -5,7 +5,7 @@ import { MARKETS, aggregatorsFor, getMarket, type Market } from '../config'
 import { merklQuery } from '../lib/merkl'
 import { snapshotQuery } from '../lib/snapshot'
 import { scanMarket, type ScanFlag, type ScanRow } from '../lib/scan'
-import { fmtDate, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { fmtDate, fmtMaturity, fmtPct, fmtUsd, fmtX } from '../lib/format'
 import { Card, Fold, Notice, Segmented, Skel, Tag, useSlow } from './ui'
 
 /** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (from the positions' Merkl rewards). */
@@ -150,6 +150,9 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
                   {r.collateral.token.symbol} / {r.debt.token.symbol}
                   {scope === 'all' && <span className="muted"> · {label(r.marketId)}</span>}
                   <div className="tags">
+                    {r.collateral.pt && (
+                      <Tag tone={r.collateral.pt.expiry - Date.now() / 1000 < 14 * 86_400 ? 'warn' : undefined}>PT · {fmtMaturity(r.collateral.pt.expiry)}</Tag>
+                    )}
                     {r.emode && <Tag>eMode {r.emode.label}</Tag>}
                     {r.rewardsApy > 0 && <Tag tone="good">bonus</Tag>}
                     {r.flags.map((f) => (
@@ -225,7 +228,8 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
         <p className="muted small">
           « dont token » est le rendement propre des tokens à rendement (wstETH, sUSDe…) : la hausse de leur taux de change depuis le dernier relevé de leur
           adaptateur de prix Aave, annualisée, sur le collatéral moins celle d’une dette qui en a un. Sans adaptateur lisible, l’étiquette « rendement du token
-          non compté » le signale.
+          non compté » le signale. Pour un PT Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe de son marché Pendle, valable jusqu’à
+          l’échéance.
         </p>
         <p className="muted small">
           Non compté : le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes Merkl à public restreint. La capacité est le capital encore «

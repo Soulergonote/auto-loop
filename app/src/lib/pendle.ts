@@ -11,7 +11,8 @@
 import { decodeFunctionData, encodeFunctionData, getAddress, parseAbi, zeroAddress, type Address, type Hex } from 'viem'
 import { readContract, readContracts } from '@wagmi/core'
 import { wagmiConfig } from '../wagmi'
-import { PENDLE_FACTORIES, PENDLE_MARKETS, PENDLE_ROUTER, PENDLE_ROUTER_STATIC, pendleChain, type Token } from '../config'
+import type { NativeYield } from './nativeYield'
+import { PENDLE_FACTORIES, PENDLE_MARKETS, PENDLE_PY_ORACLE, PENDLE_ROUTER, PENDLE_ROUTER_STATIC, pendleChain, type Token } from '../config'
 
 export const ptAbi = parseAbi([
   'function SY() view returns (address)',
@@ -88,6 +89,12 @@ export function fixedApy(ptOut: bigint, assetIn: bigint, secondsLeft: number): n
   const ratio = Number((ptOut * 10n ** 12n) / assetIn) / 1e12
   const y = Math.pow(ratio, YEAR / secondsLeft) - 1
   return Number.isFinite(y) ? y : undefined
+}
+
+/** The PT's yield as the app counts it: the market's implied APY until maturity, nothing after (redeemed 1 for 1). */
+export function ptYield(pt: PtInfo, nowSec = Date.now() / 1000): NativeYield | undefined {
+  if (isExpired(pt, nowSec) || pt.impliedApy === undefined) return undefined
+  return { apy: pt.impliedApy, since: nowSec, fixedUntil: pt.expiry }
 }
 
 export const isExpired = (pt: Pick<PtInfo, 'expiry' | 'expired'>, nowSec = Date.now() / 1000) => pt.expired || nowSec >= pt.expiry
@@ -385,6 +392,27 @@ export async function readFeedDiscount(chainId: number, oracle: Address, pt: Add
     return undefined
   }
 }
+
+/** 15-minute TWAP of the PT's price in its underlying asset (1 = par), from Pendle's PT oracle; undefined if unreadable. */
+export async function readPtTwap(chainId: number, market: Address): Promise<number | undefined> {
+  const oracle = PENDLE_PY_ORACLE[chainId]
+  if (!oracle) return undefined
+  try {
+    const rate = await readContract(wagmiConfig, {
+      chainId,
+      address: oracle,
+      abi: parseAbi(['function getPtToAssetRate(address market, uint32 duration) view returns (uint256)']),
+      functionName: 'getPtToAssetRate',
+      args: [market, 900],
+    })
+    return Number(rate) / 1e18
+  } catch {
+    return undefined
+  }
+}
+
+/** Price of the PT in its underlying asset that a fixed APY means, `days` before maturity. */
+export const ptPriceFromApy = (apy: number, days: number) => Math.pow(1 + apy, -Math.max(0, days) / 365)
 
 // ---------------------------------------------------------------------------------------------
 // Quotes (RouterStatic)
