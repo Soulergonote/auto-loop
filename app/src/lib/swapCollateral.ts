@@ -77,12 +77,12 @@ export function swapTargets(reserves: Reserve[], from: Address, debt: Address, e
     (r) =>
       !same(r.token.address, from) &&
       !same(r.token.address, debt) &&
-      r.config.ltvBps > 0 &&
       r.config.active &&
       !r.config.frozen &&
       !r.config.paused &&
       !r.config.isolated &&
-      (!emode || (hasBit(emode.collateralBitmap, r.id) && !hasBit(emode.ltvZeroBitmap, r.id))),
+      // inside an eMode its own LTV applies: Aave lists PTs with an LTV of 0 outside their eMode
+      (emode ? hasBit(emode.collateralBitmap, r.id) && !hasBit(emode.ltvZeroBitmap, r.id) : r.config.ltvBps > 0),
   )
 }
 

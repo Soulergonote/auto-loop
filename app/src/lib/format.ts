@@ -68,3 +68,6 @@ export function fmtMaturity(expirySec: number, nowSec = Date.now() / 1000): stri
   const days = (expirySec - nowSec) / 86_400
   return days > 0 ? `J${MINUS}${Math.floor(days)}` : 'échu'
 }
+
+/** A PT's symbol without its maturity, for tight tiles: "PT-reUSDe-10DEC2026" → "PT-reUSDe". */
+export const ptShortSymbol = (symbol: string) => symbol.replace(/-\d{1,2}[A-Z]{3}\d{4}$/, '')

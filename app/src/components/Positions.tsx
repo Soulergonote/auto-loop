@@ -244,7 +244,7 @@ function MarketPosition({
           label="APY net"
           value={fmtPct(s.apy)}
           tone={apyTone(s.apy)}
-          sub={`${fmtDollars((Number(s.equityBase) / 1e8) * (Number.isFinite(s.apy) ? s.apy : 0))} par an${s.nativeApy ? `, dont ${fmtPct(s.nativeApy)} token` : ''}`}
+          sub={`${fmtDollars((Number(s.equityBase) / 1e8) * (Number.isFinite(s.apy) ? s.apy : 0))} par an${s.nativeApy ? `, dont ${fmtPct(s.nativeApy)} ${pt ? 'fixe' : 'token'}` : ''}`}
         />
       </div>
       {tone === 'bad' && (

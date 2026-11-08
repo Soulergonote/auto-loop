@@ -30,7 +30,7 @@ import { encodeCall, executeOpen, explainError, openCall, type OpenPlan } from '
 import { executeOpenBatch, useAtomicBatch } from '../lib/oneClick'
 import { capitalKind, useWalletTokens } from '../lib/capital'
 import { outcomeLines, readOutcome } from '../lib/outcome'
-import { fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX } from '../lib/format'
+import { fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
 import { Card, Fold, LoopLayout, QuoteCompare, Metric, Notice, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
@@ -52,7 +52,7 @@ type Props = {
   head: ReactNode
   /** eMode and leverage to start with (pair picked in the scanner) */
   /** from the scanner, the positions or the reinvest flow; amount = capital to fill in, as typed text */
-  seed?: { emode: number; leverage: number; amount?: string }
+  seed?: { emode: number; leverage: number; amount?: string; capital?: Address }
   /** the market's tokens, offered as capital with a v2 contract */
   tokens?: Token[]
 }
@@ -78,7 +78,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   // capital in any token (contract v2): the collateral, the debt asset or another token the wallet holds
   const v2 = market.executorVersion !== 1
   const wallet = useWalletTokens(market, tokens, C.token, D.token, account, v2)
-  const [capitalChoice, setCapitalChoice] = useState<string>()
+  const [capitalChoice, setCapitalChoice] = useState<string | undefined>(seed?.capital)
   const capitalOptions = v2 ? (wallet.data ?? []) : []
   const capitalPick = capitalOptions.find((t) => t.token.address === capitalChoice)
   const K = capitalPick?.token ?? C.token
@@ -530,7 +530,11 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           />
           <Metric
             label="Collatéral déposé"
-            value={q && capColl !== undefined ? `${fmtAmount(capColl + q.buyAmount, C.token.decimals)} ${C.token.symbol}` : undefined}
+            value={
+              q && capColl !== undefined
+                ? `${fmtAmount(capColl + q.buyAmount, C.token.decimals)} ${pt ? ptShortSymbol(C.token.symbol) : C.token.symbol}`
+                : undefined
+            }
             sub={
               q &&
               (pt && loopLev !== undefined
@@ -555,7 +559,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
                   ptExpired
                     ? 'à fermer ou renouveler'
                     : horizonYield !== undefined
-                      ? `${fmtDate(pt.expiry)}, ${fmtPct(horizonYield)} coûts compris`
+                      ? `${fmtDate(pt.expiry)} · APY coûts compris ${fmtPct(horizonYield)}`
                       : fmtDate(pt.expiry)
                 }
                 tone={ptExpired ? 'bad' : ptDays! < 14 ? 'warn' : undefined}

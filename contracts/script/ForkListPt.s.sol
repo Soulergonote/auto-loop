@@ -9,7 +9,8 @@ import {Script, console} from "forge-std/Script.sol";
  * while no PT is active on the real market. Run with the Aave ACL admin unlocked:
  *   forge script script/ForkListPt.s.sol --rpc-url http://127.0.0.1:8545 --unlocked --sender <ACL admin> --broadcast
  * PTS="pt1,pt2" picks the PTs (default PT-reUSDe-10DEC2026 and PT-sUSN-22JUL2027), SPLIT=1 puts the second PT in its own
- * eMode only (renewal through close + eMode change + open instead of one swapCollateral).
+ * eMode only (renewal through close + eMode change + open instead of one swapCollateral). DISCOUNTS="1500,800" sets each
+ * PT's yearly oracle discount in bps (default 15 %); far from the Pendle implied rate, every buy reads as a loss.
  */
 
 interface IProvider {
@@ -93,6 +94,7 @@ contract ForkListPt is Script {
     function run() external {
         address[] memory pts = vm.envOr("PTS", ",", _defaults());
         bool split = vm.envOr("SPLIT", false);
+        uint256[] memory discounts = vm.envOr("DISCOUNTS", ",", new uint256[](0));
         IProvider provider = IProvider(POOL.ADDRESSES_PROVIDER());
         IConfigurator cf = IConfigurator(provider.getPoolConfigurator());
         address aImpl = address(uint160(uint256(vm.load(POOL.getReserveAToken(REF), IMPL_SLOT))));
@@ -116,7 +118,9 @@ contract ForkListPt is Script {
                 // borrowing stays disabled: the rate curve is never used
                 interestRateData: abi.encode(uint16(4500), uint32(0), uint32(1000), uint32(30000))
             });
-            feeds[i] = address(new PtLinearDiscountFeed(IPt(pts[i]).expiry(), 0.15e18, string.concat(sym, " linear discount (fork)")));
+            // Aave sets the discount near the PT's implied rate; DISCOUNTS="1500,800" (bps, one per PT) does the same here
+            uint256 discount = i < discounts.length ? discounts[i] * 1e14 : 0.15e18;
+            feeds[i] = address(new PtLinearDiscountFeed(IPt(pts[i]).expiry(), discount, string.concat(sym, " linear discount (fork)")));
         }
         cf.initReserves(input);
         IOracle(provider.getPriceOracle()).setAssetSources(pts, feeds);

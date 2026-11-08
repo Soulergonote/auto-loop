@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Address } from 'viem'
 import { needsRenewal, ptPriceFromApy, ptYield, type PtInfo } from './pendle'
-import { fmtMaturity } from './format'
+import { fmtMaturity, ptShortSymbol } from './format'
 import { loopCosts } from './economics'
 import { scanMarket } from './scan'
 import { rollTargets } from './swapCollateral'
@@ -38,6 +38,8 @@ describe('PT yield and maturity', () => {
     expect(fmtMaturity(NOW + 32.7 * DAY, NOW)).toBe('J−32')
     expect(fmtMaturity(NOW + 3600, NOW)).toBe('J−0')
     expect(fmtMaturity(NOW, NOW)).toBe('échu')
+    expect(ptShortSymbol('PT-reUSDe-10DEC2026')).toBe('PT-reUSDe')
+    expect(ptShortSymbol('PT-sUSN-22JUL2027')).toBe('PT-sUSN')
   })
 
   it('offers a roll in the last month or once matured', () => {

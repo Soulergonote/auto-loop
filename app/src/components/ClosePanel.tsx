@@ -31,6 +31,8 @@ type Props = {
   common: ReactNode
   /** market card and open / close tabs */
   head: ReactNode
+  /** next step offered after a full close (a PT roll in two steps: open the new PT with the collateral given back) */
+  then?: { label: string; run: (back: { collateral: bigint; debt: bigint }) => void }
 }
 
 /** Summary while there is nothing to close: the button stays, disabled, with the reason. */
@@ -48,13 +50,13 @@ const idleSummary = (reason: string, children?: ReactNode) => (
   </Summary>
 )
 
-export function ClosePanel({ reserves, user, account, aggregator, onDone, common, head }: Props) {
+export function ClosePanel({ reserves, user, account, aggregator, onDone, common, head, then }: Props) {
   const { market, collateral: C, debt: D, premiumBps } = reserves
   // target leverage of the pair's position; 1 = close everything
   const [target, setTarget] = useState(1)
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
   const [busy, setBusy] = useState<string>()
-  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[] }>()
+  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[]; back?: { collateral: bigint; debt: bigint } }>()
 
   if (!user) {
     return (
@@ -71,7 +73,19 @@ export function ClosePanel({ reserves, user, account, aggregator, onDone, common
   if (user.debtBalance === 0n || user.aTokenBalance === 0n) {
     return (
       // a full close lands here: its confirmation stays visible under the button
-      <LoopLayout summary={idleSummary('Aucune position à fermer', <TxResult market={market} result={result?.ok ? result : undefined} />)}>
+      <LoopLayout
+        summary={idleSummary(
+          'Aucune position à fermer',
+          <>
+            <TxResult market={market} result={result?.ok ? result : undefined} />
+            {result?.ok && then && (
+              <button className="btn" onClick={() => then.run(result.back ?? { collateral: 0n, debt: 0n })}>
+                {then.label}
+              </button>
+            )}
+          </>,
+        )}
+      >
         {head}
         <Card title="Fermer ou réduire">
           <p className="muted">
@@ -126,7 +140,7 @@ function ClosePanelInner(p: {
   busy?: string
   setBusy: (s?: string) => void
   result?: { ok: boolean; text: string; hash?: Hash; details?: string[] }
-  setResult: (r?: { ok: boolean; text: string; hash?: Hash; details?: string[] }) => void
+  setResult: (r?: { ok: boolean; text: string; hash?: Hash; details?: string[]; back?: { collateral: bigint; debt: bigint } }) => void
 }) {
   const { market, C, D, user, account, aggregator, slippage, busy, setBusy, result, setResult } = p
   // a wallet that sends atomic batches: approval, close and approval back in one confirmation
@@ -159,7 +173,8 @@ function ClosePanelInner(p: {
   const ptExpired = !!pt && isExpired(pt)
   const [ptScale, setPtScale] = useState(1)
   let toSell = collateralToSellForRepay(repay, premiumBps, BigInt(slippage), C.side, D.side)
-  if (pt) toSell = (toSell * BigInt(Math.round(ptScale * 1e6))) / 1_000_000n
+  // a matured PT earns nothing more: a full close redeems all of it and the rest comes back in the debt asset
+  if (pt) toSell = full && ptExpired ? user.aTokenBalance : (toSell * BigInt(Math.round(ptScale * 1e6))) / 1_000_000n
   if (toSell > user.aTokenBalance) toSell = user.aTokenBalance
 
   const quoteReq =
@@ -182,11 +197,11 @@ function ClosePanelInner(p: {
   const required = full ? (owed * 10_005n) / 10_000n : owed
   const coversDebt = q ? q.minOut >= required : undefined
   useEffect(() => {
-    if (!pt || !q || q.simulated || q.sellAmount !== toSell || q.minOut === 0n) return
+    if (!pt || (full && ptExpired) || !q || q.simulated || q.sellAmount !== toSell || q.minOut === 0n) return
     const ratio = Number(required) / Number(q.minOut)
     // short of the repayment, or selling more than 1 % too much: resize (0,1 % of room), at most the whole balance
     if (ratio > 1 || (ratio < 0.99 && !full)) setPtScale((x) => Math.min(x * ratio * 1.001, 10))
-  }, [pt, q, toSell, required, full])
+  }, [pt, ptExpired, q, toSell, required, full])
 
   const remainingDebtBase = user.account.debtBase - toBase(repay, D.side)
   const hfAfter =
@@ -311,7 +326,11 @@ function ClosePanelInner(p: {
           collateralReturned: full ? collatBack : undefined,
           debtReturned: fresh.buyAmount > owed ? fresh.buyAmount - owed : undefined,
         })
-      setResult({ ok: true, text: full ? 'Position fermée.' : 'Position réduite.', hash, details })
+      const back =
+        outcome?.kind === 'close'
+          ? { collateral: outcome.collateralReturned, debt: outcome.debtReturned }
+          : { collateral: full ? collatBack : 0n, debt: fresh.buyAmount > owed ? fresh.buyAmount - owed : 0n }
+      setResult({ ok: true, text: full ? 'Position fermée.' : 'Position réduite.', hash, details, back })
       p.onDone()
     } catch (e) {
       setResult({ ok: false, text: explainError(e) })
@@ -344,12 +363,20 @@ function ClosePanelInner(p: {
           : { label: 'Health factor après', value: fmtHf(hfAfter), tone: hfTone(hfAfter, correlated), sub: `levier ${fmtX(levAfter)}`, key: true },
         {
           label: 'Rendu',
-          value: full
-            ? `${fmtAmount(collatBack, C.token.decimals)} ${C.token.symbol}`
-            : q
-              ? `${fmtAmount(debtBack, D.token.decimals)} ${D.token.symbol}`
-              : undefined,
-          sub: full ? (q ? `+ ${fmtAmount(debtBack, D.token.decimals)} ${D.token.symbol}` : undefined) : 'surplus du swap',
+          value:
+            full && collatBack > 0n
+              ? `${fmtAmount(collatBack, C.token.decimals)} ${C.token.symbol}`
+              : q
+                ? `${fmtAmount(debtBack, D.token.decimals)} ${D.token.symbol}`
+                : undefined,
+          sub:
+            full && collatBack > 0n
+              ? q
+                ? `+ ${fmtAmount(debtBack, D.token.decimals)} ${D.token.symbol}`
+                : undefined
+              : full
+                ? `tout le ${C.token.symbol} racheté`
+                : 'surplus du swap',
         },
         ...(pt
           ? [

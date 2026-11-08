@@ -7,6 +7,9 @@
 //   USER_ADDR=0x… node e2e/run.cjs reinvest rei   claim that account's Merkl rewards, swap them, open "Augmenter"
 // USER_ADDR=0x… acts as that account (impersonated on anvil, funded for gas); Merkl's API is fetched from node
 // (its CORS only allows the deployed site).
+// MARKET=ethereum (default base) and CHAIN_HEX=0x1 (default 0x2105) run on another fork; CLOCK=<seconds> moves the page's
+// clock forward like an anvil evm_increaseTime (deadlines and PT maturity follow it). COLL=PT-reUSDe-10DEC2026 picks a PT.
+//   MARKET=ethereum CHAIN_HEX=0x1 COLL=… node e2e/run.cjs renew ren   roll the PT into a later one (« Renouveler »)
 // EXECUTOR=0x… preloads an executor as if deployed from this browser (app built without VITE_EXECUTORS).
 // Writes <prefix>-avant.png / <prefix>-apres.png and prints the notices. Needs playwright (NODE_PATH=$(npm root -g)).
 const { chromium } = require('playwright')
@@ -53,12 +56,23 @@ const anvil = async (method, params) =>
       await route.abort()
     }
   })
+  page.on('response', (r) => r.status() >= 400 && console.log('http', r.status(), r.url().slice(0, 160)))
+  page.on('requestfailed', (r) => !r.url().includes('127.0.0.1') && console.log('failed', r.url().slice(0, 160), r.failure()?.errorText))
   page.on('console', (m) => {
     if (m.type() === 'error') console.log('console:', m.text().slice(0, 300))
   })
-  if (process.env.EXECUTOR) await page.addInitScript((a) => localStorage.setItem('auto-loop.executors', JSON.stringify({ base: a })), process.env.EXECUTOR)
+  const MARKET = process.env.MARKET || 'base'
+  const CHAIN_HEX = process.env.CHAIN_HEX || '0x2105'
+  await page.addInitScript((m) => localStorage.setItem('auto-loop.market', m), MARKET)
+  if (process.env.EXECUTOR)
+    await page.addInitScript(([a, m]) => localStorage.setItem('auto-loop.executors', JSON.stringify({ [m]: a })), [process.env.EXECUTOR, MARKET])
+  if (process.env.CLOCK)
+    await page.addInitScript((s) => {
+      const real = Date.now
+      Date.now = () => real() + s * 1000
+    }, Number(process.env.CLOCK))
   await page.addInitScript(
-    ([U, BATCH]) => {
+    ([U, BATCH, CHAIN_HEX]) => {
       let id = 0
       const rpc = async (method, params) => {
         const r = await fetch('http://127.0.0.1:8545', {
@@ -83,12 +97,12 @@ const anvil = async (method, params) =>
         async request({ method, params }) {
           window.__calls.push(method)
           if (method === 'eth_requestAccounts' || method === 'eth_accounts') return [U]
-          if (method === 'eth_chainId') return '0x2105'
+          if (method === 'eth_chainId') return CHAIN_HEX
           if (method === 'wallet_switchEthereumChain' || method === 'wallet_requestPermissions') return null
           // BATCH=1: an EIP-5792 wallet that sends a batch atomically (the calls one by one, all undone if one fails)
           if (method === 'wallet_getCapabilities') {
             if (!BATCH) throw Object.assign(new Error('Method not supported'), { code: 4200 })
-            return { '0x2105': { atomic: { status: 'supported' } } }
+            return { [CHAIN_HEX]: { atomic: { status: 'supported' } } }
           }
           if (method === 'wallet_sendCalls') {
             const { calls } = params[0]
@@ -119,13 +133,13 @@ const anvil = async (method, params) =>
           }
           if (method === 'wallet_getCallsStatus') {
             const b = window.__bundles?.[params[0]]
-            return { version: '2.0.0', id: params[0], chainId: '0x2105', atomic: true, status: b.ok ? 200 : 500, receipts: b.receipts }
+            return { version: '2.0.0', id: params[0], chainId: CHAIN_HEX, atomic: true, status: b.ok ? 200 : 500, receipts: b.receipts }
           }
           return rpc(method, params)
         },
       }
     },
-    [U, !!process.env.BATCH],
+    [U, !!process.env.BATCH, CHAIN_HEX],
   )
   await page.goto(process.env.APP_URL || 'http://localhost:5173/')
   await page.getByText('Connecter le portefeuille').click()
@@ -140,23 +154,38 @@ const anvil = async (method, params) =>
     return browser.close()
   }
   if (mode === 'reinvest') return reinvest(page, browser)
+  // positions: the Positions screen of the account
+  if (mode === 'positions') {
+    await page.getByRole('tab', { name: 'Positions' }).or(page.locator('nav >> text=Positions')).first().click()
+    await page.waitForSelector('.card h2:has-text("Ethereum")', { timeout: 120000 }).catch(() => console.log('no Ethereum card'))
+    await page.waitForTimeout(3000)
+    await page.screenshot({ path: `${outPrefix}.png`, fullPage: true })
+    console.log('metrics:', (await page.locator('.metric').allInnerTexts()).map((t) => t.replace(/\n/g, ' ')).join(' | '))
+    console.log('notices:', (await page.locator('.notice').allTextContents()).join(' | '))
+    console.log('buttons:', (await page.locator('.card button').allTextContents()).join(' | '))
+    return browser.close()
+  }
   // COLL=cbETH: another collateral than the default pair's
   if (process.env.COLL) {
     await page.locator('label:has-text("Collatéral") select').selectOption({ label: process.env.COLL })
     await page.waitForTimeout(5000)
   }
+  if (mode === 'roll2') return roll2(page, browser)
   // AGG=Velora|KyberSwap forces one aggregator instead of the best-price comparison
   if (mode.startsWith('close') || mode === 'reduce') await page.getByRole('radio', { name: 'Fermer / réduire' }).click()
   // swap (v2): TARGET=cbETH the new collateral, PART=50 % (default Tout)
-  if (mode === 'swap') {
-    await page.getByRole('radio', { name: 'Changer de collatéral' }).click({ timeout: 60000 })
+  if (mode === 'swap' || mode === 'renew') {
+    await page.getByRole('radio', { name: mode === 'renew' ? 'Renouveler' : 'Changer de collatéral' }).click({ timeout: 60000 })
     await page.waitForTimeout(5000)
     if (process.env.TARGET) {
-      const sel = page.locator('label:has-text("Nouveau collatéral") select')
+      const sel = page.locator(`label:has-text("${mode === 'renew' ? 'Nouveau PT' : 'Nouveau collatéral'}") select`)
       const label = (await sel.locator('option').allTextContents()).find((t) => t.startsWith(process.env.TARGET + ' '))
       await sel.selectOption({ label })
     }
-    await page.getByRole('radio', { name: process.env.PART || 'Tout' }).click()
+    await page
+      .getByRole('radio', { name: process.env.PART || 'Tout' })
+      .click({ timeout: 30000 })
+      .catch(() => console.log('no part selector'))
   }
   // the aggregator lives in the collapsed "Réglages" block
   if (process.env.AGG) {
@@ -175,7 +204,7 @@ const anvil = async (method, params) =>
   }
   if (mode === 'open') {
     await page.locator('input[inputmode=decimal]').fill(process.env.AMOUNT || '1')
-    await page.locator('input[type=range]').fill('3')
+    await page.locator('input[type=range]').fill(process.env.LEV || '3')
   }
   if (mode === 'increase') {
     await page.waitForSelector('h2:has-text("Augmenter la position")', { timeout: 30000 })
@@ -203,7 +232,7 @@ const anvil = async (method, params) =>
       await page.waitForTimeout(1000)
       const t = await page.locator('main, .page').first().innerText()
       if (
-        /Position ouverte|Position augmentée|Position réduite|Position fermée|Collatéral changé|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(
+        /Position ouverte|Position augmentée|Position réduite|Position fermée|Collatéral changé|PT renouvelé|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(
           t,
         ) &&
         i > 3
@@ -269,5 +298,58 @@ async function reinvest(page, browser) {
     }
   }
   console.log('wallet calls:', [...new Set(await page.evaluate(() => window.__calls))].join(','))
+  await browser.close()
+}
+
+// roll2: « Renouveler » when the new PT cannot be flash-borrowed: close, then open the new PT with the old one as capital
+async function roll2(page, browser) {
+  const btn = page.locator('button.btn.primary')
+  const waitDone = async (re) => {
+    for (let i = 0; i < 120; i++) {
+      await page.waitForTimeout(1000)
+      if (i % 5 === 4) await anvil('evm_mine', [])
+      if (re.test(await page.locator('.summary').innerText())) return true
+    }
+    return false
+  }
+  const log = async (tag) => {
+    console.log(
+      tag,
+      'button:',
+      await btn.textContent(),
+      'enabled:',
+      await btn.isEnabled(),
+      'reason:',
+      (await page.locator('.sum-reason').allTextContents()).join(' | '),
+    )
+    console.log('  notices:', (await page.locator('.notice').allTextContents()).join(' | '))
+    console.log('  metrics:', (await page.locator('.metric, .sum-item').allInnerTexts()).map((t) => t.replace(/\n/g, ' ')).join(' | '))
+  }
+  await page.getByRole('radio', { name: 'Renouveler' }).click({ timeout: 60000 })
+  await page.locator('button:has-text("Fermer, puis ouvrir")').click({ timeout: 90000 })
+  await page.waitForTimeout(8000)
+  await page.screenshot({ path: `${process.argv[3]}-1-fermer.png`, fullPage: true })
+  await log('close')
+  if (!(await btn.isEnabled())) return browser.close()
+  await btn.click()
+  console.log('closed:', await waitDone(/Position fermée|échoué|Erreur/i), (await page.locator('.summary').innerText()).replace(/\n/g, ' ').slice(0, 400))
+  const next = page.locator('button:has-text("au même levier")')
+  if (!(await next.count())) return browser.close()
+  await next.click()
+  await page.waitForTimeout(15000)
+  await page.screenshot({ path: `${process.argv[3]}-2-ouvrir.png`, fullPage: true })
+  await log('open')
+  console.log(
+    '  capital:',
+    await page
+      .locator('select[aria-label="Token du capital"]')
+      .inputValue()
+      .catch(() => '?'),
+    await page.locator('input[inputmode=decimal]').inputValue(),
+  )
+  if (!(await btn.isEnabled())) return browser.close()
+  await btn.click()
+  console.log('opened:', await waitDone(/Position ouverte|échoué|Erreur/i), (await page.locator('.summary').innerText()).replace(/\n/g, ' ').slice(0, 500))
+  await page.screenshot({ path: `${process.argv[3]}-3-apres.png`, fullPage: true })
   await browser.close()
 }

@@ -41,6 +41,8 @@ type Props = {
   renew?: boolean
   /** shows the close panel (a roll that needs another eMode goes through a close and a new open) */
   onClose?: () => void
+  /** a roll in two steps, when the new PT cannot be flash-borrowed: close, then open it with what the close gives back */
+  onTwoStep?: (to: Token, leverage: number) => void
 }
 
 /** Yield of a collateral: Aave supply rate, the token's own yield and the headline Merkl supply reward. */
@@ -60,6 +62,7 @@ export function SwapCollateralPanel({
   head,
   renew,
   onClose,
+  onTwoStep,
 }: Props) {
   const { market, collateral: C, debt: D } = reserves
   const all = useAllReserves(market, tokens)
@@ -152,8 +155,10 @@ export function SwapCollateralPanel({
   if (market.executor && market.executorVersion === 1) problems.push('Le contrat v1 ne change pas de collatéral : déployer le contrat v2.')
   else if ((C.pt || T?.pt) && market.executor && !market.executorPendle)
     problems.push('Ce contrat n’autorise pas le routeur Pendle : déployer le nouveau contrat (bandeau en haut).')
-  if (q && T && !viaMorpho && !T.config.flashLoanEnabled)
-    problems.push(`Flash loan désactivé sur ${T.token.symbol} et Morpho n’en détient pas assez : changement impossible pour l’instant.`)
+  // Aave lists recent PTs without flash loans: the roll then goes through a close and a new open
+  const noFlash = !!q && !!T && !viaMorpho && !T.config.flashLoanEnabled
+  if (noFlash && !(renew && onTwoStep))
+    problems.push(`Flash loan désactivé sur ${T!.token.symbol} et Morpho n’en détient pas assez : changement impossible pour l’instant.`)
   if (worst && worst.healthFactor < 1.01)
     problems.push(`Health factor du pire cas ${fmtHf(worst.healthFactor)} : la position serait liquidable. Choisir un autre collatéral.`)
   const warnings: string[] = []
@@ -201,7 +206,8 @@ export function SwapCollateralPanel({
   })()
 
   const empty = user.aTokenBalance === 0n
-  const canSign = !empty && !!market.executor && !!q && !q.simulated && !!preview && problems.length === 0 && !quote.isFetching && !busy
+  const twoStep = renew && noFlash && !!onTwoStep
+  const canSign = !twoStep && !empty && !!market.executor && !!q && !q.simulated && !!preview && problems.length === 0 && !quote.isFetching && !busy
   const disabledReason = empty
     ? `Aucun ${C.token.symbol} en collatéral`
     : !market.executor
@@ -370,6 +376,18 @@ export function SwapCollateralPanel({
           </div>
         )}
 
+        {twoStep && T && (
+          <Notice>
+            <span>
+              Aave ne prête pas {T.token.symbol} en flash loan et Morpho n’en détient pas assez : le renouvellement se fait en deux transactions. Fermer la
+              position (le {C.token.symbol} restant revient au portefeuille), puis ouvrir {T.token.symbol} au même levier avec ce {C.token.symbol} comme
+              capital. Entre les deux, aucune position n’est ouverte.
+            </span>
+            <button className="btn" onClick={() => onTwoStep!(T.token, positionLeverage(whole))}>
+              Fermer, puis ouvrir {T.token.symbol}
+            </button>
+          </Notice>
+        )}
         {all.error && <Notice>Lecture des réserves Aave impossible : {all.error.message.split('\n')[0]}</Notice>}
         {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
         {problems.map((x) => (

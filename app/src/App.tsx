@@ -31,9 +31,12 @@ import { DeployPanel } from './components/DeployPanel'
 import { useExecutorCheck } from './lib/deploy'
 import { Scanner, type Pick } from './components/Scanner'
 import { needsRenewal } from './lib/pendle'
+import { toBase } from './lib/math'
 import { Positions } from './components/Positions'
 
 type View = 'loop' | 'scan' | 'positions'
+/** How the Boucle screen opens a pair: eMode and leverage, the tab, and for « Ouvrir » a capital amount and token. */
+type Seed = { emode: number; leverage: number; tab?: Pick['tab']; amount?: string; capital?: Address }
 
 function WalletButton({ market }: { market: Market }) {
   const { address, chainId, isConnected } = useAccount()
@@ -145,7 +148,7 @@ export function App() {
     collateral: Address
     debt: Address
     /** set when the pair comes from the scanner: eMode and leverage to start the open panel with */
-    seed?: { emode: number; leverage: number; tab?: Pick['tab']; nonce: number }
+    seed?: Seed & { nonce: number }
   }>()
 
   const pair = useMemo(() => {
@@ -174,11 +177,12 @@ export function App() {
   }
   const seed =
     pair && picked?.market === market.id && picked.collateral === pair.collateral.address && picked.debt === pair.debt.address ? picked.seed : undefined
-  const setPair = (collateral: Token, debt: Token) =>
+  const setPair = (collateral: Token, debt: Token, seed?: Seed) =>
     setPicked({
       market: market.id,
       collateral: collateral.address,
       debt: debt.address,
+      seed: seed && { ...seed, nonce: Date.now() },
     })
 
   const selectors = (
@@ -357,13 +361,13 @@ type PairViewProps = {
   /** the market's tokens */
   tokens?: Token[]
   /** shows another pair of the market */
-  onPair: (collateral: Token, debt: Token) => void
+  onPair: (collateral: Token, debt: Token, seed?: Seed) => void
   account?: Address
   aggregator: AggregatorChoice
   selectors: ReactNode
   common: ReactNode
   notes: ReactNode
-  seed?: { emode: number; leverage: number; tab?: Pick['tab'] }
+  seed?: Seed
   /** keeps a newly deployed executor for this market */
   onExecutor: (a: Address) => void
 }
@@ -385,7 +389,9 @@ function PairView({
 }: PairViewProps) {
   const [tab, setTab] = useState<'open' | 'close' | 'swap' | 'reinvest' | 'renew'>(seed?.tab ?? 'open')
   // filled by the reinvest flow's last step: "Augmenter" with the capital it gained
-  const [augment, setAugment] = useState<{ emode: number; leverage: number; amount: string }>()
+  const [augment, setAugment] = useState<{ emode: number; leverage: number; amount: string; capital?: Address }>()
+  // a PT roll in two steps: after the close, open this PT with the collateral given back
+  const [roll, setRoll] = useState<{ to: Token; leverage: number; emode: number }>()
   const market = useMarket(m, collateral, debt, account, nativeToken)
   const emodes = useEModeCategories(m)
   const incentives = useCampaigns(m)
@@ -539,6 +545,11 @@ function PairView({
         key={tab}
         renew={tab === 'renew'}
         onClose={() => setTab('close')}
+        onTwoStep={(to, leverage) => {
+          setRoll({ to, leverage, emode: market.user?.eModeCategory ?? 0 })
+          setTab('close')
+          window.scrollTo({ top: 0 })
+        }}
         reserves={withEMode(r, currentEMode)}
         emode={market.user.eModeCategory ? emodes.find((c) => c.id === market.user!.eModeCategory) : undefined}
         tokens={tokens}
@@ -571,6 +582,23 @@ function PairView({
   ) : (
     <ClosePanel
       reserves={withEMode(r, currentEMode)}
+      then={
+        roll && {
+          label: `Ouvrir ${roll.to.symbol} au même levier`,
+          // a new pair: the view starts again on « Ouvrir », with the old PT given back as capital
+          run: (back) => {
+            // the old PT given back is the capital, or the debt asset when the close redeemed it all (matured PT)
+            const inPt = toBase(back.collateral, r.collateral.side) >= toBase(back.debt, r.debt.side)
+            onPair(roll.to, debt, {
+              emode: roll.emode,
+              leverage: roll.leverage,
+              amount: inPt ? formatUnits(back.collateral, collateral.decimals) : formatUnits(back.debt, debt.decimals),
+              capital: inPt ? collateral.address : debt.address,
+            })
+            window.scrollTo({ top: 0 })
+          },
+        }
+      }
       user={market.user}
       account={account}
       aggregator={aggregator}

@@ -126,6 +126,10 @@ describe('swapTargets', () => {
     expect(thresholdIn(t[0], emode)).toBe(9500)
     expect(thresholdIn(t[0])).toBe(8300)
   })
+  it('in eMode, takes a reserve listed at LTV 0 outside it (Aave PTs)', () => {
+    const emode = { id: 1, liquidationThresholdBps: 9200, collateralBitmap: (1n << 0n) | (1n << 5n), ltvZeroBitmap: 0n } as EModeCategory
+    expect(swapTargets(all, WETH, USDC, emode).map((r) => r.token.symbol)).toEqual(['LTV0'])
+  })
 })
 
 describe('projectSwap', () => {
