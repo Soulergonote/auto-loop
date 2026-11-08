@@ -72,6 +72,78 @@ export function useReserveTokens(market: Market) {
   return { tokens, error: list.error ?? meta.error, loading: list.isLoading || meta.isLoading, refetch }
 }
 
+type ReserveData = {
+  configuration: bigint
+  id: number
+  aTokenAddress: Address
+  variableDebtTokenAddress: Address
+  currentLiquidityRate: bigint
+  currentVariableBorrowRate: bigint
+}
+
+/** A reserve as the app uses it, from the pool's `getReserveData` and the oracle price. */
+export function toReserve(token: Token, r: ReserveData, price: bigint, native?: NativeYield): Reserve {
+  const config = decodeReserveConfig(r.configuration)
+  return {
+    native,
+    token: { ...token, decimals: config.decimals },
+    config,
+    id: r.id,
+    aToken: r.aTokenAddress,
+    variableDebtToken: r.variableDebtTokenAddress,
+    supplyApy: rayAprToApy(r.currentLiquidityRate),
+    borrowApy: rayAprToApy(r.currentVariableBorrowRate),
+    supplyRewardApr: 0,
+    borrowRewardApr: 0,
+    price,
+    side: { price, decimals: config.decimals },
+  }
+}
+
+/** Every reserve of the market with its oracle price (intrinsic yields read for those that have one). */
+export function useAllReserves(market: Market, tokens: Token[] | undefined, enabled = true) {
+  const chainId = market.chain.id
+  const list = useMemo(() => tokens ?? [], [tokens])
+  const on = enabled && !DEMO && list.length > 0
+  const provider = useReadContract({ chainId, address: market.pool, abi: poolAbi, functionName: 'ADDRESSES_PROVIDER', query: { enabled: on } })
+  const oracle = useReadContract({
+    chainId,
+    address: provider.data,
+    abi: providerAbi,
+    functionName: 'getPriceOracle',
+    query: { enabled: on && !!provider.data },
+  })
+  const prices = useReadContract({
+    chainId,
+    address: oracle.data,
+    abi: oracleAbi,
+    functionName: 'getAssetsPrices',
+    args: [list.map((t) => t.address)],
+    query: { enabled: on && !!oracle.data, refetchInterval: 30_000 },
+  })
+  const data = useReadContracts({
+    contracts: list.map((t) => ({ chainId, address: market.pool, abi: poolAbi, functionName: 'getReserveData', args: [t.address] }) as const),
+    allowFailure: true,
+    query: { enabled: on, refetchInterval: 60_000 },
+  })
+  const native = useQuery(
+    nativeYieldQuery(
+      chainId,
+      oracle.data,
+      list.map((t) => t.address),
+    ),
+  )
+  const reserves = useMemo(() => {
+    if (!prices.data || !data.data) return undefined
+    return list.flatMap((t, i) => {
+      const r = data.data[i]?.result
+      const price = prices.data[i] ?? 0n
+      return r && r.aTokenAddress !== zeroAddress && price > 0n ? [toReserve(t, r, price, native.data?.get(t.address.toLowerCase()))] : []
+    })
+  }, [list, prices.data, data.data, native.data])
+  return { reserves, error: provider.error ?? oracle.error ?? prices.error ?? data.error }
+}
+
 /** Reads both reserves of the pair, oracle prices, the flash loan premium and, when connected, the user's state. */
 export function useMarket(market: Market, collateral: Token, debt: Token, user?: Address, nativeToken?: Address) {
   const chainId = market.chain.id
@@ -108,23 +180,7 @@ export function useMarket(market: Market, collateral: Token, debt: Token, user?:
     if (DEMO) return { market, collateral: demoReserve(collateral), debt: demoReserve(debt), premiumBps: 5n, nativePrice: undefined }
     if (!reads.data) return undefined
     const [rc, rd, premium, prices] = reads.data
-    const build = (token: Token, r: typeof rc, price: bigint): Reserve => {
-      const config = decodeReserveConfig(r.configuration)
-      return {
-        native: native.data?.get(token.address.toLowerCase()),
-        token: { ...token, decimals: config.decimals },
-        config,
-        id: r.id,
-        aToken: r.aTokenAddress,
-        variableDebtToken: r.variableDebtTokenAddress,
-        supplyApy: rayAprToApy(r.currentLiquidityRate),
-        borrowApy: rayAprToApy(r.currentVariableBorrowRate),
-        supplyRewardApr: 0,
-        borrowRewardApr: 0,
-        price,
-        side: { price, decimals: config.decimals },
-      }
-    }
+    const build = (token: Token, r: typeof rc, price: bigint) => toReserve(token, r, price, native.data?.get(token.address.toLowerCase()))
     if (rc.aTokenAddress === zeroAddress || rd.aTokenAddress === zeroAddress) return null // not listed
     return {
       market,

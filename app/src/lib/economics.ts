@@ -7,8 +7,8 @@ import { fmtPct } from './format'
 
 const BPS = 10_000n
 
-/** Gas used by the executor, measured on a Base fork (2026-10-18 e2e: ~733k to open, ~1.7M to close), rounded up. */
-export const GAS_UNITS = { open: 800_000n, close: 1_700_000n }
+/** Gas used by the executor, measured on a Base fork (2026-10-18 e2e: ~733k to open, ~1.7M to close; 2026-11-08: ~1.14M to change the collateral), rounded up. */
+export const GAS_UNITS = { open: 800_000n, close: 1_700_000n, swapCollateral: 1_200_000n }
 
 export const HORIZONS = [30, 90, 180, 365] as const
 export type Horizon = (typeof HORIZONS)[number]

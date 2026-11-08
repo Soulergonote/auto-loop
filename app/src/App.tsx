@@ -26,6 +26,7 @@ import { ReinvestPanel } from './components/ReinvestPanel'
 import { AggregatorPicker, Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary } from './components/ui'
 import { OpenPanel } from './components/OpenPanel'
 import { ClosePanel } from './components/ClosePanel'
+import { SwapCollateralPanel } from './components/SwapCollateralPanel'
 import { DeployPanel } from './components/DeployPanel'
 import { useExecutorCheck } from './lib/deploy'
 import { Scanner, type Pick } from './components/Scanner'
@@ -283,6 +284,7 @@ export function App() {
             debt={pair.debt}
             nativeToken={wrappedNative(tokens, market.chain)?.address}
             tokens={tokens}
+            onPair={setPair}
             account={address}
             aggregator={aggregator}
             selectors={selectors}
@@ -347,6 +349,8 @@ type PairViewProps = {
   nativeToken?: Address
   /** the market's tokens */
   tokens?: Token[]
+  /** shows another pair of the market */
+  onPair: (collateral: Token, debt: Token) => void
   account?: Address
   aggregator: AggregatorChoice
   selectors: ReactNode
@@ -355,8 +359,8 @@ type PairViewProps = {
   seed?: { emode: number; leverage: number; tab?: 'reinvest' }
 }
 
-function PairView({ market: m, collateral, debt, nativeToken, tokens, account, aggregator, selectors, common, notes, seed }: PairViewProps) {
-  const [tab, setTab] = useState<'open' | 'close' | 'reinvest'>(seed?.tab ?? 'open')
+function PairView({ market: m, collateral, debt, nativeToken, tokens, onPair, account, aggregator, selectors, common, notes, seed }: PairViewProps) {
+  const [tab, setTab] = useState<'open' | 'close' | 'swap' | 'reinvest'>(seed?.tab ?? 'open')
   // filled by the reinvest flow's last step: "Augmenter" with the capital it gained
   const [augment, setAugment] = useState<{ emode: number; leverage: number; amount: string }>()
   const market = useMarket(m, collateral, debt, account, nativeToken)
@@ -368,6 +372,8 @@ function PairView({ market: m, collateral, debt, nativeToken, tokens, account, a
 
   const { claimables } = useClaimables(m.chain.id, account)
   const canReinvest = !!account && (claimables.length > 0 || tab === 'reinvest')
+  // contract v2: the collateral of an existing position can be changed without closing it
+  const canSwap = !!account && m.executorVersion === 2 && !!market.user && market.user.aTokenBalance > 0n
   const averages = useRateAverages(m.chain.id, m.pool, [collateral.address, debt.address])
   const natives = r ? [r.collateral.native, r.debt.native].filter((n) => n !== undefined) : []
   const nativeSince = natives.length ? Math.min(...natives.map((n) => n.since)) : undefined
@@ -433,6 +439,7 @@ function PairView({ market: m, collateral, debt, nativeToken, tokens, account, a
           options={[
             { value: 'open', label: 'Ouvrir / augmenter' },
             { value: 'close', label: 'Fermer / réduire' },
+            ...(canSwap || tab === 'swap' ? [{ value: 'swap' as const, label: 'Changer de collatéral' }] : []),
             ...(canReinvest ? [{ value: 'reinvest' as const, label: 'Réinvestir' }] : []),
           ]}
         />
@@ -481,7 +488,26 @@ function PairView({ market: m, collateral, debt, nativeToken, tokens, account, a
         }}
       />
     )
-  return tab === 'open' ? (
+  if (tab === 'swap' && account && market.user)
+    return (
+      <SwapCollateralPanel
+        reserves={withEMode(r, currentEMode)}
+        emode={market.user.eModeCategory ? emodes.find((c) => c.id === market.user!.eModeCategory) : undefined}
+        tokens={tokens}
+        campaigns={incentives.data}
+        user={market.user}
+        account={account}
+        aggregator={aggregator}
+        common={common}
+        head={head}
+        onDone={market.refetchUser}
+        onShowPair={(c) => {
+          setTab('close')
+          onPair(c, debt)
+        }}
+      />
+    )
+  return tab === 'open' || tab === 'swap' ? (
     <OpenPanel
       reserves={r}
       tokens={tokens}

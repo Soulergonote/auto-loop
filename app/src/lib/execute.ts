@@ -4,6 +4,7 @@ import { wagmiConfig } from '../wagmi'
 import { erc20Abi, executorAbi, executorAbiV1, poolAbi } from '../abi'
 import type { Quote } from './quotes'
 import { signATokenPermit, signDelegation, type ExecutorSignature } from './signatures'
+import { aTokensToApprove, swapCollateralArgs, type SwapCollateralPlan } from './swapCollateral'
 
 export type Progress = (step: string) => void
 
@@ -216,6 +217,26 @@ export async function executeClose(p: ClosePlan, onStep: Progress): Promise<Hash
     const sig = await signATokenPermit(p.chainId, p.user, p.aToken, p.executor, value)
     hash = await send(p.chainId, p.user, p.executor, closeCall(p, sig), onStep, 'la fermeture')
   }
+  onStep('En attente d’inclusion…')
+  const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: p.chainId, hash })
+  if (receipt.status !== 'success') throw new Error('La transaction a échoué')
+  return hash
+}
+
+export function swapCollateralCall(p: SwapCollateralPlan, sig?: ExecutorSignature): Call {
+  const args = swapCollateralArgs(p)
+  return { abi: executorAbi, functionName: sig ? 'swapCollateralWithSig' : 'swapCollateral', args: sig ? [args, sig] : [args] }
+}
+
+/** Changes the collateral: aToken permit by signature if needed, then one transaction. */
+export async function executeSwapCollateral(p: SwapCollateralPlan, onStep: Progress): Promise<Hash> {
+  const need = aTokensToApprove(p)
+  let call = swapCollateralCall(p) // checks the plan before anything is signed
+  if (p.aTokenAllowance < need) {
+    onStep('Signature de l’autorisation sur les aTokens…')
+    call = swapCollateralCall(p, await signATokenPermit(p.chainId, p.user, p.fromAToken, p.executor, need))
+  }
+  const hash = await send(p.chainId, p.user, p.executor, call, onStep, 'du changement de collatéral')
   onStep('En attente d’inclusion…')
   const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: p.chainId, hash })
   if (receipt.status !== 'success') throw new Error('La transaction a échoué')

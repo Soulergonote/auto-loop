@@ -22,7 +22,8 @@ import type { Token } from '../config'
 import { getQuote, QuoteError, type Quote, type QuoteRequest } from './quotes'
 import { distributorAbi, MERKL_DISTRIBUTOR, type Claimable } from './reinvest'
 import { walletSwapProblem, swapTerms } from './swapCalldata'
-import { capitalTokenOf, closeCall, encodeCall, openCall, type ClosePlan, type OpenPlan, type Progress } from './execute'
+import { aTokensToApprove, type SwapCollateralPlan } from './swapCollateral'
+import { capitalTokenOf, closeCall, encodeCall, openCall, swapCollateralCall, type ClosePlan, type OpenPlan, type Progress } from './execute'
 
 const withdrawAbi = parseAbi(['function withdraw(address asset, uint256 amount, address to) returns (uint256)'])
 
@@ -248,6 +249,29 @@ export function closeBatchCalls(p: ClosePlan, aTokenAllowance: bigint): BatchCal
     },
     ...a.after,
   ]
+}
+
+/** "Changer de collatéral" as one batch: exact aToken approval, `swapCollateral`, approval back after. */
+export function swapCollateralBatchCalls(p: SwapCollateralPlan, aTokenAllowance: bigint): BatchCall[] {
+  const call = encodeCall(swapCollateralCall(p))
+  const a = allowanceCalls('erc20', p.fromAToken, p.executor, aTokensToApprove(p), aTokenAllowance, {
+    set: 'Autoriser le contrat à prendre ces aTokens (montant exact)',
+    reset: 'Remettre l’autorisation des aTokens à sa valeur',
+  })
+  return [...a.before, { to: p.executor, data: call, label: 'Changer de collatéral : flash loan, dépôt, retrait et swap' }, ...a.after]
+}
+
+/** Changes the collateral in one confirmation, with the aToken allowance read now. */
+export async function executeSwapCollateralBatch(p: SwapCollateralPlan, onStep: Progress): Promise<Hash | undefined> {
+  onStep('Lecture des autorisations…')
+  const allowance = await readContract(wagmiConfig, {
+    chainId: p.chainId,
+    address: p.fromAToken,
+    abi: erc20Abi,
+    functionName: 'allowance',
+    args: [p.user, p.executor],
+  })
+  return sendBatch(p.chainId, p.user, swapCollateralBatchCalls(p, allowance), onStep)
 }
 
 /** Opens in one confirmation, with the allowances read now (not the ones the screen last polled). */

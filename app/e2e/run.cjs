@@ -140,8 +140,24 @@ const anvil = async (method, params) =>
     return browser.close()
   }
   if (mode === 'reinvest') return reinvest(page, browser)
+  // COLL=cbETH: another collateral than the default pair's
+  if (process.env.COLL) {
+    await page.locator('label:has-text("Collatéral") select').selectOption({ label: process.env.COLL })
+    await page.waitForTimeout(5000)
+  }
   // AGG=Velora|KyberSwap forces one aggregator instead of the best-price comparison
   if (mode.startsWith('close') || mode === 'reduce') await page.getByRole('radio', { name: 'Fermer / réduire' }).click()
+  // swap (v2): TARGET=cbETH the new collateral, PART=50 % (default Tout)
+  if (mode === 'swap') {
+    await page.getByRole('radio', { name: 'Changer de collatéral' }).click({ timeout: 60000 })
+    await page.waitForTimeout(5000)
+    if (process.env.TARGET) {
+      const sel = page.locator('label:has-text("Nouveau collatéral") select')
+      const label = (await sel.locator('option').allTextContents()).find((t) => t.startsWith(process.env.TARGET + ' '))
+      await sel.selectOption({ label })
+    }
+    await page.getByRole('radio', { name: process.env.PART || 'Tout' }).click()
+  }
   // the aggregator lives in the collapsed "Réglages" block
   if (process.env.AGG) {
     await page.locator('summary', { hasText: 'Réglages' }).click()
@@ -187,7 +203,9 @@ const anvil = async (method, params) =>
       await page.waitForTimeout(1000)
       const t = await page.locator('main, .page').first().innerText()
       if (
-        /Position ouverte|Position augmentée|Position réduite|Position fermée|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(t) &&
+        /Position ouverte|Position augmentée|Position réduite|Position fermée|Collatéral changé|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(
+          t,
+        ) &&
         i > 3
       )
         break
@@ -195,6 +213,13 @@ const anvil = async (method, params) =>
     await page.screenshot({ path: `${outPrefix}-apres.png`, fullPage: true })
     console.log('wallet calls:', [...new Set(await page.evaluate(() => window.__calls))].join(','))
     console.log('notices after:', (await page.locator('.notice, .success').allTextContents()).join(' | '))
+    const show = page.locator('button:has-text("Afficher la paire")')
+    if (await show.count()) {
+      await show.click()
+      await page.waitForTimeout(6000)
+      console.log('pair after:', (await page.locator('.metric').allInnerTexts()).map((t) => t.replace(/\n/g, ' ')).join(' | '))
+      await page.screenshot({ path: `${outPrefix}-paire.png`, fullPage: true })
+    }
   }
   await browser.close()
 })()
