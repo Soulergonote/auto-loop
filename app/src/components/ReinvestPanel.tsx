@@ -9,7 +9,7 @@ import { withEMode, type EModeCategory, type Reserves, type UserState } from '..
 import { snapshotQuery } from '../lib/snapshot'
 import { useQuote } from '../lib/useQuote'
 import { getQuote, type Quote } from '../lib/quotes'
-import { extraDebtForTarget, positionLeverage, project, roundSignificant, toBase, type Side } from '../lib/math'
+import { extraDebtForTarget, pairPosition, positionLeverage, project, roundSignificant, toBase, type Side } from '../lib/math'
 import { explainError } from '../lib/execute'
 import { claimRewards, rewardAction, swapFromWallet, usdValue, useClaimables, withdrawReward, type Claimable, type RewardAction } from '../lib/reinvest'
 import { buildReinvestBatch, sendBatch, swapCapital, useAtomicBatch, walletQuote, type BatchCall, type WalletSwap } from '../lib/oneClick'
@@ -77,7 +77,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
   // which can deposit collateral aTokens)
   const liveLev = (() => {
     if (!user || user.debtBalance === 0n) return undefined
-    const lev = positionLeverage({ collateralBase: toBase(user.aTokenBalance, C.side), debtBase: toBase(user.debtBalance, D.side) })
+    const lev = positionLeverage(pairPosition(user, C.side, D.side))
     return Number.isFinite(lev) && lev > 1 ? lev : undefined
   })()
   const [claimedLev, setClaimedLev] = useState<number>()
@@ -111,7 +111,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
   const legs = steps.filter((s): s is Step & { kind: 'swap' } & SwapLeg => 'kind' in s && s.kind === 'swap')
   const current = steps.find((s) => !done.includes(s.id))!
 
-  const position = user ? { collateralBase: toBase(user.aTokenBalance, C.side), debtBase: toBase(user.debtBalance, D.side) } : undefined
+  const position = user ? pairPosition(user, C.side, D.side) : undefined
   const executor = market.executor
   // one confirmation needs: a wallet that batches atomically, the contract, a position to return to, and an
   // account eMode the pair can borrow in

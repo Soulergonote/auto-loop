@@ -5,6 +5,7 @@ import { capitalKind, walletTokens, type WalletToken } from './capital'
 import { openArgs, openCall, type OpenPlan } from './execute'
 import { openBatchCalls } from './oneClick'
 import type { Quote } from './quotes'
+import { pairPosition, positionLeverage } from './math'
 
 const a = (n: number) => getAddress('0x' + n.toString(16).padStart(40, '0'))
 const USER = a(0x11),
@@ -123,5 +124,28 @@ describe('walletTokens', () => {
       USDC,
     )
     expect(list.map((x) => x.token.symbol)).toEqual(['WETH', 'USDC', 'cbBTC', 'wstETH'])
+  })
+})
+
+describe('pairPosition', () => {
+  const side = { price: 10n ** 8n, decimals: 18 }
+  const usd = { price: 10n ** 8n, decimals: 6 }
+  it('the pair alone when the account holds nothing else', () => {
+    const p = pairPosition(
+      { aTokenBalance: 3n * 10n ** 18n, debtBalance: 2_000_000n, account: { collateralBase: 3n * 10n ** 8n, debtBase: 2n * 10n ** 8n } },
+      side,
+      usd,
+    )
+    expect(p).toEqual({ collateralBase: 3n * 10n ** 8n, debtBase: 2n * 10n ** 8n })
+  })
+  it('the whole account once another collateral backs the debt: finite leverage', () => {
+    // half switched to another collateral: 1.5 left on the pair, 3 in the account, debt 2
+    const p = pairPosition(
+      { aTokenBalance: 15n * 10n ** 17n, debtBalance: 2_000_000n, account: { collateralBase: 3n * 10n ** 8n, debtBase: 2n * 10n ** 8n } },
+      side,
+      usd,
+    )
+    expect(positionLeverage(p)).toBe(3)
+    expect(positionLeverage({ collateralBase: 15n * 10n ** 7n, debtBase: 2n * 10n ** 8n })).toBe(Infinity)
   })
 })

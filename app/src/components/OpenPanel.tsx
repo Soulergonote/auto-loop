@@ -11,7 +11,18 @@ import { useDebounced } from '../lib/useDebounced'
 import { getQuote } from '../lib/quotes'
 import { loopNativeApy } from '../lib/nativeYield'
 import { WINDOWS, isRateSpike, useRateAverages } from '../lib/rateHistory'
-import { extraDebtForTarget, maxLeverage, netApy, positionLeverage, project, roundSignificant, toBase, EMPTY_ACCOUNT, NO_POSITION } from '../lib/math'
+import {
+  extraDebtForTarget,
+  maxLeverage,
+  netApy,
+  pairPosition,
+  positionLeverage,
+  project,
+  roundSignificant,
+  toBase,
+  EMPTY_ACCOUNT,
+  NO_POSITION,
+} from '../lib/math'
 import { HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
 import { encodeCall, executeOpen, explainError, openCall, type OpenPlan } from '../lib/execute'
 import { executeOpenBatch, useAtomicBatch } from '../lib/oneClick'
@@ -87,7 +98,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[] }>()
 
   // an existing position on the pair is levered further: the slider then sets the leverage of the whole position
-  const position = user ? { collateralBase: toBase(user.aTokenBalance, C.side), debtBase: toBase(user.debtBalance, D.side) } : NO_POSITION
+  const position = user ? pairPosition(user, C.side, D.side) : NO_POSITION
   const hasPosition = position.collateralBase > 0n
   const currentLev = positionLeverage(position)
 
@@ -373,13 +384,15 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       : []),
     ...(batch
       ? [
-          ...(needsApprove || !user ? [{ label: `Autoriser le contrat à prendre ${amountText || 0} ${K.symbol} (montant exact)` }] : []),
+          ...(needsApprove || !user ? [{ label: `Autoriser le contrat à prendre ${fmtAmount(initial ?? 0n, K.decimals)} ${K.symbol} (montant exact)` }] : []),
           ...(needsDelegation ? [{ label: `Déléguer l’emprunt de ${D.token.symbol} au contrat (montant exact)` }] : []),
           { label: kind === 'swap' ? `Ouvrir : swap ${K.symbol} → ${C.token.symbol}, flash loan, swap et dépôt` : 'Ouvrir : flash loan, swap et dépôt' },
           ...(needsApprove || needsDelegation || !user ? [{ label: 'Remettre l’autorisation et la délégation à leur valeur' }] : []),
         ]
       : [
-          ...(needsApprove || !user ? [{ label: `Autoriser le contrat à prendre ${amountText || 0} ${K.symbol} (transaction, une fois)` }] : []),
+          ...(needsApprove || !user
+            ? [{ label: `Autoriser le contrat à prendre ${fmtAmount(initial ?? 0n, K.decimals)} ${K.symbol} (transaction, une fois)` }]
+            : []),
           ...(needsDelegation ? [{ label: `Signer la délégation de crédit ${D.token.symbol} (signature, sans gas)` }] : []),
           {
             label:

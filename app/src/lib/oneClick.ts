@@ -230,7 +230,14 @@ export function openBatchCalls(p: OpenPlan, allowances: { collateral: bigint; bo
             label: p.eModeTarget === 0 ? 'Sortir de l’eMode sur le compte Aave' : 'Passer le compte Aave en eMode',
           },
         ]
-  return [...emode, ...col.before, ...del.before, { to: p.executor, data: open, label: 'Ouvrir : flash loan, swap et dépôt' }, ...del.after, ...col.after]
+  return [
+    ...emode,
+    ...col.before,
+    ...del.before,
+    { to: p.executor, data: open, label: p.capitalQuote ? 'Ouvrir : swap du capital, flash loan, swap et dépôt' : 'Ouvrir : flash loan, swap et dépôt' },
+    ...del.after,
+    ...col.after,
+  ]
 }
 
 /** "Fermer" as one batch: exact aToken approval (a little headroom on a full close), `close`, approval back after. */

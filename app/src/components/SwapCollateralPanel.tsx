@@ -7,7 +7,7 @@ import { useAllReserves, type EModeCategory, type Reserve, type Reserves, type U
 import { headlineRewards, type Campaign } from '../lib/merkl'
 import { useQuote } from '../lib/useQuote'
 import { getQuote } from '../lib/quotes'
-import { flashLoanOwed, positionLeverage, roundSignificant, toBase } from '../lib/math'
+import { flashLoanOwed, pairPosition, positionLeverage, roundSignificant, toBase } from '../lib/math'
 import { GAS_UNITS, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
 import { encodeCall, executeSwapCollateral, explainError, swapCollateralCall } from '../lib/execute'
 import { executeSwapCollateralBatch, useAtomicBatch } from '../lib/oneClick'
@@ -116,7 +116,8 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
           [supplyYield(T), addedBase],
         ])
       : undefined
-  const levAfter = q ? positionLeverage({ collateralBase: posC - removedBase + addedBase, debtBase: posD }) : undefined
+  const whole = pairPosition(user, C.side, D.side)
+  const levAfter = q ? positionLeverage({ collateralBase: whole.collateralBase - removedBase + addedBase, debtBase: whole.debtBase }) : undefined
 
   const gas =
     gasPrice.data !== undefined && reserves.nativePrice !== undefined
@@ -277,7 +278,7 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
         <div className="metrics">
           <Metric label="Collatéral" value={`${fmtAmount(user.aTokenBalance, C.token.decimals)} ${C.token.symbol}`} sub={fmtUsd(posC)} />
           <Metric label="Dette" value={`${fmtAmount(user.debtBalance, D.token.decimals)} ${D.token.symbol}`} sub="inchangée" />
-          <Metric label="Levier actuel" value={fmtX(positionLeverage({ collateralBase: posC, debtBase: posD }))} />
+          <Metric label="Levier actuel" value={fmtX(positionLeverage(whole))} />
           <Metric label="Health factor" value={fmtHf(user.healthFactor)} tone={hfTone(user.healthFactor, isCorrelated(C, D))} />
         </div>
 

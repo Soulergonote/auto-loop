@@ -29,6 +29,24 @@ export type PairPosition = { collateralBase: bigint; debtBase: bigint }
 
 export const NO_POSITION: PairPosition = { collateralBase: 0n, debtBase: 0n }
 
+/**
+ * The position the pair's leverage applies to. When the Aave account holds other collateral too (after a partial
+ * change of collateral, say), all of it backs the debt: the account's totals are used, so that the leverage stays
+ * finite and the targets of the open and close screens are those of the whole account.
+ */
+export function pairPosition(
+  user: { aTokenBalance: bigint; debtBalance: bigint; account: { collateralBase: bigint; debtBase: bigint } },
+  collateral: Side,
+  debt: Side,
+): PairPosition {
+  const c = toBase(user.aTokenBalance, collateral)
+  const d = toBase(user.debtBalance, debt)
+  return {
+    collateralBase: c > 0n && user.account.collateralBase > c ? user.account.collateralBase : c,
+    debtBase: user.account.debtBase > d ? user.account.debtBase : d,
+  }
+}
+
 /** collateral / equity of a position, Infinity when the debt eats all of it, 1 without debt. */
 export function positionLeverage(p: PairPosition): number {
   const equity = p.collateralBase - p.debtBase

@@ -6,7 +6,7 @@ import { erc20Abi } from '../abi'
 import type { Reserves, UserState } from '../lib/useMarket'
 import { useQuote } from '../lib/useQuote'
 import { getQuote } from '../lib/quotes'
-import { collateralToSellForRepay, flashLoanOwed, positionLeverage, repayForTarget, roundSignificant, toBase } from '../lib/math'
+import { collateralToSellForRepay, flashLoanOwed, pairPosition, positionLeverage, repayForTarget, roundSignificant, toBase } from '../lib/math'
 import { useDebounced } from '../lib/useDebounced'
 import { swapLoss, swapLossProblem } from '../lib/economics'
 import { closeCall, encodeCall, executeClose, explainError, type ClosePlan } from '../lib/execute'
@@ -130,7 +130,7 @@ function ClosePanelInner(p: {
   const { market, C, D, user, account, aggregator, slippage, busy, setBusy, result, setResult } = p
   // a wallet that sends atomic batches: approval, close and approval back in one confirmation
   const batch = useAtomicBatch(market.chain.id, account) === true
-  const position = { collateralBase: toBase(user.aTokenBalance, C.side), debtBase: toBase(user.debtBalance, D.side) }
+  const position = pairPosition(user, C.side, D.side)
   const currentLev = positionLeverage(position)
   const sliderMax = Number.isFinite(currentLev) ? Math.max(1, Math.floor(currentLev * 20) / 20) : 15
   const lev = Math.max(1, Math.min(p.target, sliderMax))
@@ -191,7 +191,13 @@ function ClosePanelInner(p: {
   const debtBack = q && q.buyAmount > owed ? q.buyAmount - owed : 0n
 
   const problems: string[] = []
-  if (q && coversDebt === false)
+  // part of the debt is backed by another collateral of the account: this one alone cannot repay it all
+  const shortOfCollateral = toBase(user.aTokenBalance, C.side) * 10_000n < toBase(owed, D.side) * (10_000n + BigInt(slippage) + 30n)
+  if (shortOfCollateral)
+    problems.push(
+      `Le ${C.token.symbol} déposé ne couvre pas ce remboursement : une partie de la dette repose sur un autre collatéral. Réduire moins, ou ramener d’abord tout le collatéral en ${C.token.symbol} (onglet « Changer de collatéral »).`,
+    )
+  if (q && coversDebt === false && !shortOfCollateral)
     problems.push(
       `Le minimum garanti du swap (${fmtAmount(q.minOut, D.token.decimals)} ${D.token.symbol}) ne couvre pas le remboursement (${fmtAmount(required, D.token.decimals)}). Baisser le slippage ou réessayer.`,
     )
