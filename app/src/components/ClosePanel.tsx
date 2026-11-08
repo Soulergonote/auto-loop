@@ -217,6 +217,9 @@ function ClosePanelInner(p: {
   if (repay === 0n) problems.push(`Le levier visé n’est pas sous le levier actuel (${fmtX(currentLev)}). Pour l’augmenter : onglet « Ouvrir / augmenter ».`)
   if (D.config.paused || C.config.paused) problems.push('Marché en pause sur Aave.')
   if (!D.config.flashLoanEnabled) problems.push(`Flash loan désactivé sur ${D.token.symbol}.`)
+  if (pt && market.executor && market.executorVersion === 1) problems.push('Le contrat v1 ne fait qu’un swap : vendre un PT demande le contrat v2.')
+  else if (pt && market.executor && !market.executorPendle)
+    problems.push('Ce contrat n’autorise pas le routeur Pendle : déployer le nouveau contrat (bandeau en haut).')
 
   const warnings: string[] = []
   const lossIssue = q && swapLossProblem(swapLoss(toSell, C.side, q.buyAmount, D.side), C.token.symbol, D.token.symbol, q.simulated, 0.1) // leaving stays possible at a cost, not at any cost

@@ -489,3 +489,10 @@ export async function quoteSellPt(chainId: number, pt: PtInfo, ptIn: bigint, tok
 }
 
 export const PENDLE_ROUTER_ADDRESS = getAddress(PENDLE_ROUTER)
+
+/** Days before maturity from which a PT position is offered a roll into a later PT. */
+export const RENEW_DAYS = 30
+
+/** A PT position is due for a roll in its last month, or once matured. */
+export const needsRenewal = (pt: Pick<PtInfo, 'expiry' | 'expired'>, nowSec = Date.now() / 1000) =>
+  isExpired(pt, nowSec) || daysToMaturity(pt, nowSec) < RENEW_DAYS

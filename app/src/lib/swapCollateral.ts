@@ -104,3 +104,16 @@ export function projectSwap(account: Account, removedBase: bigint, removedLtBps:
     dropToLiquidation: Number.isFinite(healthFactor) ? Math.max(0, 1 - 1 / healthFactor) : 1,
   }
 }
+
+/**
+ * PTs a PT collateral can be rolled into: a later maturity, still trading on Pendle. Same underlying (same SY)
+ * first, then the nearest maturity.
+ */
+export function rollTargets(targets: Reserve[], from: Reserve, nowSec = Date.now() / 1000): Reserve[] {
+  const pt = from.pt
+  if (!pt) return []
+  const sameSy = (r: Reserve) => r.pt!.sy.toLowerCase() === pt.sy.toLowerCase()
+  return targets
+    .filter((r) => r.pt && r.pt.market && !r.pt.expired && r.pt.expiry > nowSec && r.pt.expiry > pt.expiry)
+    .sort((a, b) => Number(sameSy(b)) - Number(sameSy(a)) || a.pt!.expiry - b.pt!.expiry)
+}

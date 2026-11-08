@@ -7,7 +7,8 @@ import { snapshotQuery, userPositionQuery, type Snapshot, type UserPosition } fr
 import { merklBalances, summarizePosition, userRewardsQuery, type PositionSummary } from '../lib/positions'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfTone } from '../lib/tone'
-import { fmtAmount, fmtDate, fmtDollars, fmtHf, fmtNum, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtNum, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { daysToMaturity, isExpired, needsRenewal } from '../lib/pendle'
 import { Card, Fold, Metric, Notice, useSlow } from './ui'
 import type { Pick } from './Scanner'
 
@@ -194,7 +195,12 @@ function MarketPosition({
   const excluded = s.campaigns.filter((c) => c.reasons.length > 0)
   const paying = s.campaigns.filter((c) => c.apy > 0)
   const tone = s.debtBase > 0n ? hfTone(healthFactor, correlated) : undefined
-  const manage = (tab?: 'reinvest') =>
+  // a PT collateral: its maturity replaces the leverage tile (leverage moves to its second line)
+  const pt = collateral.suppliedBase > 0n ? collateral.reserve.pt : undefined
+  const ptDays = pt ? daysToMaturity(pt) : undefined
+  const ptTone = pt && (isExpired(pt) ? 'bad' : ptDays! < 14 ? 'warn' : undefined)
+  const canRenew = !!pt && needsRenewal(pt) && market.executorVersion !== 1
+  const manage = (tab?: Pick['tab']) =>
     onManage({
       marketId: market.id,
       collateral: collateral.reserve.token.address,
@@ -209,6 +215,11 @@ function MarketPosition({
       aside={
         s.debtBase > 0n && (
           <div className="actions">
+            {canRenew && (
+              <button className="btn" onClick={() => manage('renew')}>
+                Renouveler
+              </button>
+            )}
             {canReinvest && (
               <button className="btn" onClick={() => manage('reinvest')}>
                 Réinvestir
@@ -223,7 +234,11 @@ function MarketPosition({
     >
       <div className="metrics">
         <Metric label="Valeur nette" value={fmtUsd(s.equityBase)} sub={`dette ${fmtUsd(s.debtBase, true)}`} />
-        <Metric label="Levier" value={fmtX(s.leverage)} sub={emode ? `eMode ${emode.label}` : 'sans eMode'} />
+        {pt ? (
+          <Metric label="Échéance du PT" value={fmtMaturity(pt.expiry)} tone={ptTone || undefined} sub={`${fmtDate(pt.expiry)} · levier ${fmtX(s.leverage)}`} />
+        ) : (
+          <Metric label="Levier" value={fmtX(s.leverage)} sub={emode ? `eMode ${emode.label}` : 'sans eMode'} />
+        )}
         <Metric label="Health factor" value={fmtHf(healthFactor)} tone={tone} sub={correlated ? 'paire corrélée' : undefined} />
         <Metric
           label="APY net"
@@ -234,6 +249,18 @@ function MarketPosition({
       </div>
       {tone === 'bad' && (
         <Notice tone="bad">Health factor {fmtHf(healthFactor)} : une petite baisse du collatéral ou la hausse des intérêts suffit à liquider.</Notice>
+      )}
+      {pt && isExpired(pt) && (
+        <Notice tone="bad">
+          {collateral.reserve.token.symbol} est échu depuis le {fmtDate(pt.expiry)} : il ne rapporte plus rien et la dette continue de coûter. Renouveler ou
+          fermer.
+        </Notice>
+      )}
+      {pt && !isExpired(pt) && ptDays! < 14 && (
+        <Notice>
+          {collateral.reserve.token.symbol} arrive à échéance le {fmtDate(pt.expiry)} ({fmtMaturity(pt.expiry)}) : après, il ne rapporte plus rien. Renouveler
+          dans un PT plus long ou fermer.
+        </Notice>
       )}
       {s.endingSoon.map((c) => (
         <Notice key={c.name + c.token}>
@@ -267,7 +294,12 @@ function MarketPosition({
                   {h.supplied > 0n && `dépôt ${fmtPct(h.reserve.supplyApy)}`}
                   {h.supplied > 0n && h.borrowed > 0n && ' · '}
                   {h.borrowed > 0n && `emprunt ${fmtPct(h.reserve.borrowApy)}`}
-                  {h.reserve.native && <span className="muted"> + {fmtPct(h.reserve.native.apy)} token</span>}
+                  {h.reserve.native && (
+                    <span className="muted">
+                      {' '}
+                      + {fmtPct(h.reserve.native.apy)} {h.reserve.native.fixedUntil ? 'fixe' : 'token'}
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}

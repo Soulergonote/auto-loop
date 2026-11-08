@@ -1,18 +1,19 @@
 import { useState, type ReactNode } from 'react'
 import { useGasPrice, useReadContract } from 'wagmi'
 import type { Address, Hash } from 'viem'
-import { AGGREGATORS, MORPHO_BLUE, type AggregatorChoice, type Token } from '../config'
+import { MORPHO_BLUE, type AggregatorChoice, type Token } from '../config'
 import { erc20Abi } from '../abi'
 import { useAllReserves, type EModeCategory, type Reserve, type Reserves, type UserState } from '../lib/useMarket'
 import { headlineRewards, type Campaign } from '../lib/merkl'
 import { useQuote } from '../lib/useQuote'
-import { getQuote } from '../lib/quotes'
+import { getQuote, quoteLabel } from '../lib/quotes'
 import { flashLoanOwed, pairPosition, positionLeverage, roundSignificant, toBase } from '../lib/math'
-import { GAS_UNITS, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
+import { GAS_UNITS, GAS_UNITS_PT, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
 import { encodeCall, executeSwapCollateral, explainError, swapCollateralCall } from '../lib/execute'
 import { executeSwapCollateralBatch, useAtomicBatch } from '../lib/oneClick'
-import { aTokensToApprove, flashAmountFor, projectSwap, swapTargets, thresholdIn, type SwapCollateralPlan } from '../lib/swapCollateral'
-import { fmtAmount, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { aTokensToApprove, flashAmountFor, projectSwap, rollTargets, swapTargets, thresholdIn, type SwapCollateralPlan } from '../lib/swapCollateral'
+import { fmtAmount, fmtDate, fmtHf, fmtMaturity, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { isExpired } from '../lib/pendle'
 import { outcomeLines, readOutcome } from '../lib/outcome'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
@@ -36,18 +37,37 @@ type Props = {
   onShowPair: (collateral: Token) => void
   common: ReactNode
   head: ReactNode
+  /** roll a PT collateral into a later PT (« Renouveler ») instead of any collateral */
+  renew?: boolean
+  /** shows the close panel (a roll that needs another eMode goes through a close and a new open) */
+  onClose?: () => void
 }
 
 /** Yield of a collateral: Aave supply rate, the token's own yield and the headline Merkl supply reward. */
 const supplyYield = (r: Reserve) => r.supplyApy + (r.native?.apy ?? 0) + r.supplyRewardApr
 
-export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, account, aggregator, onDone, onShowPair, common, head }: Props) {
+export function SwapCollateralPanel({
+  reserves,
+  emode,
+  tokens,
+  campaigns,
+  user,
+  account,
+  aggregator,
+  onDone,
+  onShowPair,
+  common,
+  head,
+  renew,
+  onClose,
+}: Props) {
   const { market, collateral: C, debt: D } = reserves
   const all = useAllReserves(market, tokens)
-  const targets = swapTargets(all.reserves ?? [], C.token.address, D.token.address, emode)
+  const anyTarget = swapTargets(all.reserves ?? [], C.token.address, D.token.address, emode)
+  const targets = renew ? rollTargets(anyTarget, C) : anyTarget
   const [targetChoice, setTargetChoice] = useState<Address>()
-  // default: a collateral of the same family (WETH → wstETH), else the first one
-  const T0 = targets.find((t) => t.token.address === targetChoice) ?? targets.find((t) => isCorrelated(t, C)) ?? targets[0]
+  // default: the next PT of the same underlying for a roll, else a collateral of the same family (WETH → wstETH), else the first one
+  const T0 = targets.find((t) => t.token.address === targetChoice) ?? (renew ? targets[0] : (targets.find((t) => isCorrelated(t, C)) ?? targets[0]))
   const T: Reserve | undefined = T0 && { ...T0, supplyRewardApr: headlineRewards(campaigns, T0).supply }
   const [part, setPart] = useState<(typeof PARTS)[number]>('100')
   const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
@@ -121,7 +141,7 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
 
   const gas =
     gasPrice.data !== undefined && reserves.nativePrice !== undefined
-      ? (GAS_UNITS.swapCollateral * gasPrice.data * reserves.nativePrice) / 10n ** 18n
+      ? ((C.pt || T?.pt ? GAS_UNITS_PT : GAS_UNITS).swapCollateral * gasPrice.data * reserves.nativePrice) / 10n ** 18n
       : undefined
   const swapCost = q && T ? swapCostBase(fromAmount, C.side, q.buyAmount, T.side) : undefined
   const premiumBase = T ? toBase(premium, T.side) : 0n
@@ -129,11 +149,20 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
 
   const problems: string[] = []
   if (C.config.paused) problems.push(`${C.token.symbol} est en pause sur Aave.`)
+  if (market.executor && market.executorVersion === 1) problems.push('Le contrat v1 ne change pas de collatéral : déployer le contrat v2.')
+  else if ((C.pt || T?.pt) && market.executor && !market.executorPendle)
+    problems.push('Ce contrat n’autorise pas le routeur Pendle : déployer le nouveau contrat (bandeau en haut).')
   if (q && T && !viaMorpho && !T.config.flashLoanEnabled)
     problems.push(`Flash loan désactivé sur ${T.token.symbol} et Morpho n’en détient pas assez : changement impossible pour l’instant.`)
   if (worst && worst.healthFactor < 1.01)
     problems.push(`Health factor du pire cas ${fmtHf(worst.healthFactor)} : la position serait liquidable. Choisir un autre collatéral.`)
   const warnings: string[] = []
+  if (renew && T?.pt && C.pt && T.pt.sy.toLowerCase() !== C.pt.sy.toLowerCase())
+    warnings.push(`${T.token.symbol} n’a pas le même actif sous-jacent que ${C.token.symbol} : le renouvellement passe par un swap entre les deux.`)
+  if (renew && T?.native && T.native.apy < D.borrowApy)
+    warnings.push(
+      `APY fixe de ${T.token.symbol} (${fmtPct(T.native.apy)}) sous le taux d’emprunt de ${D.token.symbol} (${fmtPct(D.borrowApy)}) : la boucle perd de l’argent.`,
+    )
   const lossIssue = q && T && swapLossProblem(swapLoss(fromAmount, C.side, q.buyAmount, T.side), C.token.symbol, T.token.symbol, q.simulated)
   if (lossIssue) (lossIssue.block ? problems : warnings).push(lossIssue.text)
   if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
@@ -195,7 +224,7 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
       const outcome = await readOutcome(market.chain.id, hash, p.executor, p.user)
       const expected = fresh.buyAmount - (flashLoanOwed(p.toAmount, premiumBps) - p.toAmount)
       const details = outcome && outcomeLines(outcome, [C.token, D.token, T!.token], { supplied: expected })
-      setResult({ ok: true, text: `Collatéral changé : ${T!.token.symbol}.`, hash, to: T!.token, details })
+      setResult({ ok: true, text: renew ? `PT renouvelé : ${T!.token.symbol}.` : `Collatéral changé : ${T!.token.symbol}.`, hash, to: T!.token, details })
       onDone()
     } catch (e) {
       setResult({ ok: false, text: explainError(e) })
@@ -208,7 +237,7 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
   const steps = batch
     ? [
         ...(needsPermit ? [{ label: `Autoriser le contrat à prendre ces a${C.token.symbol} (montant exact)` }] : []),
-        { label: 'Changer de collatéral : flash loan, dépôt, retrait et swap' },
+        { label: `${renew ? 'Renouveler le PT' : 'Changer de collatéral'} : flash loan, dépôt, retrait et swap` },
         ...(needsPermit ? [{ label: `Remettre l’autorisation des a${C.token.symbol} à sa valeur` }] : []),
       ]
     : [
@@ -246,7 +275,7 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
       ]}
       action={
         <button className="btn primary" disabled={!canSign} onClick={onSwap} title={disabledReason}>
-          {busy ?? (quote.isFetching ? 'Cotation…' : 'Changer de collatéral')}
+          {busy ?? (quote.isFetching ? 'Cotation…' : renew ? 'Renouveler le PT' : 'Changer de collatéral')}
         </button>
       }
       reason={busy ? undefined : disabledReason}
@@ -265,7 +294,7 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
     return (
       <LoopLayout summary={summary}>
         {head}
-        <Card title="Changer de collatéral">
+        <Card title={renew ? 'Renouveler le PT' : 'Changer de collatéral'}>
           <p className="muted">Aucun {C.token.symbol} en collatéral sur Aave pour cette adresse. Choisir la paire du collatéral actuel dans « Marché ».</p>
         </Card>
       </LoopLayout>
@@ -274,7 +303,7 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
   return (
     <LoopLayout summary={summary}>
       {head}
-      <Card title="Changer de collatéral">
+      <Card title={renew ? 'Renouveler le PT' : 'Changer de collatéral'}>
         <div className="metrics">
           <Metric label="Collatéral" value={`${fmtAmount(user.aTokenBalance, C.token.decimals)} ${C.token.symbol}`} sub={fmtUsd(posC)} />
           <Metric label="Dette" value={`${fmtAmount(user.debtBalance, D.token.decimals)} ${D.token.symbol}`} sub="inchangée" />
@@ -282,7 +311,28 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
           <Metric label="Health factor" value={fmtHf(user.healthFactor)} tone={hfTone(user.healthFactor, isCorrelated(C, D))} />
         </div>
 
-        {all.reserves && targets.length === 0 ? (
+        {renew && C.pt && (
+          <p className="muted small">
+            {C.token.symbol}{' '}
+            {isExpired(C.pt)
+              ? `échu le ${fmtDate(C.pt.expiry)} : racheté 1 pour 1 par Pendle`
+              : `échéance le ${fmtDate(C.pt.expiry)} (${fmtMaturity(C.pt.expiry)})`}
+            , puis remplacé par un PT plus long, dans la même transaction. La dette ne change pas.
+          </p>
+        )}
+        {renew && all.reserves && targets.length === 0 ? (
+          <Notice tone="bad">
+            <span>
+              Aucun PT plus long accepté {emode ? `par l’eMode « ${emode.label} » du compte` : 'sur ce marché'}. Pour en prendre un dans un autre eMode : fermer
+              la position, puis l’ouvrir sur le nouveau PT.
+            </span>
+            {onClose && (
+              <button className="btn" onClick={onClose}>
+                Fermer la position
+              </button>
+            )}
+          </Notice>
+        ) : all.reserves && targets.length === 0 ? (
           <p className="muted">
             Aucun autre collatéral accepté {emode ? `par l’eMode « ${emode.label} » du compte` : 'sur ce marché'}. Pour changer d’eMode : fermer la position,
             puis l’ouvrir avec un autre eMode.
@@ -290,11 +340,13 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
         ) : (
           <div className="grid2">
             <label className="field">
-              <span>Nouveau collatéral</span>
+              <span>{renew ? 'Nouveau PT' : 'Nouveau collatéral'}</span>
               <select value={T?.token.address ?? ''} onChange={(e) => setTargetChoice(e.target.value as Address)} disabled={!T}>
                 {targets.map((t) => (
                   <option key={t.token.address} value={t.token.address}>
-                    {t.token.symbol} (seuil {fmtPct(thresholdIn(t, emode) / 10_000, 0)}, dépôt {fmtPct(supplyYield(t))})
+                    {t.pt
+                      ? `${t.token.symbol} (${fmtMaturity(t.pt.expiry)}, APY fixe ${fmtPct(t.native?.apy ?? 0)})`
+                      : `${t.token.symbol} (seuil ${fmtPct(thresholdIn(t, emode) / 10_000, 0)}, dépôt ${fmtPct(supplyYield(t))})`}
                   </option>
                 ))}
               </select>
@@ -341,12 +393,12 @@ export function SwapCollateralPanel({ reserves, emode, tokens, campaigns, user, 
         </Fold>
 
         {q && T && (
-          <Fold title="Devis" value={`${AGGREGATORS[q.aggregator].label} · minimum ${fmtAmount(q.minOut, T.token.decimals)} ${T.token.symbol}`}>
+          <Fold title="Devis" value={`${quoteLabel(q)} · minimum ${fmtAmount(q.minOut, T.token.decimals)} ${T.token.symbol}`}>
             <QuoteCompare quote={q} token={T.token} />
             {preview && (
               <dl className="preview">
-                <dt>Routeur</dt>
-                <dd>{q.router}</dd>
+                <dt>{q.route ? 'Routeurs' : 'Routeur'}</dt>
+                <dd>{q.route ? q.route.map((l) => l.router).join(' puis ') : q.router}</dd>
                 <dt>Calldata swapCollateral()</dt>
                 <dd className="mono">{preview}</dd>
               </dl>

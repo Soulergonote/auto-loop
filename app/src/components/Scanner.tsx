@@ -8,8 +8,8 @@ import { scanMarket, type ScanFlag, type ScanRow } from '../lib/scan'
 import { fmtDate, fmtMaturity, fmtPct, fmtUsd, fmtX } from '../lib/format'
 import { Card, Fold, Notice, Segmented, Skel, Tag, useSlow } from './ui'
 
-/** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (from the positions' Merkl rewards). */
-export type Pick = { marketId: string; collateral: Address; debt: Address; emode: number; leverage: number; tab?: 'reinvest' }
+/** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (positions' Merkl rewards) or « Renouveler » (a PT near maturity). */
+export type Pick = { marketId: string; collateral: Address; debt: Address; emode: number; leverage: number; tab?: 'reinvest' | 'renew' }
 
 const HFS = ['1.05', '1.1', '1.2', '1.5'] as const
 type Filter = 'correlated' | 'stable' | 'all'

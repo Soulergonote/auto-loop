@@ -30,6 +30,7 @@ import { SwapCollateralPanel } from './components/SwapCollateralPanel'
 import { DeployPanel } from './components/DeployPanel'
 import { useExecutorCheck } from './lib/deploy'
 import { Scanner, type Pick } from './components/Scanner'
+import { needsRenewal } from './lib/pendle'
 import { Positions } from './components/Positions'
 
 type View = 'loop' | 'scan' | 'positions'
@@ -111,7 +112,12 @@ export function App() {
   // an executor is only offered for signing once its on-chain code is checked to be exactly this contract
   const check = useExecutorCheck(declared)
   const market = useMemo(
-    () => (!declared.executor ? declared : check.data ? { ...declared, executorVersion: check.data.version, executorPendle: check.data.pendle } : { ...declared, executor: undefined }),
+    () =>
+      !declared.executor
+        ? declared
+        : check.data
+          ? { ...declared, executorVersion: check.data.version, executorPendle: check.data.pendle }
+          : { ...declared, executor: undefined },
     [declared, check.data],
   )
   function setLocalExecutor(id: string, a?: Address) {
@@ -139,7 +145,7 @@ export function App() {
     collateral: Address
     debt: Address
     /** set when the pair comes from the scanner: eMode and leverage to start the open panel with */
-    seed?: { emode: number; leverage: number; tab?: 'reinvest'; nonce: number }
+    seed?: { emode: number; leverage: number; tab?: Pick['tab']; nonce: number }
   }>()
 
   const pair = useMemo(() => {
@@ -291,6 +297,7 @@ export function App() {
             common={common}
             notes={notes}
             seed={seed}
+            onExecutor={(a) => setLocalExecutor(market.id, a)}
           />
         ) : (
           <LoopLayout
@@ -356,11 +363,27 @@ type PairViewProps = {
   selectors: ReactNode
   common: ReactNode
   notes: ReactNode
-  seed?: { emode: number; leverage: number; tab?: 'reinvest' }
+  seed?: { emode: number; leverage: number; tab?: Pick['tab'] }
+  /** keeps a newly deployed executor for this market */
+  onExecutor: (a: Address) => void
 }
 
-function PairView({ market: m, collateral, debt, nativeToken, tokens, onPair, account, aggregator, selectors, common, notes, seed }: PairViewProps) {
-  const [tab, setTab] = useState<'open' | 'close' | 'swap' | 'reinvest'>(seed?.tab ?? 'open')
+function PairView({
+  market: m,
+  collateral,
+  debt,
+  nativeToken,
+  tokens,
+  onPair,
+  account,
+  aggregator,
+  selectors,
+  common,
+  notes,
+  seed,
+  onExecutor,
+}: PairViewProps) {
+  const [tab, setTab] = useState<'open' | 'close' | 'swap' | 'reinvest' | 'renew'>(seed?.tab ?? 'open')
   // filled by the reinvest flow's last step: "Augmenter" with the capital it gained
   const [augment, setAugment] = useState<{ emode: number; leverage: number; amount: string }>()
   const market = useMarket(m, collateral, debt, account, nativeToken)
@@ -374,13 +397,19 @@ function PairView({ market: m, collateral, debt, nativeToken, tokens, onPair, ac
   const canReinvest = !!account && (claimables.length > 0 || tab === 'reinvest')
   // contract v2: the collateral of an existing position can be changed without closing it
   const canSwap = !!account && m.executorVersion === 2 && !!market.user && market.user.aTokenBalance > 0n
+  // a PT in its last month (or matured) can be rolled into a later one, without closing
+  const pt = r?.collateral.pt
+  const canRenew = canSwap && !!pt && needsRenewal(pt)
   const averages = useRateAverages(m.chain.id, m.pool, [collateral.address, debt.address])
-  const natives = r ? [r.collateral.native, r.debt.native].filter((n) => n !== undefined) : []
+  const natives = r ? [r.collateral.native, r.debt.native].filter((n): n is NonNullable<typeof n> => n !== undefined && !n.fixedUntil) : []
   const nativeSince = natives.length ? Math.min(...natives.map((n) => n.since)) : undefined
 
   const head = (
     <>
       {notes}
+      {!DEMO && (pt || r?.debt.pt) && m.executorVersion === 2 && !m.executorPendle && m.executorSource === 'wallet' && (
+        <DeployPanel market={m} upgrade="pendle" onReady={onExecutor} />
+      )}
       <Card title="Marché">
         {selectors}
         {market.error && <Notice>Lecture d’Aave impossible : {market.error.message.split('\n')[0]}</Notice>}
@@ -410,13 +439,23 @@ function PairView({ market: m, collateral, debt, nativeToken, tokens, onPair, ac
                     </td>
                     <td data-label="APY dépôt">
                       {fmtPct(x.supplyApy)}
-                      {x.native && <span className="muted"> + {fmtPct(x.native.apy)} token</span>}
+                      {x.native && (
+                        <span className="muted">
+                          {' '}
+                          + {fmtPct(x.native.apy)} {x.native.fixedUntil ? 'fixe' : 'token'}
+                        </span>
+                      )}
                       {x.supplyRewardApr > 0 && <span className="reward"> + {fmtPct(x.supplyRewardApr)} Merkl</span>}
                       <Averages values={averages.data?.get(x.token.address.toLowerCase())?.supply} pending={averages.isPending} />
                     </td>
                     <td data-label="APY emprunt">
                       {fmtPct(x.borrowApy)}
-                      {x.native && <span className="muted"> + {fmtPct(x.native.apy)} token</span>}
+                      {x.native && (
+                        <span className="muted">
+                          {' '}
+                          + {fmtPct(x.native.apy)} {x.native.fixedUntil ? 'fixe' : 'token'}
+                        </span>
+                      )}
                       {x.borrowRewardApr > 0 && <span className="reward"> − {fmtPct(x.borrowRewardApr)} Merkl</span>}
                       <Averages values={averages.data?.get(x.token.address.toLowerCase())?.borrow} pending={averages.isPending} />
                     </td>
@@ -425,6 +464,11 @@ function PairView({ market: m, collateral, debt, nativeToken, tokens, onPair, ac
               </tbody>
             </table>
             <p className="muted small">Moyennes 7 j et 30 j : hausse des index Aave sur la période, annualisée.</p>
+            {pt?.market && (
+              <p className="muted small">
+                « fixe » : APY implicite du marché Pendle de {r.collateral.token.symbol}, acquis jusqu’à l’échéance du {fmtDate(pt.expiry)}.
+              </p>
+            )}
             {nativeSince !== undefined && (
               <p className="muted small">« token » : rendement propre du token, hausse de son taux de change depuis le {fmtDate(nativeSince)}, annualisée.</p>
             )}
@@ -440,6 +484,7 @@ function PairView({ market: m, collateral, debt, nativeToken, tokens, onPair, ac
             { value: 'open', label: 'Ouvrir / augmenter' },
             { value: 'close', label: 'Fermer / réduire' },
             ...(canSwap || tab === 'swap' ? [{ value: 'swap' as const, label: 'Changer de collatéral' }] : []),
+            ...(canRenew || tab === 'renew' ? [{ value: 'renew' as const, label: 'Renouveler' }] : []),
             ...(canReinvest ? [{ value: 'reinvest' as const, label: 'Réinvestir' }] : []),
           ]}
         />
@@ -488,9 +533,12 @@ function PairView({ market: m, collateral, debt, nativeToken, tokens, onPair, ac
         }}
       />
     )
-  if (tab === 'swap' && account && market.user)
+  if ((tab === 'swap' || tab === 'renew') && account && market.user)
     return (
       <SwapCollateralPanel
+        key={tab}
+        renew={tab === 'renew'}
+        onClose={() => setTab('close')}
         reserves={withEMode(r, currentEMode)}
         emode={market.user.eModeCategory ? emodes.find((c) => c.id === market.user!.eModeCategory) : undefined}
         tokens={tokens}
@@ -507,7 +555,7 @@ function PairView({ market: m, collateral, debt, nativeToken, tokens, onPair, ac
         }}
       />
     )
-  return tab === 'open' || tab === 'swap' ? (
+  return tab === 'open' || tab === 'swap' || tab === 'renew' ? (
     <OpenPanel
       reserves={r}
       tokens={tokens}
