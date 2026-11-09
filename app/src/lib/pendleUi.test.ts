@@ -84,3 +84,19 @@ describe('PT pairs', () => {
     expect(rollTargets([later], reserve(6, 'USDe'), NOW)).toEqual([])
   })
 })
+
+describe('Pendle networks', () => {
+  it('gives every Pendle network a quoter, its factories and the PT oracle, and only networks of the app', async () => {
+    const { MARKETS, PENDLE_FACTORIES, PENDLE_MARKETS, PENDLE_PY_ORACLE, PENDLE_ROUTER_STATIC, pendleChain } = await import('../config')
+    const ids = Object.keys(PENDLE_ROUTER_STATIC).map(Number)
+    expect(ids.sort((x, y) => x - y)).toEqual([1, 10, 56, 143, 146, 5000, 8453, 9745, 42161])
+    for (const id of ids) {
+      expect(PENDLE_FACTORIES[id]?.length).toBeGreaterThan(0)
+      expect(PENDLE_PY_ORACLE[id]).toMatch(/^0x[0-9a-fA-F]{40}$/)
+      expect(MARKETS.some((m) => m.chain.id === id)).toBe(true)
+    }
+    for (const id of Object.keys(PENDLE_MARKETS).map(Number)) expect(pendleChain(id)).toBe(true)
+    // no Pendle there
+    expect([43114, 137, 59144].some(pendleChain)).toBe(false)
+  })
+})

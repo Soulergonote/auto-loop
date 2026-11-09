@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useGasPrice } from 'wagmi'
 import { parseUnits, type Address, type Hash } from 'viem'
-import { AGGREGATORS, type AggregatorChoice, type Token } from '../config'
+import { AGGREGATORS, QUOTE_MODE, type AggregatorChoice, type Token } from '../config'
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../lib/merkl'
 import { CampaignTable } from './CampaignTable'
 import { RiskPanel } from './RiskPanel'
@@ -178,6 +178,26 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const fixedApy = pt && !ptExpired ? (q?.pendle?.kind === 'buy' && q.pendle.fixedApy !== undefined ? q.pendle.fixedApy : C.native?.apy) : undefined
   const cNative = pt ? (fixedApy !== undefined ? { apy: fixedApy, since: 0, fixedUntil: pt.expiry } : undefined) : C.native
 
+  // a PT whose SY gives back a token no aggregator sells for the debt asset could not be closed by the app, before or
+  // after maturity: the way out is quoted (PT → debt asset, the size of the position) before anything is signed
+  const exitByRoute = !!pt && !ptExpired && !pt.tokensOut.some((t) => t.address.toLowerCase() === D.token.address.toLowerCase())
+  const exitReq =
+    exitByRoute && q && capColl !== undefined && QUOTE_MODE !== 'mock'
+      ? {
+          aggregator,
+          chainId: market.chain.id,
+          sell: C.token,
+          buy: D.token,
+          sellAmount: roundSignificant(capColl + q.buyAmount, 2),
+          taker: market.quoteTaker,
+          slippageBps: BigInt(slippage),
+          oracle: { sell: C.side, buy: D.side },
+        }
+      : undefined
+  const exitQuote = useQuote(exitReq)
+  const exitBlocked = !!exitReq && (exitQuote.isError || !!exitQuote.data?.simulated)
+  const exitPending = !!exitReq && !exitQuote.data && !exitQuote.isError
+
   const account0 = user?.account ?? EMPTY_ACCOUNT
   const proj = q && capColl !== undefined ? project(account0, capColl + q.buyAmount, C.side, C.config.liquidationThresholdBps, debtAmount, D.side) : undefined
   const worst =
@@ -199,6 +219,10 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   if (user && initial && capBalance !== undefined && initial > capBalance) problems.push(`Solde ${K.symbol} insuffisant.`)
   if (ptExpired) problems.push(`${C.token.symbol} est échu : il ne s’achète plus. Le fermer ou le renouveler.`)
   else if (pt && !pt.market) problems.push(`Aucun marché Pendle connu pour ${C.token.symbol} : achat impossible.`)
+  if (exitBlocked)
+    problems.push(
+      `Sortie impossible : aucun agrégateur ne revend ${pt!.tokensOut.map((t) => t.symbol).join(' ou ')} (ce que rend ${C.token.symbol}) contre ${D.token.symbol} pour ce montant. La position ne pourrait être fermée ni avant ni après l’échéance.`,
+    )
   if (pt && executor && market.executorVersion === 1) problems.push('Le contrat v1 ne fait qu’un swap : un PT demande le contrat v2.')
   else if (pt && executor && !market.executorPendle)
     problems.push('Ce contrat n’autorise pas le routeur Pendle : déployer le nouveau contrat (bandeau en haut).')
@@ -359,7 +383,16 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
 
   const stale = initial !== debouncedInitial || quote.isFetching || capitalQuote.isFetching
   const canSign =
-    !!executor && !!account && !!q && !q.simulated && (kind !== 'swap' || (!!cq && !cq.simulated)) && !!preview && problems.length === 0 && !stale && !busy
+    !exitPending &&
+    !!executor &&
+    !!account &&
+    !!q &&
+    !q.simulated &&
+    (kind !== 'swap' || (!!cq && !cq.simulated)) &&
+    !!preview &&
+    problems.length === 0 &&
+    !stale &&
+    !busy
   const disabledReason = !executor
     ? 'Contrat pas encore déployé'
     : !account
@@ -368,7 +401,9 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
         ? 'Devis simulé'
         : problems.length
           ? 'Bloqué : voir le bandeau rouge'
-          : undefined
+          : exitPending
+            ? 'Vérification de la sortie…'
+            : undefined
 
   async function onOpen() {
     setResult(undefined)
