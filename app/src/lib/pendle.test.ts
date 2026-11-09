@@ -7,6 +7,7 @@ import {
   hfAtMaturity,
   impliedApyFromLn,
   isExpired,
+  mintableTokensIn,
   pendleCalldataProblem,
   pendleRouterAbi,
   pendleTerms,
@@ -147,5 +148,24 @@ describe('routes through Pendle', () => {
     expect(c.steps.map((s) => s.tokenOut)).toEqual([REUSDE, USDC])
     expect(c.repayAmount).toBe(maxUint256)
     expect(executorAbi.some((f) => f.type === 'function' && f.name === 'close')).toBe(true)
+  })
+})
+
+describe('mintableTokensIn', () => {
+  const USDC = { address: getAddress('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'), symbol: 'USDC', name: 'USDC', decimals: 6 }
+  const USD3 = { address: getAddress('0x056B269Eb1f75477a8666ae8C7fE01b64dD55eCc'), symbol: 'USD3', name: 'USD3', decimals: 6 }
+  const room = (max?: bigint) => ({ yieldToken: USD3.address, asset: USDC.address, max })
+
+  it('keeps every token when the vault has room or does not say', () => {
+    expect(mintableTokensIn([USDC, USD3], room(10_000n), USDC.address, 5_000n)).toEqual([USDC, USD3])
+    expect(mintableTokensIn([USDC, USD3], room(undefined), USDC.address, 5_000n)).toEqual([USDC, USD3])
+    expect(mintableTokensIn([USDC, USD3], undefined, USDC.address, 5_000n)).toEqual([USDC, USD3])
+  })
+
+  it('buys through the yield token when the vault is full or too small for the amount', () => {
+    expect(mintableTokensIn([USDC, USD3], room(0n), USDC.address, 5_000n)).toEqual([USD3])
+    expect(mintableTokensIn([USDC, USD3], room(4_999n), USDC.address, 5_000n)).toEqual([USD3])
+    // another token held: USDC still offered while the vault takes anything
+    expect(mintableTokensIn([USDC, USD3], room(1n), USD3.address, 5_000n)).toEqual([USDC, USD3])
   })
 })

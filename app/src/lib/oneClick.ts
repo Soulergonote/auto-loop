@@ -59,7 +59,7 @@ export function swapCapital(swaps: WalletSwap[], buy: Address, user: Address): b
 }
 
 /** Exact approval before a use and the previous value back after it; nothing when the allowance already covers it. */
-function allowanceCalls(
+export function allowanceCalls(
   kind: 'erc20' | 'delegation',
   token: Address,
   spender: Address,

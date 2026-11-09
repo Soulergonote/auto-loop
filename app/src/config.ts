@@ -128,11 +128,6 @@ export const VELORA_EXCLUDE_DEXS = ((import.meta.env.VITE_VELORA_EXCLUDE_DEXS as
 /** Same for KyberSwap (its source ids, e.g. uniswapv3,aerodrome-cl,pancake-v3): prop AMMs such as kipseli-prop revert on a fork. */
 export const KYBER_INCLUDED_SOURCES = ((import.meta.env.VITE_KYBER_INCLUDED_SOURCES as string | undefined) ?? '').trim()
 
-export const PLATFORMS = [
-  { id: 'aave-v3', label: 'Aave v3', available: true },
-  { id: 'morpho-blue', label: 'Morpho Blue', available: false },
-] as const
-
 /** Address the fork tests deploy the executor at; used as the quote taker until a real deployment exists. */
 export const FORK_EXECUTOR: Address = getAddress(slice(keccak256(toBytes('auto-loop.executor.fork')), 12))
 
@@ -169,6 +164,38 @@ export const MORPHO_BLUE: Record<number, Address> = {
   43114: '0x895383274303AA19fe978AFB4Ac55C7f094f982C',
   56: '0x01b0Bd309AA75547f7a37Ad7B1219A898E67a83a',
   146: '0xd6c916eB7542D0Ad3f18AEd0FCBD50C582cfa95f',
+}
+
+/**
+ * Morpho Blue as a lending platform (LeverageExecutorMorpho): the app networks where Morpho Blue is deployed and its
+ * API (blue-api.morpho.org, market list and rates) answers. Checked 2026-11-09: the API refuses Avalanche, BNB and
+ * Plasma; Sonic has no API data. Ethereum first, as Azerty asked.
+ */
+export type MorphoNetDef = { id: string; label: string; chain: Chain; morpho: Address }
+export const MORPHO_NETWORKS: MorphoNetDef[] = [
+  { id: 'morpho-ethereum', label: 'Ethereum', chain: mainnet, morpho: MORPHO_BLUE[1] },
+  { id: 'morpho-base', label: 'Base', chain: base, morpho: MORPHO_BLUE[8453] },
+  { id: 'morpho-arbitrum', label: 'Arbitrum', chain: arbitrum, morpho: MORPHO_BLUE[42161] },
+  { id: 'morpho-optimism', label: 'Optimism', chain: optimism, morpho: MORPHO_BLUE[10] },
+  { id: 'morpho-polygon', label: 'Polygon', chain: polygon, morpho: MORPHO_BLUE[137] },
+]
+export const isMorphoId = (id: string) => id.startsWith('morpho-')
+
+/** Address the fork tests deploy the Morpho executor at; the quote taker until a real deployment exists. */
+export const FORK_MORPHO_EXECUTOR: Address = getAddress(slice(keccak256(toBytes('auto-loop.morpho-executor.fork')), 12))
+
+export type MorphoNet = MorphoNetDef & {
+  executor?: Address
+  executorSource?: 'build' | 'wallet'
+  /** taker sent to the aggregators: the contract holds the tokens during the swap */
+  quoteTaker: Address
+}
+
+export function getMorphoNet(id: string, local: Record<string, Address> = {}): MorphoNet {
+  const def = MORPHO_NETWORKS.find((n) => n.id === id) ?? MORPHO_NETWORKS[0]
+  const fromBuild = EXECUTORS[def.id]
+  const executor = fromBuild ?? local[def.id]
+  return { ...def, executor, executorSource: fromBuild ? 'build' : executor ? 'wallet' : undefined, quoteTaker: executor ?? FORK_MORPHO_EXECUTOR }
 }
 
 /**
@@ -242,6 +269,11 @@ export const PENDLE_MARKETS: Record<number, Address[]> = {
     '0x90b70c407f1077f8eb92bf423b44cd92329b737a', // PT-reUSDe-10DEC2026
     '0x16d3126ee82ee36816499fb9db6f647c6addd09c', // PT-sUSN-22JUL2027
     '0x43c97094da0e894d3af2fda6f507d59a29888251', // PT-USDe-13AUG2026
+    // PT collaterals of the largest Morpho Blue markets
+    '0x13285bcbc27f92b47b4edb99d744c07b48c977c0', // PT-reUSD-10DEC2026
+    '0x4a5067c3ff1abb7449244025b0e37feaf77d8e3e', // PT-USD3-17DEC2026
+    '0x4ccf6deb3d1895373f604b418ff55d8adae8b846', // PT-USDat-14JAN2027
+    '0x9c560ebaf78e596cbcc27411d633a74d628dd7dc', // PT-sUSDS-26NOV2026
   ],
   42161: [
     '0xf86119a39f8654f38acbbd5488bd83f3f51983c8', // PT-sUSDai-25FEB2027

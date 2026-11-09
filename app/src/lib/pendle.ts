@@ -301,6 +301,54 @@ async function tokenMeta(chainId: number, addresses: readonly Address[]): Promis
   })
 }
 
+const vaultAbi = parseAbi([
+  'function yieldToken() view returns (address)',
+  'function asset() view returns (address)',
+  'function maxDeposit(address) view returns (uint256)',
+])
+
+/**
+ * What the SY of a PT can still mint from tokens other than its yield token: those are deposited into the yield token
+ * (an ERC-4626 vault for most), which may be capped. `max` is the vault's maxDeposit for the SY, in `asset` units;
+ * undefined when the SY or its yield token does not tell (not a vault): then nothing is known to be blocked.
+ */
+export async function syDepositRoom(chainId: number, sy: Address): Promise<{ yieldToken: Address; asset?: Address; max?: bigint } | undefined> {
+  try {
+    const [y] = await readContracts(wagmiConfig, { contracts: [{ chainId, address: sy, abi: vaultAbi, functionName: 'yieldToken' }], allowFailure: true })
+    if (typeof y.result !== 'string') return undefined
+    const yieldToken = getAddress(y.result)
+    const [asset, max] = await readContracts(wagmiConfig, {
+      contracts: [
+        { chainId, address: yieldToken, abi: vaultAbi, functionName: 'asset' },
+        { chainId, address: yieldToken, abi: vaultAbi, functionName: 'maxDeposit', args: [sy] },
+      ],
+      allowFailure: true,
+    })
+    return {
+      yieldToken,
+      asset: typeof asset.result === 'string' ? getAddress(asset.result) : undefined,
+      max: typeof max.result === 'bigint' ? max.result : undefined,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Tokens the SY can take for `amount` of `held` now: the yield token always; the others (deposited into it) only while
+ * its vault has room: at least `amount` when `held` is the vault's asset, otherwise any room at all.
+ */
+export function mintableTokensIn(tokensIn: Token[], room: Awaited<ReturnType<typeof syDepositRoom>>, held: Address, amount: bigint): Token[] {
+  if (!room || room.max === undefined) return tokensIn
+  const max = room.max
+  return tokensIn.filter((t) => {
+    const a = t.address.toLowerCase()
+    if (a === room.yieldToken.toLowerCase()) return true
+    const need = room.asset && a === room.asset.toLowerCase() && a === held.toLowerCase() ? amount : 1n
+    return max >= need
+  })
+}
+
 /** PtInfo of each of these tokens that is a Pendle PT (lower-cased address → info); other tokens are left out. */
 export async function readPtInfos(chainId: number, tokens: readonly Address[]): Promise<Map<string, PtInfo>> {
   const out = new Map<string, PtInfo>()

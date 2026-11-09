@@ -11,6 +11,9 @@ import { fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtNum, fmtPct, fmt
 import { daysToMaturity, isExpired, needsRenewal } from '../lib/pendle'
 import { Card, Fold, Metric, Notice, useSlow } from './ui'
 import type { Pick } from './Scanner'
+import { MorphoPositions, type MorphoTotals } from './MorphoPositions'
+import type { MorphoTab } from './MorphoView'
+import type { MorphoMarket } from '../lib/morpho'
 
 const READABLE = MARKETS.filter((m) => !m.soon)
 /** Balances under a cent (leftover interest after a close) are not a position. */
@@ -18,9 +21,20 @@ const DUST = 1_000_000n
 
 type Open = { market: Market; snapshot: Snapshot; position: UserPosition; campaigns?: Campaign[]; summary: PositionSummary; correlated: boolean }
 
-/** Every Aave v3 position of an address across the app's networks: total first, then one card per network. */
-export function Positions({ account, onManage, onScan }: { account?: Address; onManage: (p: Pick) => void; onScan: () => void }) {
+/** Every Aave v3 position of an address across the app's networks (total first, then one card per network), then its Morpho Blue positions. */
+export function Positions({
+  account,
+  onManage,
+  onManageMorpho,
+  onScan,
+}: {
+  account?: Address
+  onManage: (p: Pick) => void
+  onManageMorpho: (m: MorphoMarket, tab?: MorphoTab, leverage?: number) => void
+  onScan: () => void
+}) {
   const [typed, setTyped] = useState('')
+  const [morpho, setMorpho] = useState<MorphoTotals>()
   const user: Address | undefined = isAddress(typed.trim()) ? getAddress(typed.trim()) : account
   const markets: Market[] = useMemo(() => READABLE.map((m) => getMarket(m.id)), [])
   const snapshots = useQueries({ queries: markets.map((m) => ({ ...snapshotQuery(m), enabled: !!user })) })
@@ -56,14 +70,21 @@ export function Positions({ account, onManage, onScan }: { account?: Address; on
     .filter((c) => c.balances.length > 0)
 
   // total over every network: net value, APY weighted by net value, lowest health factor
-  const equity = open.reduce((s, x) => s + x.summary.equityBase, 0n)
-  const weighted = open.reduce((s, x) => s + (Number.isFinite(x.summary.apy) ? x.summary.apy * Number(x.summary.equityBase) : 0), 0)
+  // Morpho Blue positions count in the total once read (they are listed under the Aave cards)
+  const m = user && morpho && !morpho.pending ? morpho : undefined
+  const equity = open.reduce((s, x) => s + x.summary.equityBase, 0n) + (m?.equity ?? 0n)
+  const weighted = open.reduce((s, x) => s + (Number.isFinite(x.summary.apy) ? x.summary.apy * Number(x.summary.equityBase) : 0), 0) + (m?.weightedApy ?? 0)
   const levered = open.filter((x) => x.summary.debtBase > 0n)
-  const lowest = levered.reduce<Open | undefined>((m, x) => (!m || x.position.healthFactor < m.position.healthFactor ? x : m), undefined)
+  const lowestAave = levered.reduce<Open | undefined>((m, x) => (!m || x.position.healthFactor < m.position.healthFactor ? x : m), undefined)
+  const lowest =
+    m?.lowest && (!lowestAave || m.lowest.hf < lowestAave.position.healthFactor)
+      ? m.lowest
+      : lowestAave && { hf: lowestAave.position.healthFactor, correlated: lowestAave.correlated, label: lowestAave.market.label }
+  const count = open.length + (m?.count ?? 0)
   const claimUsd = claim.reduce((s, c) => s + c.balances.reduce((t, b) => t + b.usd, 0), 0)
   // the total shows as soon as one network is read; unreachable networks are named in a banner
   const read = markets.length - pending
-  const done = !!user && (pending === 0 || open.length > 0)
+  const done = !!user && (pending === 0 || count > 0)
   const avgApy = done && equity > 0n ? weighted / Number(equity) : undefined
 
   return (
@@ -74,13 +95,15 @@ export function Positions({ account, onManage, onScan }: { account?: Address; on
           <input placeholder={account ?? '0x…'} value={typed} onChange={(e) => setTyped(e.target.value)} spellCheck={false} />
         </label>
         {typed.trim() && !isAddress(typed.trim()) && <Notice>Adresse invalide.</Notice>}
-        {!user && <p className="muted">Connecter le portefeuille ou coller une adresse : ses positions Aave v3 s’affichent pour tous les réseaux.</p>}
-        {user && (open.length > 0 || pending > 0) && (
+        {!user && (
+          <p className="muted">Connecter le portefeuille ou coller une adresse : ses positions Aave v3 et Morpho Blue s’affichent pour tous les réseaux.</p>
+        )}
+        {user && (count > 0 || pending > 0) && (
           <div className="metrics">
             <Metric
               label="Valeur nette"
               value={done ? fmtUsd(equity) : undefined}
-              sub={done ? (pending > 0 ? `${read} réseaux lus sur ${markets.length}` : `${open.length} réseau${open.length > 1 ? 'x' : ''}`) : undefined}
+              sub={done ? (pending > 0 ? `${read} réseaux Aave lus sur ${markets.length}` : `${count} position${count > 1 ? 's' : ''}`) : undefined}
             />
             <Metric
               label="APY moyen"
@@ -90,16 +113,16 @@ export function Positions({ account, onManage, onScan }: { account?: Address; on
             />
             <Metric
               label="Health factor minimum"
-              value={done ? (lowest ? fmtHf(lowest.position.healthFactor) : '∞') : undefined}
-              tone={lowest && hfTone(lowest.position.healthFactor, lowest.correlated)}
-              sub={lowest?.market.label}
+              value={done ? (lowest ? fmtHf(lowest.hf) : '∞') : undefined}
+              tone={lowest && hfTone(lowest.hf, lowest.correlated)}
+              sub={lowest?.label}
             />
             <Metric label="Merkl à réclamer" value={done ? fmtDollars(claimUsd) : undefined} sub={done ? 'réclamable et en cours' : undefined} />
           </div>
         )}
-        {done && open.length === 0 && failed.length < markets.length && (
+        {done && count === 0 && !morpho?.pending && failed.length < markets.length && (
           <div className="actions">
-            <span className="muted">Aucune position Aave v3 sur ces réseaux. Le Scanner liste les boucles disponibles.</span>
+            <span className="muted">Aucune position Aave v3 ni Morpho Blue sur ces réseaux. Le Scanner liste les boucles disponibles.</span>
             <button className="btn" onClick={onScan}>
               Ouvrir le Scanner
             </button>
@@ -134,6 +157,8 @@ export function Positions({ account, onManage, onScan }: { account?: Address; on
           canReinvest={!!account && user === account && claim.some((c) => c.chain.id === x.market.chain.id && c.balances.some((b) => b.claimable > 0))}
         />
       ))}
+
+      {user && <MorphoPositions key={user} user={user} onManage={onManageMorpho} onTotals={setMorpho} />}
 
       {claim.length > 0 && user && (
         <Card

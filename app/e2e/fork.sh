@@ -9,6 +9,7 @@
 # live Pendle PTs are listed on Aave Core (contracts/script/ForkListPt.s.sol, SPLIT=1 for separate eModes) and the
 # user gets 1 ETH, 20 000 USDC and 5000 USDe. NET=arbitrum does the same on Arbitrum (anvil --chain-id 42161): PT-sUSDai
 # 25FEB2027 and 24JUN2027 listed against USDC and USDT, 20 000 USDC to the user (needs an archive RPC: FORK_URL=…).
+# NET=morpho: Ethereum (anvil --chain-id 1) for Morpho Blue, 20 000 USDC to the user, no executor (deployed from the app).
 # NET=base-pendle: Base (anvil --chain-id 8453) with PT-yUTY-17DEC2026 listed against USDC, 20 000 USDC to the user.
 # Optional: SOLC=/path/to/solc-0.8.27 when forge cannot download solc.
 set -euo pipefail
@@ -41,12 +42,26 @@ elif [ "${NET:-base}" = base-pendle ]; then
   ADMIN=0x9390B1735def18560c509E2d0bc090E9d6BA257a # Aave ACL admin on Base (governance executor)
   FUNDS="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913:20000000000"
   LIST_ENV="POOL=$POOL REF=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 BORROW=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 PTS=0x0112e4D09bc228534eef9D52D5A06d6b94244E8E DISCOUNTS=${DISCOUNTS:-1150}"
+elif [ "${NET:-base}" = morpho ]; then
+  # Ethereum for Morpho Blue: no executor deployed (the app's "Déployer le contrat Morpho" button does it), 20 000 USDC
+  # to the user, taken from Aave's aUSDC
+  POOL=0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2
+  DEFAULT_FORK=https://ethereum-rpc.publicnode.com
 else
   POOL=0xA238Dd80C259a72e81d7e4664a9801593F98d1c5
   ROUTERS="[0x6A000F20005980200259B80c5102003040001068,0x6131B5fae19EA4f9D964eAc0408E4408b66337b5]"
   DEFAULT_FORK=https://mainnet.base.org
 fi
 cast rpc --rpc-url $R anvil_reset "{\"forking\":{\"jsonRpcUrl\":\"${FORK_URL:-$DEFAULT_FORK}\"}}" >/dev/null
+if [ "${NET:-base}" = morpho ]; then
+  USDC=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+  A=$(cast call --rpc-url $R $POOL "getReserveAToken(address)(address)" $USDC)
+  cast rpc --rpc-url $R anvil_impersonateAccount $A >/dev/null
+  cast rpc --rpc-url $R anvil_setBalance $A 0xDE0B6B3A7640000 >/dev/null
+  cast send --rpc-url $R --unlocked --from $A $USDC "transfer(address,uint256)" $U 20000000000 >/dev/null
+  echo "fork block $(cast block-number --rpc-url $R), user $U: 20 000 USDC (Morpho Blue, executor to deploy from the app)"
+  exit 0
+fi
 cd "$HERE/../../contracts"
 if [ -n "${NO_DEPLOY:-}" ]; then cd - >/dev/null; else
 # the address depends on the deployer's nonce at the fork block: pass the printed one to the app (VITE_EXECUTORS)

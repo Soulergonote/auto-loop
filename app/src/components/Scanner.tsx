@@ -1,12 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import type { Address } from 'viem'
-import { MARKETS, aggregatorsFor, getMarket, type Market } from '../config'
+import { MARKETS, MORPHO_NETWORKS, aggregatorsFor, getMarket, type Market } from '../config'
 import { merklQuery } from '../lib/merkl'
 import { snapshotQuery } from '../lib/snapshot'
-import { scanMarket, type ScanFlag, type ScanRow } from '../lib/scan'
-import { fmtDate, fmtMaturity, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { scanMarket, type ScanFlag } from '../lib/scan'
+import { morphoMarketsQuery, type MorphoMarket } from '../lib/morpho'
+import { scanMorpho, type MorphoScanFlag } from '../lib/morphoScan'
+import { ptInfosQuery } from '../lib/pendle'
+import { fmtDate, fmtDollars, fmtMaturity, fmtPct, fmtX, ptShortSymbol } from '../lib/format'
 import { Card, Fold, Notice, Segmented, Skel, Tag, useSlow } from './ui'
+import type { MorphoTab } from './MorphoView'
 
 /** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (positions' Merkl rewards) or « Renouveler » (a PT near maturity). */
 export type Pick = { marketId: string; collateral: Address; debt: Address; emode: number; leverage: number; tab?: 'reinvest' | 'renew' }
@@ -14,58 +18,153 @@ export type Pick = { marketId: string; collateral: Address; debt: Address; emode
 const HFS = ['1.05', '1.1', '1.2', '1.5'] as const
 type Filter = 'correlated' | 'stable' | 'all'
 const ROWS = 20
-/** Pairs where less than this can still be looped are hidden (borrow cap or cash used up). */
-const MIN_CAPACITY = 1_000n * 10n ** 8n
+/** Pairs where less than this (USD) can still be looped are hidden (borrow cap or cash used up). */
+const MIN_CAPACITY_USD = 1_000
 /** Flagged as nearly full under this. */
-const LOW_CAPACITY = 50_000n * 10n ** 8n
+const LOW_CAPACITY_USD = 50_000
+const LOW_CAPACITY = BigInt(LOW_CAPACITY_USD) * 10n ** 8n
 
-const FLAG_TAG: Record<ScanFlag, { text: string; tone?: 'good' | 'warn' }> = {
+const FLAG_TAG: Record<ScanFlag | MorphoScanFlag, { text: string; tone?: 'good' | 'warn' }> = {
   conditional: { text: 'conditions Merkl' },
   nativeUnknown: { text: 'rendement du token non compté' },
   lowCapacity: { text: 'presque plein', tone: 'warn' },
+  unlisted: { text: 'non listé', tone: 'warn' },
 }
 
 /** Markets the app can loop on: an aggregator quotes there. */
 const SCANNABLE = MARKETS.filter((m) => !m.soon && aggregatorsFor(m.chain.id).length > 0)
+const SCANNABLE_MORPHO = MORPHO_NETWORKS.filter((n) => aggregatorsFor(n.chain.id).length > 0)
 
-/** Every pair of every market, looped at a target health factor, ranked by yield (Aave rates + token yield + eligible Merkl). */
-export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
+/** One line of the table, Aave pair or Morpho market. */
+type Line = {
+  key: string
+  pair: string
+  place: string
+  tags: ReactNode[]
+  leverage: number
+  apy: number
+  nativeApy: number
+  rewardsApy: number
+  capacityUsd: number
+  rewardsEnd?: number
+  stable: boolean
+  correlated: boolean
+  nativeUnknown: boolean
+  open: () => void
+}
+
+const ptTag = (expiry: number) => <Tag tone={expiry - Date.now() / 1000 < 14 * 86_400 ? 'warn' : undefined}>PT · {fmtMaturity(expiry)}</Tag>
+const flagTags = (flags: (ScanFlag | MorphoScanFlag)[]) =>
+  flags.map((f) => (
+    <Tag key={f} tone={FLAG_TAG[f].tone}>
+      {FLAG_TAG[f].text}
+    </Tag>
+  ))
+
+/**
+ * Every pair of every Aave market and every listed Morpho Blue market, looped at a target health factor, ranked by
+ * yield (rates + token yield + eligible Merkl on Aave).
+ */
+export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; onPickMorpho: (m: MorphoMarket, tab?: MorphoTab, leverage?: number) => void }) {
   const [scope, setScope] = useState('all')
   const [hfText, setHf] = useState<(typeof HFS)[number]>('1.1')
   const [filter, setFilter] = useState<Filter>('correlated')
   const [showNegative, setShowNegative] = useState(false)
   const [all, setAll] = useState(false)
   const markets: Market[] = useMemo(() => (scope === 'all' ? SCANNABLE : SCANNABLE.filter((m) => m.id === scope)).map((m) => getMarket(m.id)), [scope])
+  const morphoNets = scope === 'all' ? SCANNABLE_MORPHO : SCANNABLE_MORPHO.filter((n) => n.id === scope)
   const snapshots = useQueries({ queries: markets.map((m) => snapshotQuery(m)) })
+  const morphoLists = useQueries({ queries: morphoNets.map((n) => morphoMarketsQuery(n.chain.id, false)) })
+  // a PT's yield is its Pendle implied APY: read for the PT collaterals of each network's listed markets
+  const ptTokens = morphoLists.map((q) => [...new Set((q.data ?? []).filter((m) => /^PT-/i.test(m.collateral.symbol)).map((m) => m.collateral.address))])
+  const morphoPts = useQueries({ queries: morphoNets.map((n, i) => ptInfosQuery(n.chain.id, ptTokens[i])) })
   // one Merkl query per chain (Ethereum Core and Prime share it)
   const chainIds = [...new Set(markets.map((m) => m.chain.id))]
   const merkl = useQueries({ queries: chainIds.map((id) => merklQuery(id)) })
   const targetHf = Number(hfText)
+  const label = (id: string) => MARKETS.find((m) => m.id === id)?.label ?? id
 
-  // recomputed when a snapshot or a campaign list arrives (the query arrays are new objects at every render)
-  const version = [...snapshots, ...merkl].map((q) => q.dataUpdatedAt).join()
+  // recomputed when a snapshot, a Morpho list or a campaign list arrives (the query arrays are new objects at every render)
+  const version = [...snapshots, ...merkl, ...morphoLists, ...morphoPts].map((q) => q.dataUpdatedAt).join()
   const rows = useMemo(() => {
-    const out: ScanRow[] = []
+    const out: Line[] = []
     for (const q of snapshots) {
       if (!q.data) continue
       const campaigns = merkl[chainIds.indexOf(q.data.market.chain.id)]?.data
-      out.push(...scanMarket(q.data, campaigns, { targetHf, minCapacityBase: LOW_CAPACITY }))
+      for (const r of scanMarket(q.data, campaigns, { targetHf, minCapacityBase: LOW_CAPACITY }))
+        out.push({
+          key: `${r.marketId}-${r.collateral.token.address}-${r.debt.token.address}`,
+          pair: `${r.collateral.token.symbol} / ${r.debt.token.symbol}`,
+          place: label(r.marketId),
+          tags: [
+            r.collateral.pt && <span key="pt">{ptTag(r.collateral.pt.expiry)}</span>,
+            r.emode && <Tag key="emode">eMode {r.emode.label}</Tag>,
+            r.rewardsApy > 0 && (
+              <Tag key="bonus" tone="good">
+                bonus
+              </Tag>
+            ),
+            ...flagTags(r.flags),
+          ],
+          leverage: r.leverage,
+          apy: r.apy,
+          nativeApy: r.nativeApy,
+          rewardsApy: r.rewardsApy,
+          capacityUsd: Number(r.capacityBase) / 1e8,
+          rewardsEnd: r.rewardsEnd,
+          stable: r.stable,
+          correlated: r.correlated,
+          nativeUnknown: r.flags.includes('nativeUnknown'),
+          open: () =>
+            onPick({ marketId: r.marketId, collateral: r.collateral.token.address, debt: r.debt.token.address, emode: r.emode?.id ?? 0, leverage: r.leverage }),
+        })
     }
+    morphoNets.forEach((n, i) => {
+      const list = morphoLists[i].data
+      if (!list) return
+      for (const r of scanMorpho(list, { targetHf, pts: morphoPts[i].data, lowCapacityUsd: LOW_CAPACITY_USD }))
+        out.push({
+          key: `morpho-${n.chain.id}-${r.market.id}`,
+          pair: `${ptShortSymbol(r.market.collateral.symbol)} / ${r.market.loan.symbol}`,
+          place: `Morpho · ${n.label}`,
+          tags: [
+            <Tag key="morpho">Morpho · LLTV {fmtPct(r.market.lltv, 1)}</Tag>,
+            r.pt && <span key="pt">{ptTag(r.pt.expiry)}</span>,
+            r.market.borrowRewardsApr > 0 && (
+              <Tag key="bonus" tone="good">
+                bonus
+              </Tag>
+            ),
+            ...flagTags(r.flags),
+          ],
+          leverage: r.leverage,
+          apy: r.apy,
+          nativeApy: r.nativeApy,
+          rewardsApy: r.market.borrowRewardsApr * (r.leverage - 1),
+          capacityUsd: r.capacityUsd,
+          stable: r.stable,
+          correlated: r.correlated,
+          nativeUnknown: r.flags.includes('nativeUnknown'),
+          open: () => onPickMorpho(r.market, 'open', r.leverage),
+        })
+    })
     return out.sort((a, b) => b.apy - a.apy)
   }, [version, targetHf])
 
   const shown = rows.filter(
     (r) =>
       (filter === 'all' || (filter === 'stable' ? r.stable : r.correlated)) &&
-      (showNegative || r.apy > 0 || r.flags.includes('nativeUnknown')) &&
-      r.capacityBase >= MIN_CAPACITY,
+      (showNegative || r.apy > 0 || r.nativeUnknown) &&
+      r.capacityUsd >= MIN_CAPACITY_USD,
   )
-  const loading = snapshots.filter((q) => q.isPending).length
+  const loading = snapshots.filter((q) => q.isPending).length + morphoLists.filter((q) => q.isPending).length
   const slow = useSlow(loading > 0)
-  const failed = markets.filter((_, i) => snapshots[i].isError)
+  const failed = [
+    ...markets.filter((_, i) => snapshots[i].isError).map((m) => m.label),
+    ...morphoNets.filter((_, i) => morphoLists[i].isError).map((n) => `Morpho · ${n.label}`),
+  ]
   const merklFailed = chainIds.filter((_, i) => merkl[i].isError)
-  const label = (id: string) => MARKETS.find((m) => m.id === id)?.label ?? id
-  const retry = () => snapshots.forEach((q) => (q.isError || q.isPending) && void q.refetch())
+  const retry = () => [...snapshots, ...morphoLists].forEach((q) => (q.isError || q.isPending) && void q.refetch())
   const visible = all ? shown : shown.slice(0, ROWS)
   const hf = hfText.replace('.', ',')
 
@@ -76,11 +175,20 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
           <span>Réseau</span>
           <select value={scope} onChange={(e) => setScope(e.target.value)}>
             <option value="all">Tous les réseaux</option>
-            {SCANNABLE.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
+            <optgroup label="Aave v3">
+              {SCANNABLE.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Morpho Blue">
+              {SCANNABLE_MORPHO.map((n) => (
+                <option key={n.id} value={n.id}>
+                  Morpho · {n.label}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </label>
         <div className="field">
@@ -105,7 +213,7 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
       </label>
       {failed.length > 0 && loading === 0 && (
         <Notice>
-          <span>Illisible depuis ce navigateur : {failed.map((m) => m.label).join(', ')} (RPC public qui ne répond pas).</span>
+          <span>Illisible depuis ce navigateur : {failed.join(', ')} (RPC public ou API Morpho qui ne répond pas).</span>
           <button className="btn" onClick={retry}>
             Réessayer
           </button>
@@ -145,22 +253,11 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
           </thead>
           <tbody>
             {visible.map((r) => (
-              <tr key={`${r.marketId}-${r.collateral.token.address}-${r.debt.token.address}`}>
+              <tr key={r.key}>
                 <td className="lead">
-                  {r.collateral.token.symbol} / {r.debt.token.symbol}
-                  {scope === 'all' && <span className="muted"> · {label(r.marketId)}</span>}
-                  <div className="tags">
-                    {r.collateral.pt && (
-                      <Tag tone={r.collateral.pt.expiry - Date.now() / 1000 < 14 * 86_400 ? 'warn' : undefined}>PT · {fmtMaturity(r.collateral.pt.expiry)}</Tag>
-                    )}
-                    {r.emode && <Tag>eMode {r.emode.label}</Tag>}
-                    {r.rewardsApy > 0 && <Tag tone="good">bonus</Tag>}
-                    {r.flags.map((f) => (
-                      <Tag key={f} tone={FLAG_TAG[f].tone}>
-                        {FLAG_TAG[f].text}
-                      </Tag>
-                    ))}
-                  </div>
+                  {r.pair}
+                  {scope === 'all' && <span className="muted"> · {r.place}</span>}
+                  <div className="tags">{r.tags}</div>
                 </td>
                 <td data-label="Levier" className="num">
                   {fmtX(r.leverage)}
@@ -175,22 +272,11 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
                   {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : '—'}
                 </td>
                 <td data-label="Capacité" className="num">
-                  {fmtUsd(r.capacityBase, true)}
+                  {fmtDollars(r.capacityUsd, true)}
                 </td>
                 <td data-label="Fin du bonus">{r.rewardsEnd ? fmtDate(r.rewardsEnd) : r.rewardsApy > 0 ? 'non indiquée' : '—'}</td>
                 <td>
-                  <button
-                    className="btn small"
-                    onClick={() =>
-                      onPick({
-                        marketId: r.marketId,
-                        collateral: r.collateral.token.address,
-                        debt: r.debt.token.address,
-                        emode: r.emode?.id ?? 0,
-                        leverage: r.leverage,
-                      })
-                    }
-                  >
+                  <button className="btn small" onClick={r.open}>
                     Ouvrir
                   </button>
                 </td>
@@ -220,7 +306,7 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
           </button>
         </div>
       )}
-      <Fold title="Méthode" value={`levier à un health factor de ${hf}, meilleur eMode, Merkl si éligible`}>
+      <Fold title="Méthode" value={`levier à un health factor de ${hf}, meilleur eMode, Merkl si éligible, Morpho listé`}>
         <p className="muted small">
           Le levier de chaque paire donne un health factor de {hf}, plafonné comme le curseur de la boucle, dans la configuration eMode qui rapporte le plus.
           Les rewards Merkl ne comptent que si la position y a droit à ce health factor. Les taux sont variables : l’APY change avec l’utilisation du marché.
@@ -234,6 +320,11 @@ export function Scanner({ onPick }: { onPick: (p: Pick) => void }) {
         <p className="muted small">
           Non compté : le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes Merkl à public restreint. La capacité est le capital encore «
           bouclable » avant que l’actif emprunté manque de liquidité ou atteigne un plafond.
+        </p>
+        <p className="muted small">
+          Morpho Blue : chaque marché listé par Morpho (un collatéral, un actif emprunté, une LLTV), au levier qui donne ce health factor, plafonné au levier
+          d’un health factor de 1,02 comme le curseur. Taux de l’API Morpho, relus on-chain à l’ouverture ; « dont Merkl » y est la part des rewards d’emprunt
+          que l’API compte. Les marchés avec un avertissement rouge de l’API sont écartés.
         </p>
       </Fold>
     </Card>

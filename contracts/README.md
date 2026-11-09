@@ -14,13 +14,16 @@ Deux versions cohabitent : `LeverageExecutorV2` (v2, voir [la section v2](#v2--l
 | `test/mocks/MockAggregatorRouter.sol` | Routeur factice (slippage réglable, routes malveillantes). |
 | `test/fork/BaseFork.t.sol` | Tests sur fork de Base (Aave v3 réel, swap Uniswap v3, puis rejeu de calldata Velora ou KyberSwap réel). Ignorés sans `BASE_RPC_URL`. |
 | `script/quote-velora.sh`, `script/quote-kyber.sh` | Récupèrent un devis Velora ou KyberSwap réel (USDC → WETH) avec le contrat comme taker. |
-| `script/export-bytecode.cjs` | Compile le contrat avec solc-js 0.8.27 et écrit `app/src/executorBytecode.ts`, utilisé par le bouton « Déployer le contrat » de l'app. |
+| `script/export-bytecode.cjs` | Compile les contrats (v1, v2, Morpho) avec solc-js 0.8.27 et écrit `app/src/executorBytecode.ts`, utilisé par le bouton « Déployer le contrat » de l'app. |
 | `script/setup.sh` | Installe les dépendances dans `lib/`. |
 | `src/LeverageExecutorV2.sol` | La v2 (chaînes de swaps, capital en n'importe quel token, garde, changement de collatéral, flash loans gratuits). |
 | `src/interfaces/IFlashLenders.sol` | Interfaces des flash loans Morpho Blue et Balancer v2. |
 | `test/v2/*.t.sol` | 136 tests v2 sur le même Aave v3.6 local : ouverture, fermeture, changement de collatéral, attaques, fuzz, invariants et preuves de l'audit interne (`V2Audit.t.sol`). |
 | `test/mocks/MockFlashLenders.sol`, `test/mocks/AttackRouter.sol` | Prêteurs Morpho et Balancer factices (même déroulé que les vrais), prêteurs qui ne rappellent jamais, routeur qui exécute du code hostile au milieu d'un swap. |
 | `test/fork/BaseForkV2.t.sol`, `test/fork/EthereumForkV2.t.sol` | v2 sur forks réels : Base (Aave, Morpho, Balancer, Uniswap) et Ethereum (Aave Core, Pendle, Curve, Morpho, Balancer). Ignorés sans `BASE_RPC_URL` / `ETH_RPC_URL`. |
+| `src/LeverageExecutorMorpho.sol`, `src/interfaces/IMorpho.sol` | Boucles sur Morpho Blue (ouvrir, fermer, changer de marché), autorisation Morpho le temps d'une transaction. |
+| `test/morpho/*` | 35 tests sur le **vrai Morpho Blue v1.0.0** (bytecode du tag compilé, `MorphoBlueBytecode.sol`), oracle et IRM factices. |
+| `test/fork/EthereumForkMorpho.t.sol` | Morpho sur fork d'Ethereum avec de vrais marchés PT (reUSD, USD3), routeur Pendle. Ignorés sans `ETH_RPC_URL`. |
 
 ## Lancer
 
@@ -143,5 +146,46 @@ Rapport complet : [Audit interne du contrat v2](https://claude.ai/artifact/61hHE
 - Aave de Plasma et de Monad non testés (RPC inaccessibles depuis l'environnement cloud) : version d'Aave et comportement du LTV 0 en eMode à vérifier avant d'y faire des PT.
 - Morpho Blue et Balancer v2 doivent être déployés sur la chaîne pour servir de prêteur gratuit (adresses à vérifier chaîne par chaîne ; sinon `address(POOL)` avec prime).
 - Mêmes limites que la v1 pour l'isolation mode, les tokens à frais de transfert et l'eMode (que l'utilisateur active lui-même).
+
+## Morpho Blue : `LeverageExecutorMorpho`
+
+Contrat séparé, sans propriétaire, pour boucler sur **n'importe quel marché Morpho Blue** (un collatéral, un actif prêté, un oracle, un IRM, une LLTV). Il reprend le moteur d'étapes de la v2 (`Step`, 1 à 4 étapes par swap, minimum par étape contrôlé par différence de soldes, routeurs en liste blanche figée au déploiement) et le prêt flash **gratuit** de Morpho lui-même. Constructeur : `(IMorpho morpho, address[] routers)` ; il refuse comme routeur Morpho, le contrat lui-même et toute adresse sans code.
+
+### Fonctions
+
+- `open(OpenParams)` : flash loan de l'actif prêté → swap en collatéral → `supplyCollateral` pour l'utilisateur → `borrow` au nom de l'utilisateur → remboursement du prêt flash. Capital dans le collatéral, l'actif prêté (vendu avec la dette) ou un autre token (`capitalSteps`) ; `debtAmount = 0` fait un simple dépôt.
+- `close(CloseParams)` : `repayAmount` (`type(uint256).max` = toute la dette, remboursée par parts, intérêts courus compris), `collateralToWithdraw` (max = tout), `collateralToSell` ; flash loan de l'actif prêté seulement s'il y a une dette. Ce qui reste (collatéral non vendu, actif prêté en trop) revient à l'utilisateur.
+- `roll(RollParams)` : change de marché en une transaction (même actif prêté, autre id) : flash loan → remboursement sur l'ancien marché → retrait du collatéral → swap si le collatéral change (PT vers PT plus long) → dépôt et emprunt sur le nouveau. Pas besoin de prêt flash du PT.
+- Chacune a une variante `…WithAuth(params, AuthSigs)` : deux signatures EIP-712 Morpho `setAuthorizationWithSig`, l'une qui autorise le contrat (nonce n), l'autre qui retire l'autorisation (nonce n + 1), consommées au début et à la fin du même appel. Sans signatures, l'appelant peut autoriser le contrat lui-même dans un lot atomique de son portefeuille (autoriser, appeler, retirer).
+- `Guard {minHealthFactor, deadline}` sur chaque appel ; `healthFactor(market, user)` en lecture (intérêts courus compris, même formule que Morpho).
+- Valeurs de retour et événements `PositionOpened`, `PositionClosed`, `PositionRolled`, `Swapped` (un par étape).
+
+### Sécurité
+
+- **Autorisation le temps d'une transaction.** Morpho exige une autorisation pour `borrow` et `withdrawCollateral` au nom d'un autre. Le contrat n'agit que pour `msg.sender` ; à la fin de `…WithAuth`, il vérifie que `isAuthorized(user, this)` est redevenu faux (`AuthorizationNotRevoked`). Une signature de retrait invalide fait échouer tout l'appel. Un tiers qui rejoue la signature d'autorisation en avance ne gagne rien (l'appel se poursuit, testé) ; s'il rejoue aussi le retrait, il ne fait que bloquer l'appel.
+- **Rappel de flash loan à usage unique** : empreinte `keccak256(actif, montant, données)` écrite juste avant `flashLoan`, rappel accepté seulement de Morpho et effacé ; sinon `FlashLoanNotExecuted` / `UnexpectedFlashLoan`.
+- **Routeurs hostiles** : `nonReentrant` sur toutes les entrées ; un routeur ne peut ni rappeler le contrat, ni utiliser l'autorisation Morpho d'un utilisateur (elle est donnée au contrat, qui n'agit que pour l'appelant), ni garder de token (approval exacte remise à 0, soldes rendus). Testé avec des routeurs malveillants.
+- Paramètres du marché : le contrat calcule l'id à partir des `MarketParams` passés ; Morpho refuse un marché inexistant. L'app vérifie en plus que `idToMarketParams(id)` correspond à ce que l'API annonce.
+- Le contrat ne garde ni fonds ni approval après un appel (testé à chaque test par `_assertClean`).
+
+### Lancer
+
+```bash
+forge test --match-path 'test/morpho/*'     # vraie logique Morpho Blue v1.0.0 (bytecode compilé du tag, BUSL-1.1, tests seulement)
+ETH_RPC_URL=https://ethereum-rpc.publicnode.com forge test --match-contract EthereumForkMorphoTest -vv
+```
+
+### Résultats (09/11/2026)
+
+- **35 tests locaux** sur le vrai code de Morpho Blue (12 ouverture, 11 autorisation et sécurité, 7 fermeture, 4 changement de marché, 1 fuzz ouverture/fermeture à 256 essais avec intérêts sur jusqu'à un an).
+- **Fork Ethereum, 4/4** : le bytecode local est bien celui de Morpho déployé (aux immutables et métadonnées près) ; boucle x5 PT-reUSD-10DEC2026 / USDC (LLTV 91,5 %) depuis 1 000 USDC puis fermeture totale ; changement de marché PT-reUSD → PT-USD3-17DEC2026 ; déplacement de PT-USD3 entre deux marchés.
+- Gas (local, swap factice), médianes : `openWithAuth` ~415k, `closeWithAuth` ~381k, `rollWithAuth` ~494k. Taille : 15 995 octets (limite 24 576).
+- Bout en bout dans l'app sur fork d'Ethereum (09/11/2026) : déploiement depuis le bouton de l'app, ouverture x5 (signatures) et x4 (lot atomique EIP-5792), changement de marché vers PT-USD3, réduction à x2, fermeture totale ; après chaque appel, l'autorisation Morpho est retirée et l'approval remise à 0.
+
+### Limites connues (Morpho)
+
+- **Audit interne seulement**, rien n'est déployé sur un réseau réel.
+- Un marché Morpho est aussi sûr que son oracle : l'app signale les marchés non listés par Morpho, les oracles « Unknown » et les alertes rouges de l'API, mais ne juge pas l'oracle elle-même.
+- La liquidité d'un marché peut manquer à la fermeture (actif prêté entièrement emprunté) : `close` rembourse la dette avec le prêt flash, ce qui ne demande pas de liquidité, mais un `roll` emprunte sur le marché cible et en demande.
 
 Dépendance de test : `aave-v3-origin` est sous licence BUSL-1.1, utilisé uniquement pour les tests. Le contrat lui-même est MIT et n'importe que OpenZeppelin.

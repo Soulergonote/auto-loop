@@ -110,3 +110,66 @@ export const debtTokenAbi = parseAbi([
   'function nonces(address owner) view returns (uint256)',
   'function DOMAIN_SEPARATOR() view returns (bytes32)',
 ])
+
+const marketParams = '(address loanToken, address collateralToken, address oracle, address irm, uint256 lltv)'
+const openMorpho = `(${marketParams} market, address capitalToken, uint256 capitalAmount, ${step}[] capitalSteps, uint256 debtAmount, ${step}[] steps, ${guard} guard)`
+const closeMorpho = `(${marketParams} market, uint256 repayAmount, uint256 collateralToWithdraw, uint256 collateralToSell, ${step}[] steps, ${guard} guard)`
+const rollMorpho = `(${marketParams} from, ${marketParams} to, uint256 repayAmount, uint256 collateralToMove, ${step}[] steps, ${guard} guard)`
+const authSigs = '(uint256 nonce, uint256 deadline, (uint8 v, bytes32 r, bytes32 s) grant, (uint8 v, bytes32 r, bytes32 s) revoke)'
+const closeMorphoResult = '(uint256 debtRepaid, uint256 collateralWithdrawn, uint256 collateralReturned, uint256 loanReturned, uint256 healthFactor)'
+const rollMorphoResult = '(uint256 debtRepaid, uint256 collateralWithdrawn, uint256 collateralSupplied, uint256 debtBorrowed, uint256 healthFactor)'
+
+/** LeverageExecutorMorpho: the same swap steps against Morpho Blue markets, deployed by the app (one per chain). */
+export const morphoExecutorAbi = parseAbi([
+  'constructor(address morpho, address[] routers)',
+  'function MORPHO() view returns (address)',
+  `function open(${openMorpho} p) returns (uint256 collateralSupplied, uint256 debtBorrowed, uint256 healthFactor)`,
+  `function openWithAuth(${openMorpho} p, ${authSigs} auth) returns (uint256 collateralSupplied, uint256 debtBorrowed, uint256 healthFactor)`,
+  `function close(${closeMorpho} p) returns (${closeMorphoResult})`,
+  `function closeWithAuth(${closeMorpho} p, ${authSigs} auth) returns (${closeMorphoResult})`,
+  `function roll(${rollMorpho} p) returns (${rollMorphoResult})`,
+  `function rollWithAuth(${rollMorpho} p, ${authSigs} auth) returns (${rollMorphoResult})`,
+  `function healthFactor(${marketParams} market, address user) view returns (uint256)`,
+  'function isRouterAllowed(address) view returns (bool)',
+  `event PositionOpened(address indexed user, bytes32 indexed marketId, address capitalToken, uint256 capitalAmount, uint256 collateralSupplied, uint256 debtBorrowed, uint256 healthFactor)`,
+  `event PositionClosed(address indexed user, bytes32 indexed marketId, ${closeMorphoResult} result)`,
+  `event PositionRolled(address indexed user, bytes32 indexed fromId, bytes32 indexed toId, ${rollMorphoResult} result)`,
+  'event Swapped(address indexed user, address indexed router, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut)',
+  'error ZeroAddress()',
+  'error SameAsset()',
+  'error SameMarket()',
+  'error LoanTokenMismatch()',
+  'error ZeroAmount()',
+  'error Expired(uint256 deadline)',
+  'error HealthFactorTooLow(uint256 healthFactor, uint256 minHealthFactor)',
+  'error InvalidRouter(address router)',
+  'error RouterNotAllowed(address router)',
+  'error CallerNotLender()',
+  'error UnexpectedFlashLoan()',
+  'error FlashLoanNotExecuted()',
+  'error InvalidSteps()',
+  'error UnexpectedSteps()',
+  'error WrongFinalToken(address tokenOut, address expected)',
+  'error InsufficientOutput(uint256 received, uint256 minOut)',
+  'error ExcessiveInput(uint256 spent, uint256 maxIn)',
+  'error SellExceedsWithdrawn(uint256 toSell, uint256 withdrawn)',
+  'error InsufficientToRepayFlashLoan(uint256 balance, uint256 owed)',
+  'error AuthorizationNotRevoked()',
+])
+
+/** Morpho Blue (the singleton), the reads and the authorization the app uses. */
+export const morphoAbi = parseAbi([
+  `function idToMarketParams(bytes32 id) view returns (address loanToken, address collateralToken, address oracle, address irm, uint256 lltv)`,
+  'function market(bytes32 id) view returns (uint128 totalSupplyAssets, uint128 totalSupplyShares, uint128 totalBorrowAssets, uint128 totalBorrowShares, uint128 lastUpdate, uint128 fee)',
+  'function position(bytes32 id, address user) view returns (uint256 supplyShares, uint128 borrowShares, uint128 collateral)',
+  'function isAuthorized(address authorizer, address authorized) view returns (bool)',
+  'function nonce(address authorizer) view returns (uint256)',
+  'function setAuthorization(address authorized, bool newIsAuthorized)',
+])
+
+export const morphoOracleAbi = parseAbi(['function price() view returns (uint256)'])
+
+/** Morpho's AdaptiveCurveIrm (and any IRM with the same view): borrow rate per second, WAD. */
+export const morphoIrmAbi = parseAbi([
+  `function borrowRateView(${marketParams} marketParams, (uint128 totalSupplyAssets, uint128 totalSupplyShares, uint128 totalBorrowAssets, uint128 totalBorrowShares, uint128 lastUpdate, uint128 fee) market) view returns (uint256)`,
+])

@@ -15,7 +15,17 @@ import {
   type Token,
 } from '../config'
 import { applySlippage, oracleSwapOut, type Side } from './math'
-import { PENDLE_ROUTER_ADDRESS, isExpired, pendleCalldataProblem, quoteBuyPt, quoteSellPt, readPt, type PtInfo } from './pendle'
+import {
+  PENDLE_ROUTER_ADDRESS,
+  isExpired,
+  mintableTokensIn,
+  pendleCalldataProblem,
+  quoteBuyPt,
+  quoteSellPt,
+  readPt,
+  syDepositRoom,
+  type PtInfo,
+} from './pendle'
 
 export type QuoteRequest = {
   aggregator: AggregatorChoice
@@ -155,7 +165,9 @@ async function pendleRoute(req: QuoteRequest, ps: PtInfo | undefined, pb: PtInfo
   }
   if (pb) {
     if (isExpired(pb)) throw new QuoteError(`${req.buy.symbol} est échu : il ne s’achète plus`)
-    const tin = has(pb.tokensIn, token.address) ?? pb.tokensIn[0]
+    // a token the SY deposits into a full vault (USD3 at its cap, 2026-11-09) would revert: bought as the yield token instead
+    const tokensIn = mintableTokensIn(pb.tokensIn, await syDepositRoom(req.chainId, pb.sy), token.address, amount)
+    const tin = has(tokensIn, token.address) ?? tokensIn[0]
     if (!tin) throw new QuoteError('le SY du PT ne prend aucun token')
     if (!same(tin.address, token.address)) await aggregatorLeg(tin)
     const leg = await quoteBuyPt(req.chainId, pb, token.address, amount, req.taker, req.slippageBps)

@@ -1,6 +1,6 @@
 # Auto-loop : interface
 
-Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Plasma, Linea, Sonic et Monad, via le contrat `LeverageExecutorV2` (`../contracts` ; un contrat v1 déjà déployé reste reconnu et utilisé). On choisit la paire collatéral / dette et le levier ; le swap passe par Velora ou KyberSwap selon la chaîne (0x et 1inch sont codés mais pas proposés) ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
+Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 ou Morpho Blue (voir plus bas) en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Plasma, Linea, Sonic et Monad, via le contrat `LeverageExecutorV2` (`../contracts` ; un contrat v1 déjà déployé reste reconnu et utilisé). On choisit la paire collatéral / dette et le levier ; le swap passe par Velora ou KyberSwap selon la chaîne (0x et 1inch sont codés mais pas proposés) ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
 
 Stack : Vite + React + TypeScript, wagmi 2 / viem 2.
 
@@ -55,6 +55,18 @@ Un PT Pendle listé sur Aave (en eMode seulement, LTV 0 hors eMode) se boucle co
 Test sur fork d'Ethereum (`NET=ethereum bash e2e/fork.sh` liste PT-reUSDe-10DEC2026 et PT-sUSN-22JUL2027 sur Aave Core avec `contracts/script/ForkListPt.s.sol`, oracle à décote linéaire, `DISCOUNTS="1500,800"` en bps pour la régler ; puis `MARKET=ethereum CHAIN_HEX=0x1 COLL=PT-reUSDe-10DEC2026 CAPITAL=USDC AMOUNT=1000 LEV=5 node e2e/run.cjs open o`, `run.cjs roll2 r` pour le renouvellement en deux temps, `CLOCK=<s>` avance l'horloge de la page comme `evm_increaseTime`). Fork de Base : `NET=base-pendle bash e2e/fork.sh` liste PT-yUTY-17DEC2026 contre USDC ; testé le 09/11/2026 : ouverture x4 avec 1000 USDC, achat direct par Pendle ; la fermeture n'a pas de route yUTY → USDC sur le fork (sources limitées), ce qui a motivé le contrôle de sortie. Arbitrum : `NET=arbitrum` (PT-sUSDai) demande un RPC d'archive (`FORK_URL`), PublicNode ne garde pas assez de blocs.
 
 Testé le 08/11/2026 : ouverture x5 (USDC → reUSDe par KyberSwap → PT par Pendle), écran Positions, renouvellement en deux temps reUSDe → sUSN (fermeture, puis ouverture avec 970 PT-reUSDe comme capital : Pendle + Velora + Pendle), fermeture après échéance par rachat. Limite du fork : après un `evm_increaseTime`, les devis Velora et KyberSwap portent l'échéance de l'heure réelle et revertent (« Transaction too old ») ; seule une route 100 % Pendle passe.
+
+## Morpho Blue
+
+Réseaux : Ethereum, Base, Arbitrum, Optimism et Polygon, dans le même sélecteur « Réseau » (groupe « Morpho Blue »). Contrat : `LeverageExecutorMorpho` (`../contracts`), un par réseau, déployé depuis le portefeuille avec le bouton « Déployer le contrat Morpho » (routeurs : agrégateurs du réseau et Pendle) ou collé puis vérifié comme les autres (code on-chain identique au déploiement simulé, `src/lib/deploy.ts`). Adresse retenue dans le navigateur sous l'id `morpho-<réseau>`.
+
+**Marchés** (`src/lib/morpho.ts`) : liste de l'API Morpho (`blue-api.morpho.org/graphql`, CORS ouvert, sans clé), marchés listés par Morpho par défaut, case « Inclure les marchés non listés » pour ceux qui ont au moins 10 000 $ déposés. L'API ne fait que lister et classer : avant d'afficher une position ou de faire signer, l'app relit le marché sur Morpho (`idToMarketParams` doit redonner exactement l'oracle, l'IRM et la LLTV annoncés, l'id est recalculé), le prix de l'oracle du marché, le taux de l'IRM (`borrowRateView`) et la position (dette en parts arrondie au-dessus comme Morpho, intérêts courus compris). Bandeaux : marché non listé, oracle « Unknown », alertes rouges de l'API. Rendement du collatéral : APY implicite Pendle pour un PT, rendement de l'API sinon ; rewards d'emprunt comptés par l'API.
+
+**Écrans** : Ouvrir / augmenter (capital dans le collatéral ou l'actif prêté, levier jusqu'au health factor 1,02), Fermer / réduire, Changer de marché (même actif prêté ; « Renouveler » quand le PT est dans son dernier mois : PT plus long de la même famille d'abord). Health factor et liquidation au prix de l'oracle du marché et à la LLTV, comme Morpho les calcule ; prêt flash gratuit. Le Scanner ajoute chaque marché listé, au levier du health factor visé (étiquette « Morpho · LLTV »). Positions lit les positions de l'adresse sur tous les marchés listés en un multicall (une position qui vient d'être ouverte apparaît sans attendre l'API), plus celles que l'API connaît sur des marchés non listés, et les compte dans le total.
+
+**Autorisation** : Morpho demande que l'adresse autorise le contrat pour emprunter et retirer en son nom. L'app la donne le temps d'une seule transaction : avec un portefeuille qui envoie des lots atomiques (EIP-5792), autoriser → appeler → retirer l'autorisation dans le même lot ; sinon deux messages signés sans gas (autorisation au nonce n, retrait au nonce n + 1) que le contrat consomme au début et à la fin de l'appel. Une autorisation permanente trouvée sur le compte est signalée avec un bouton « Retirer l'autorisation ». Garde à chaque appel : health factor minimum (98 % du pire cas) et échéance de 20 minutes.
+
+Test sur fork d'Ethereum : `anvil --fork-url https://ethereum-rpc.publicnode.com --chain-id 1`, `VITE_RPC_URL_1=http://127.0.0.1:8545 npm run dev`, `NET=morpho bash e2e/fork.sh` (20 000 USDC), puis `MARKET=morpho-ethereum CHAIN_HEX=0x1 node e2e/run.cjs deploy d`, et avec `EXECUTOR=<adresse>` : `COLL=PT-reUSD-10DEC2026 CAPITAL=USDC AMOUNT=1000 LEV=5 node e2e/run.cjs open o` (`BATCH=1` pour le lot), `COLL=PT-reUSD-10DEC2026 node e2e/run.cjs mroll r`, `FROM_POSITIONS=1 node e2e/run.cjs reduce r2` puis `close f`. Testé le 09/11/2026 : tout passe ; ce test a révélé que le coffre USD3 est plein (`maxDeposit` = 0) : l'achat d'un PT passe désormais par le token à rendement lui-même quand son coffre n'accepte plus de dépôt (`syDepositRoom`, `mintableTokensIn` dans `src/lib/pendle.ts`), pour Aave comme pour Morpho.
 
 ## Taux moyens sur 7 et 30 jours
 
@@ -151,6 +163,8 @@ Limite propre au fork : le fork est figé au bloc du `fork.sh`, alors que Velora
 | `src/lib/execute.ts` | Enchaînement approve → signature → simulation → transaction. |
 | `src/lib/useMarket.ts` | Lectures on-chain : réserves, prix oracle, prime, position de l’utilisateur. |
 | `src/components/` | Écrans Ouvrir et Fermer. |
+| `src/lib/morpho.ts`, `src/lib/morphoExecute.ts`, `src/lib/morphoScan.ts` | Morpho Blue : marchés (API vérifiée on-chain), calculs, autorisation, appels du contrat, lignes du Scanner. |
+| `src/components/Morpho*.tsx` | Écrans Morpho (marché, Ouvrir, Fermer, Changer de marché, positions). |
 
 ## Pas encore testé
 

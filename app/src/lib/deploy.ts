@@ -2,9 +2,9 @@ import { encodeDeployData, getAddress, type Address } from 'viem'
 import { deployContract, getPublicClient, waitForTransactionReceipt } from '@wagmi/core'
 import { useQuery } from '@tanstack/react-query'
 import { wagmiConfig } from '../wagmi'
-import { executorAbi, executorAbiV1 } from '../abi'
-import { EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../executorBytecode'
-import { executorLenders, executorRouters, type Market } from '../config'
+import { executorAbi, executorAbiV1, morphoExecutorAbi } from '../abi'
+import { EXECUTOR_BYTECODE_MORPHO, EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../executorBytecode'
+import { executorLenders, executorRouters, type Market, type MorphoNet } from '../config'
 
 export type ExecutorVersion = 1 | 2
 /** What the code check found: the contract version, and whether Pendle's router is whitelisted (PT loops). */
@@ -85,5 +85,53 @@ export async function deployExecutor(market: Market, onStep: (s: string) => void
   const address = getAddress(receipt.contractAddress)
   onStep('Vérification du contrat déployé…')
   if ((await verifyExecutor(market, address)).version !== 2) throw new Error('le contrat déployé n’est pas la v2')
+  return address
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// LeverageExecutorMorpho (one per chain, for every Morpho Blue market of that chain)
+// ---------------------------------------------------------------------------------------------------------------------
+
+const morphoArgs = (net: MorphoNet) => [net.morpho, executorRouters(net.chain.id).map((r) => r.router)] as const
+
+/**
+ * Same check as `verifyExecutor` for the Morpho executor: code equal to the constructor's output for this chain's
+ * Morpho Blue and routers (so no owner, no admin function, the right Morpho), and every router registered.
+ */
+export async function verifyMorphoExecutor(net: MorphoNet, address: Address): Promise<true> {
+  const client = getPublicClient(wagmiConfig, { chainId: net.chain.id })
+  if (!client) throw new Error(`pas de connexion à ${net.chain.name}`)
+  const code = await client.getCode({ address })
+  if (!code || code === '0x') throw new Error(`aucun contrat à cette adresse sur ${net.chain.name}`)
+  const data = encodeDeployData({ abi: morphoExecutorAbi, bytecode: EXECUTOR_BYTECODE_MORPHO, args: morphoArgs(net) })
+  const expected = await client.call({ data }).catch(() => undefined)
+  if (!expected?.data || expected.data.toLowerCase() !== code.toLowerCase()) throw new Error('le code de ce contrat n’est pas celui d’Auto-loop pour Morpho')
+  for (const r of executorRouters(net.chain.id)) {
+    const ok = await client.readContract({ address, abi: morphoExecutorAbi, functionName: 'isRouterAllowed', args: [r.router] })
+    if (!ok) throw new Error(`le routeur ${r.label} n’est pas autorisé dans ce contrat`)
+  }
+  return true
+}
+
+export function useMorphoExecutorCheck(net: MorphoNet) {
+  return useQuery({
+    queryKey: ['morpho-executor-check', net.id, net.executor],
+    queryFn: () => verifyMorphoExecutor(net, net.executor!),
+    enabled: !!net.executor,
+    staleTime: Infinity,
+    retry: 1,
+  })
+}
+
+/** Deploys the Morpho executor from the connected wallet, waits for it, then verifies it on chain. */
+export async function deployMorphoExecutor(net: MorphoNet, onStep: (s: string) => void): Promise<Address> {
+  onStep('Signature du déploiement dans le portefeuille…')
+  const hash = await deployContract(wagmiConfig, { abi: morphoExecutorAbi, bytecode: EXECUTOR_BYTECODE_MORPHO, args: morphoArgs(net), chainId: net.chain.id })
+  onStep('Déploiement en cours, en attente de confirmation…')
+  const receipt = await waitForTransactionReceipt(wagmiConfig, { hash, chainId: net.chain.id })
+  if (receipt.status !== 'success' || !receipt.contractAddress) throw new Error('le déploiement a échoué')
+  const address = getAddress(receipt.contractAddress)
+  onStep('Vérification du contrat déployé…')
+  await verifyMorphoExecutor(net, address)
   return address
 }

@@ -1,0 +1,115 @@
+[
+ {
+  "marketId": "0xf8c5aa31ea6b2a068a9eddb46dd110cae57bf0f12be9583a3f9a818effecba89",
+  "listed": true,
+  "lltv": "860000000000000000",
+  "irmAddress": "0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC",
+  "oracle": {
+   "address": "0xe5E6Ec063E63A9D0c6Ac041d0AD2bd03F7f08d72",
+   "type": "ChainlinkOracleV2"
+  },
+  "collateralAsset": {
+   "address": "0x7f47c3e6b2c00fC4eB4d5Ae50d0Ab0Ab6888Eb4D",
+   "symbol": "PT-USD3-17DEC2026",
+   "decimals": 6,
+   "price": {
+    "usd": 0.9850160076541181
+   },
+   "yield": null
+  },
+  "loanAsset": {
+   "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+   "symbol": "USDC",
+   "decimals": 6,
+   "price": {
+    "usd": 0.999739076
+   }
+  },
+  "warnings": [],
+  "state": {
+   "borrowApy": 0.09008604162199121,
+   "rewards": [],
+   "liquidityAssets": 2361174608110,
+   "liquidityAssetsUsd": 2360558.5209865533,
+   "collateralAssetsUsd": 22991049.59608637,
+   "borrowAssetsUsd": 17318131.017023336,
+   "utilization": 0.8800449330517118
+  }
+ },
+ {
+  "marketId": "0xb8fc70e82bc5bb53e773626fcc6a23f7eefa036918d7ef216ecfb1950a94a85e",
+  "listed": true,
+  "lltv": "965000000000000000",
+  "irmAddress": "0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC",
+  "oracle": {
+   "address": "0xbD60A6770b27E084E8617335ddE769241B0e71D8",
+   "type": "ChainlinkOracleV2"
+  },
+  "collateralAsset": {
+   "address": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0",
+   "symbol": "wstETH",
+   "decimals": 18,
+   "price": {
+    "usd": 2654.6409318272513
+   },
+   "yield": {
+    "apr": 0.022625040416776043
+   }
+  },
+  "loanAsset": {
+   "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+   "symbol": "WETH",
+   "decimals": 18,
+   "price": {
+    "usd": 2121.7666954683964
+   }
+  },
+  "warnings": [],
+  "state": {
+   "borrowApy": 0.019642369000017933,
+   "rewards": [],
+   "liquidityAssets": "5919758488338566074698",
+   "liquidityAssetsUsd": 12560346.405773109,
+   "collateralAssetsUsd": 70823102.43745214,
+   "borrowAssetsUsd": 63834566.38287542,
+   "utilization": 0.8355866124159063
+  }
+ },
+ {
+  "marketId": "0x1e9d614631a7df0ec07fb05b2c8cb2491575fd1a63a33bf187a6afb295a4fc64",
+  "listed": true,
+  "lltv": "915000000000000000",
+  "irmAddress": "0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC",
+  "oracle": {
+   "address": "0x217d6DdCDB95112C51657F6270e8C079CFDB51f0",
+   "type": "ChainlinkOracleV2"
+  },
+  "collateralAsset": {
+   "address": "0xeCfaFdC7741323a945A163ed068B5a3C43483957",
+   "symbol": "PT-reUSD-10DEC2026",
+   "decimals": 6,
+   "price": {
+    "usd": 0.9897623619364122
+   },
+   "yield": null
+  },
+  "loanAsset": {
+   "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+   "symbol": "USDC",
+   "decimals": 6,
+   "price": {
+    "usd": 0.999739076
+   }
+  },
+  "warnings": [],
+  "state": {
+   "borrowApy": 0.09471498197576218,
+   "rewards": [],
+   "liquidityAssets": 15294592600685,
+   "liquidityAssetsUsd": 15290601.87440526,
+   "collateralAssetsUsd": 165950622.96705526,
+   "borrowAssetsUsd": 133087234.85398573,
+   "utilization": 0.8969482086304098
+  }
+ }
+]

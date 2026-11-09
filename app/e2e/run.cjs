@@ -10,6 +10,8 @@
 // MARKET=ethereum (default base) and CHAIN_HEX=0x1 (default 0x2105) run on another fork; CLOCK=<seconds> moves the page's
 // clock forward like an anvil evm_increaseTime (deadlines and PT maturity follow it). COLL=PT-reUSDe-10DEC2026 picks a PT.
 //   MARKET=ethereum CHAIN_HEX=0x1 COLL=… node e2e/run.cjs renew ren   roll the PT into a later one (« Renouveler »)
+// Morpho Blue: MARKET=morpho-ethereum CHAIN_HEX=0x1 after NET=morpho fork.sh; deploy, then EXECUTOR=0x… with open
+// (COLL=PT-reUSD-10DEC2026 CAPITAL=USDC AMOUNT=1000), close, reduce and mroll (TARGET=PT-USD3 or an LLTV label).
 // EXECUTOR=0x… preloads an executor as if deployed from this browser (app built without VITE_EXECUTORS).
 // Writes <prefix>-avant.png / <prefix>-apres.png and prints the notices. Needs playwright (NODE_PATH=$(npm root -g)).
 const { chromium } = require('playwright')
@@ -145,8 +147,8 @@ const anvil = async (method, params) =>
   await page.getByText('Connecter le portefeuille').click()
   await page.waitForSelector('.summary', { timeout: 30000 })
   if (mode === 'deploy') {
-    await page.getByText('Déployer le contrat sur Base').click()
-    await page.waitForSelector('text=Contrat Auto-loop absent', { state: 'detached', timeout: 60000 }).catch(() => {})
+    await page.locator('button', { hasText: 'Déployer le contrat' }).click()
+    await page.waitForSelector('text=/Contrat Auto-loop (pour Morpho )?absent/', { state: 'detached', timeout: 60000 }).catch(() => {})
     await page.screenshot({ path: `${outPrefix}-apres.png`, fullPage: true })
     console.log('verified line:', await page.locator('p:has-text("Contrat Auto-loop vérifié")').allTextContents())
     console.log('notices:', (await page.locator('.notice').allTextContents()).join(' | '))
@@ -165,6 +167,12 @@ const anvil = async (method, params) =>
     console.log('buttons:', (await page.locator('.card button').allTextContents()).join(' | '))
     return browser.close()
   }
+  // FROM_POSITIONS=1: the market comes from the Positions screen's first « Gérer » button (as a user would reach it)
+  if (process.env.FROM_POSITIONS) {
+    await page.locator('nav >> text=Positions').first().click()
+    await page.locator('.card button:has-text("Gérer")').first().click({ timeout: 120000 })
+    await page.waitForTimeout(5000)
+  }
   // COLL=cbETH: another collateral than the default pair's
   if (process.env.COLL) {
     await page.locator('label:has-text("Collatéral") select').selectOption({ label: process.env.COLL })
@@ -174,12 +182,15 @@ const anvil = async (method, params) =>
   // AGG=Velora|KyberSwap forces one aggregator instead of the best-price comparison
   if (mode.startsWith('close') || mode === 'reduce') await page.getByRole('radio', { name: 'Fermer / réduire' }).click()
   // swap (v2): TARGET=cbETH the new collateral, PART=50 % (default Tout)
-  if (mode === 'swap' || mode === 'renew') {
-    await page.getByRole('radio', { name: mode === 'renew' ? 'Renouveler' : 'Changer de collatéral' }).click({ timeout: 60000 })
+  // mroll (Morpho): « Changer de marché » / « Renouveler », TARGET=<start of the new market's label>
+  if (mode === 'swap' || mode === 'renew' || mode === 'mroll') {
+    const tab = mode === 'mroll' ? /Changer de marché|Renouveler/ : mode === 'renew' ? 'Renouveler' : 'Changer de collatéral'
+    await page.getByRole('radio', { name: tab }).click({ timeout: 60000 })
     await page.waitForTimeout(5000)
     if (process.env.TARGET) {
-      const sel = page.locator(`label:has-text("${mode === 'renew' ? 'Nouveau PT' : 'Nouveau collatéral'}") select`)
-      const label = (await sel.locator('option').allTextContents()).find((t) => t.startsWith(process.env.TARGET + ' '))
+      const sel = page.locator(`label:has-text("${mode === 'mroll' ? 'Nouveau marché' : mode === 'renew' ? 'Nouveau PT' : 'Nouveau collatéral'}") select`)
+      const label = (await sel.locator('option').allTextContents()).find((t) => t.startsWith(process.env.TARGET + (mode === 'mroll' ? '' : ' ')))
+      console.log('target:', label)
       await sel.selectOption({ label })
     }
     await page
@@ -211,7 +222,10 @@ const anvil = async (method, params) =>
     await page.locator('input[inputmode=decimal]').fill(process.env.AMOUNT || '0')
     await page.locator('input[type=range]').fill('4')
   }
-  await page.waitForTimeout(8000)
+  // WAIT=<ms>: longer when quotes go through Pendle on a fork (each simulation reads many slots upstream)
+  await page.waitForTimeout(Number(process.env.WAIT || 8000))
+  const btn0 = page.locator('button.btn.primary')
+  for (let i = 0; i < 60 && /Cotation/.test((await btn0.textContent()) ?? ''); i++) await page.waitForTimeout(2000)
   await page.screenshot({ path: `${outPrefix}-avant.png`, fullPage: true })
   const btn = page.locator('button.btn.primary')
   console.log('button:', await btn.textContent(), 'enabled:', await btn.isEnabled(), 'title:', await btn.getAttribute('title'))
@@ -232,7 +246,7 @@ const anvil = async (method, params) =>
       await page.waitForTimeout(1000)
       const t = await page.locator('main, .page').first().innerText()
       if (
-        /Position ouverte|Position augmentée|Position réduite|Position fermée|Collatéral changé|PT renouvelé|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(
+        /Position ouverte|Position augmentée|Position réduite|Position fermée|Collatéral changé|PT renouvelé|Position déplacée|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(
           t,
         ) &&
         i > 3

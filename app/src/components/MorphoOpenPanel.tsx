@@ -1,0 +1,479 @@
+import { useMemo, useState } from 'react'
+import { parseUnits, type Hash } from 'viem'
+import { AGGREGATORS, QUOTE_MODE } from '../config'
+import {
+  collateralInLoan,
+  debtForMorphoLeverage,
+  dropToLiquidation,
+  leverageAtMorphoHf,
+  maxMorphoLeverage,
+  morphoHf,
+  morphoLeverage,
+  morphoNetApy,
+} from '../lib/morpho'
+import { encodeAction, executeMorpho, morphoOutcomeLines, openAction, readMorphoOutcome, type MorphoOpenPlan } from '../lib/morphoExecute'
+import { useQuote } from '../lib/useQuote'
+import { useDebounced } from '../lib/useDebounced'
+import { getQuote, quoteLabel } from '../lib/quotes'
+import { daysToMaturity, isExpired } from '../lib/pendle'
+import { roundSignificant, toBase } from '../lib/math'
+import { GAS_UNITS_PT, HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
+import { explainError } from '../lib/execute'
+import { fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
+import { isCorrelated } from '../lib/scan'
+import { apyTone, hfThresholds, hfTone } from '../lib/tone'
+import { RiskPanel } from './RiskPanel'
+import { Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import type { MorphoCtx } from './MorphoView'
+
+/** slippage choices in bps, as on Aave: 0,01 % by default */
+const SLIPPAGES = ['1', '10', '50', '100'] as const
+/** The slider stops at this health factor: Morpho liquidates at 1, with no LTV margin below the LLTV like Aave's. */
+const SLIDER_MIN_HF = 1.02
+const MAX_SLIDER = 15
+
+export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLeverage?: number }) {
+  const { net, market: M, state, pt, sides, account } = ctx
+  const C = M.collateral
+  const L = M.loan
+  const executor = net.executor
+  const user = state.user
+  const [capitalIsLoan, setCapitalIsLoan] = useState(false)
+  const K = capitalIsLoan ? L : C
+  const capSide = capitalIsLoan ? sides.loan : sides.collateral
+  const capBalance = capitalIsLoan ? user?.loanBalance : user?.collateralBalance
+  const capAllowance = capitalIsLoan ? (user?.loanAllowance ?? 0n) : (user?.collateralAllowance ?? 0n)
+  const [amountText, setAmountText] = useState('1000')
+  const [leverage, setLeverage] = useState(seedLeverage ? Math.floor(seedLeverage * 20) / 20 : 3)
+  const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
+  const [horizonText, setHorizon] = useState('90')
+  const [busy, setBusy] = useState<string>()
+  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[] }>()
+
+  const ptDays = pt ? daysToMaturity(pt) : undefined
+  const ptExpired = !!pt && isExpired(pt)
+  const horizon = ptDays !== undefined ? Math.max(1, Math.floor(ptDays)) : Number(horizonText)
+
+  // the existing position on this market: the slider sets the leverage of the whole position
+  const coll0 = user?.collateral ?? 0n
+  const debt0 = user?.debt ?? 0n
+  const hasPosition = coll0 > 0n
+  const currentLev = hasPosition ? morphoLeverage(coll0, debt0, state.price) : 1
+  const maxLev = maxMorphoLeverage(M.lltv)
+  const sliderMax = Math.max(1.1, Math.min(Math.floor(leverageAtMorphoHf(M.lltv, SLIDER_MIN_HF) * 20) / 20, MAX_SLIDER))
+  const sliderMin = hasPosition && Number.isFinite(currentLev) ? Math.min(sliderMax, Math.max(1.1, Math.ceil(currentLev * 20) / 20)) : 1.1
+  const lev = Math.max(sliderMin, Math.min(leverage, sliderMax))
+
+  const initial = useMemo(() => {
+    try {
+      return parseUnits(amountText.replace(',', '.') || '0', K.decimals)
+    } catch {
+      return undefined
+    }
+  }, [amountText, K.decimals])
+  const debouncedInitial = useDebounced(initial)
+  const debouncedLevBps = useDebounced(BigInt(Math.round(lev * 10_000)))
+
+  // capital and position in loan units at the oracle price; rounded so that interest does not re-quote every block
+  const capitalLoan = debouncedInitial === undefined ? undefined : capitalIsLoan ? debouncedInitial : collateralInLoan(debouncedInitial, state.price)
+  const debtAmount =
+    capitalLoan !== undefined ? roundSignificant(debtForMorphoLeverage(collateralInLoan(coll0, state.price), debt0, capitalLoan, debouncedLevBps), 5) : 0n
+  const sold = debtAmount + (capitalIsLoan ? (debouncedInitial ?? 0n) : 0n)
+  const quoteReq =
+    sold > 0n
+      ? {
+          aggregator: ctx.aggregator,
+          chainId: net.chain.id,
+          sell: L,
+          buy: C,
+          sellAmount: sold,
+          taker: net.quoteTaker,
+          slippageBps: BigInt(slippage),
+          oracle: { sell: sides.loan, buy: sides.collateral },
+        }
+      : undefined
+  const quote = useQuote(quoteReq)
+  const q = quote.data
+  const capColl = capitalIsLoan ? 0n : (debouncedInitial ?? 0n)
+  const fixedApy = pt && !ptExpired ? (q?.pendle?.kind === 'buy' && q.pendle.fixedApy !== undefined ? q.pendle.fixedApy : ctx.collateralApy) : undefined
+  const collateralApy = pt ? (fixedApy ?? 0) : ctx.collateralApy
+
+  // a PT whose SY gives back nothing an aggregator sells for the loan token could never be closed: checked first
+  const exitByRoute = !!pt && !ptExpired && !pt.tokensOut.some((t) => t.address.toLowerCase() === L.address.toLowerCase())
+  const exitReq =
+    exitByRoute && q && QUOTE_MODE !== 'mock'
+      ? {
+          aggregator: ctx.aggregator,
+          chainId: net.chain.id,
+          sell: C,
+          buy: L,
+          sellAmount: roundSignificant(coll0 + capColl + q.buyAmount, 2),
+          taker: net.quoteTaker,
+          slippageBps: BigInt(slippage),
+          oracle: { sell: sides.collateral, buy: sides.loan },
+        }
+      : undefined
+  const exitQuote = useQuote(exitReq)
+  const exitBlocked = !!exitReq && (exitQuote.isError || !!exitQuote.data?.simulated)
+  const exitPending = !!exitReq && !exitQuote.data && !exitQuote.isError
+
+  const newColl = q ? coll0 + capColl + q.buyAmount : undefined
+  const newCollMin = q ? coll0 + capColl + q.minOut : undefined
+  const newDebt = debt0 + debtAmount
+  const hf = newColl !== undefined ? morphoHf(newColl, newDebt, state.price, M.params.lltv) : undefined
+  const worstHf = newCollMin !== undefined ? morphoHf(newCollMin, newDebt, state.price, M.params.lltv) : undefined
+  const loopLev = newColl !== undefined ? morphoLeverage(newColl, newDebt, state.price) : undefined
+  const netBorrow = ctx.borrowApy - ctx.rewardsApr
+  const apy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoNetApy(loopLev, collateralApy, netBorrow) : undefined
+  const correlated = isCorrelated({ price: sides.collateral.price, token: C }, { price: sides.loan.price, token: L })
+
+  const problems: string[] = []
+  if (initial === undefined) problems.push('Montant invalide.')
+  else if (initial === 0n && !hasPosition) problems.push('Capital à déposer manquant.')
+  else if (hasPosition && debtAmount === 0n && initial === debouncedInitial && BigInt(Math.round(lev * 10_000)) === debouncedLevBps && !capitalIsLoan)
+    problems.push('Le levier visé ne dépasse pas le levier actuel. Pour le réduire : onglet « Fermer / réduire ».')
+  if (user && initial && capBalance !== undefined && initial > capBalance) problems.push(`Solde ${K.symbol} insuffisant.`)
+  if (debtAmount > state.liquidity)
+    problems.push(
+      `Liquidité du marché insuffisante : ${fmtAmount(state.liquidity, L.decimals)} ${L.symbol} disponibles pour ${fmtAmount(debtAmount, L.decimals)} empruntés.`,
+    )
+  if (worstHf !== undefined && worstHf < 1)
+    problems.push(`Health factor projeté ${fmtHf(worstHf)} : au-delà du LLTV, Morpho refuse l’emprunt. Baisser le levier.`)
+  if (ptExpired) problems.push(`${C.symbol} est échu : il ne s’achète plus. Le fermer ou changer de marché.`)
+  else if (pt && !pt.market) problems.push(`Aucun marché Pendle connu pour ${C.symbol} : achat impossible.`)
+  if (exitBlocked)
+    problems.push(
+      `Sortie impossible : aucun agrégateur ne revend ${pt!.tokensOut.map((t) => t.symbol).join(' ou ')} (ce que rend ${C.symbol}) contre ${L.symbol} pour ce montant. La position ne pourrait être fermée ni avant ni après l’échéance.`,
+    )
+  const warnings: string[] = []
+  const lossIssue = q && swapLossProblem(swapLoss(q.sellAmount, sides.loan, q.buyAmount, sides.collateral), L.symbol, C.symbol, q.simulated)
+  if (lossIssue) (lossIssue.block ? problems : warnings).push(lossIssue.text)
+  if (pt && ptDays !== undefined && !ptExpired && ptDays < 14)
+    warnings.push(`Échéance dans ${Math.floor(ptDays)} j : le rendement fixe ne court plus que jusqu’au ${fmtDate(pt.expiry)}.`)
+  if (fixedApy !== undefined && netBorrow > fixedApy)
+    warnings.push(`L’emprunt ${L.symbol} (${fmtPct(netBorrow)}) coûte plus que l’APY fixe du PT (${fmtPct(fixedApy)}) : la boucle perd chaque jour.`)
+  if (!pt && ctx.collateralApy === 0) warnings.push(`Aucun rendement connu pour ${C.symbol} : l’APY ne compte que le coût de l’emprunt.`)
+  if (hf !== undefined && hf < hfThresholds(correlated).ok)
+    warnings.push(
+      `Health factor ${fmtHf(hf)} : une baisse de ${fmtPct(dropToLiquidation(hf), 1)} de ${C.symbol} face à ${L.symbol} à l’oracle suffit à liquider la position.`,
+    )
+  if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
+  if (debtAmount > 0n && state.liquidity > 0n && debtAmount * 10n > state.liquidity * 9n && debtAmount <= state.liquidity)
+    warnings.push('L’emprunt prend presque toute la liquidité du marché : son taux va monter fortement.')
+
+  const soldBase = toBase(debtAmount, sides.loan)
+  const capitalBase = (debouncedInitial !== undefined ? toBase(debouncedInitial, capSide) : 0n) + toBase(coll0, sides.collateral) - toBase(debt0, sides.loan)
+  const costs = q
+    ? loopCosts({
+        entrySoldBase: toBase(q.sellAmount, sides.loan),
+        entrySwapBase: swapCostBase(q.sellAmount, sides.loan, q.buyAmount, sides.collateral),
+        debtBase: soldBase,
+        // Morpho's flash loans are free
+        premiumBps: 0n,
+        gasUnits: GAS_UNITS_PT.open + GAS_UNITS_PT.close,
+        freeExit: !!pt && pt.tokensOut.some((t) => t.address.toLowerCase() === L.address.toLowerCase()),
+      })
+    : undefined
+  const horizonYield =
+    costs && apy !== undefined && capitalBase > 0n
+      ? horizonApy({ equityBase: capitalBase, ratesApy: apy, rewardsApy: 0, costsBase: costs.total, days: horizon })
+      : undefined
+  const breakEven = costs && apy !== undefined ? breakEvenDays(capitalBase, apy, costs.total) : undefined
+  if (costs && horizonYield !== undefined && horizonYield < 0 && apy !== undefined && apy > 0)
+    warnings.push(`Les coûts (${fmtUsd(costs.total)}) dépassent le rendement sur ${fmtDays(horizon)} avec ce capital. Augmenter le capital ou la durée.`)
+
+  const plan = (fresh = q): MorphoOpenPlan | undefined =>
+    executor && account && initial !== undefined
+      ? {
+          net,
+          executor,
+          user: account,
+          authorized: !!user?.authorized,
+          minHealthFactor: worstHf !== undefined && Number.isFinite(worstHf) ? BigInt(Math.floor(worstHf * 0.98 * 1e6)) * 10n ** 12n : 0n,
+          market: M.params,
+          capitalToken: K.address,
+          capitalAmount: debouncedInitial ?? 0n,
+          debtAmount,
+          quote: fresh,
+          capitalAllowance: capAllowance,
+        }
+      : undefined
+  const preview = (() => {
+    try {
+      const p = plan()
+      return p && q ? encodeAction(openAction(p)) : undefined
+    } catch {
+      return undefined
+    }
+  })()
+
+  const stale = initial !== debouncedInitial || quote.isFetching
+  const canSign = !!executor && !!account && !!q && !q.simulated && !!preview && problems.length === 0 && !stale && !busy && !exitPending
+  const disabledReason = !executor
+    ? 'Contrat pas encore déployé'
+    : !account
+      ? 'Connecter le portefeuille'
+      : q?.simulated
+        ? 'Devis simulé'
+        : problems.length
+          ? 'Bloqué : voir le bandeau rouge'
+          : exitPending
+            ? 'Vérification de la sortie…'
+            : undefined
+
+  async function onOpen() {
+    setResult(undefined)
+    try {
+      setBusy('Nouvelle cotation…')
+      const fresh = await getQuote(quoteReq!)
+      if (fresh.simulated) throw new Error('Plus de devis réel disponible')
+      const p = plan(fresh)!
+      const hash = await executeMorpho(
+        p,
+        openAction(p),
+        {
+          batch: ctx.batch,
+          nonce: user?.nonce ?? 0n,
+          capital: p.capitalAmount > 0n ? { token: K.address, amount: p.capitalAmount, allowance: capAllowance } : undefined,
+        },
+        setBusy,
+      )
+      const outcome = await readMorphoOutcome(net.chain.id, hash, p.executor, p.user)
+      setResult({ ok: true, text: hasPosition ? 'Position augmentée.' : 'Position ouverte.', hash, details: outcome && morphoOutcomeLines(outcome, C, L) })
+      ctx.onDone()
+    } catch (e) {
+      setResult({ ok: false, text: explainError(e) })
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
+  const authorized = !!user?.authorized
+  const needsApprove = !!initial && capAllowance < initial
+  const steps = ctx.batch
+    ? [
+        ...(needsApprove ? [{ label: `Autoriser le contrat à prendre ${fmtAmount(initial ?? 0n, K.decimals)} ${K.symbol} (montant exact)` }] : []),
+        ...(authorized ? [] : [{ label: 'Autoriser le contrat sur Morpho, le temps du lot' }]),
+        { label: 'Ouvrir : flash loan Morpho, swap, dépôt du collatéral et emprunt' },
+        ...(authorized ? [] : [{ label: 'Retirer l’autorisation Morpho' }]),
+        ...(needsApprove ? [{ label: 'Remettre l’autorisation du capital à sa valeur' }] : []),
+      ]
+    : [
+        ...(needsApprove ? [{ label: `Autoriser le contrat à prendre ${fmtAmount(initial ?? 0n, K.decimals)} ${K.symbol} (transaction, une fois)` }] : []),
+        ...(authorized
+          ? []
+          : [{ label: 'Signer deux messages Morpho (sans gas) : autoriser le contrat pour cette transaction, puis retirer cette autorisation à sa fin' }]),
+        { label: 'Signer la transaction : flash loan, swap, dépôt et emprunt en une fois' },
+      ]
+
+  const summary = (
+    <Summary
+      items={[
+        {
+          label: 'Health factor',
+          value: hf !== undefined ? fmtHf(hf) : undefined,
+          sub: worstHf !== undefined ? `pire cas ${fmtHf(worstHf)}` : undefined,
+          tone: hf !== undefined ? hfTone(hf, correlated) : undefined,
+          key: true,
+        },
+        {
+          label: 'Liquidation si baisse de',
+          value: hf !== undefined ? (Number.isFinite(hf) ? fmtPct(dropToLiquidation(hf), 1) : '—') : undefined,
+          sub: `de ${ptShortSymbol(C.symbol)} face à ${L.symbol}, à l’oracle`,
+        },
+        {
+          label: 'APY net',
+          value: apy !== undefined ? fmtPct(apy) : undefined,
+          sub: pt
+            ? `dont ${fmtPct(collateralApy)} fixe sur le collatéral`
+            : ctx.rewardsApr > 0
+              ? `récompenses d’emprunt ${fmtPct(ctx.rewardsApr)} comprises`
+              : 'taux variables, hors coûts',
+          tone: apyTone(apy),
+          key: true,
+        },
+        {
+          label: 'Coût total',
+          value: costs ? fmtUsd(costs.total) : undefined,
+          sub: costs && `entrée ${fmtUsd(costs.entrySwap)} · sortie ${fmtUsd(costs.exitSwap)} · flash loan gratuit · gas non compté`,
+        },
+      ]}
+      action={
+        <button className="btn primary" disabled={!canSign} onClick={onOpen} title={disabledReason}>
+          {busy ?? (stale ? 'Cotation…' : hasPosition ? 'Augmenter la position' : 'Ouvrir la position')}
+        </button>
+      }
+      reason={busy ? undefined : disabledReason}
+    >
+      <TxResult market={net} result={result} />
+    </Summary>
+  )
+
+  return (
+    <LoopLayout summary={summary}>
+      {ctx.head}
+      <Card title={hasPosition ? 'Augmenter la position' : 'Ouvrir une position'}>
+        {hasPosition && (
+          <p className="muted small">
+            Position actuelle : {fmtAmount(coll0, C.decimals)} {ptShortSymbol(C.symbol)}, dette {fmtAmount(debt0, L.decimals)} {L.symbol}, levier{' '}
+            {fmtX(currentLev)}, health factor {fmtHf(morphoHf(coll0, debt0, state.price, M.params.lltv))}. Le levier choisi s’applique à toute la position ; le
+            capital ajouté peut être 0.
+          </p>
+        )}
+        <div className="grid2">
+          <div className="field">
+            <span>
+              Capital
+              {capBalance !== undefined && (
+                <button className="link" onClick={() => setAmountText(fmtAmount(capBalance, K.decimals, 8).replace(/\s/g, '').replace(',', '.'))}>
+                  solde {fmtAmount(capBalance, K.decimals)}
+                </button>
+              )}
+            </span>
+            <div className="inputrow">
+              <select
+                aria-label="Token du capital"
+                value={capitalIsLoan ? 'loan' : 'collateral'}
+                onChange={(e) => {
+                  setCapitalIsLoan(e.target.value === 'loan')
+                  setAmountText('')
+                }}
+              >
+                <option value="collateral">{C.symbol}</option>
+                <option value="loan">{L.symbol}</option>
+              </select>
+              <input aria-label="Montant du capital" inputMode="decimal" value={amountText} onChange={(e) => setAmountText(e.target.value)} />
+            </div>
+            {initial !== undefined && <span className="muted small">≈ {fmtUsd(toBase(initial, capSide))}</span>}
+          </div>
+          <label className="field">
+            <span>
+              Levier <strong className="lev">{fmtX(lev)}</strong>
+              <span className="muted small">
+                max {fmtX(maxLev)} (LLTV {fmtPct(M.lltv, 1)})
+              </span>
+            </span>
+            <input type="range" min={sliderMin} max={sliderMax} step={0.05} value={lev} onChange={(e) => setLeverage(Number(e.target.value))} />
+          </label>
+        </div>
+
+        <div className="metrics">
+          <Metric label="Emprunt" value={`${fmtAmount(debtAmount, L.decimals)} ${L.symbol}`} sub={fmtUsd(soldBase)} />
+          <Metric
+            label="Collatéral déposé"
+            value={q ? `${fmtAmount(capColl + q.buyAmount, C.decimals)} ${ptShortSymbol(C.symbol)}` : undefined}
+            sub={q && `dont ${fmtAmount(q.buyAmount, C.decimals)} via ${quoteLabel(q)}`}
+          />
+          {pt ? (
+            <>
+              <Metric
+                label="APY fixe"
+                value={fixedApy !== undefined ? fmtPct(fixedApy) : ptExpired ? '—' : undefined}
+                sub={ptExpired ? 'PT échu' : `jusqu’au ${fmtDate(pt.expiry)}`}
+                tone={apyTone(fixedApy)}
+              />
+              <Metric
+                label="Échéance"
+                value={ptExpired ? 'échu' : fmtDays(Math.floor(ptDays!))}
+                sub={
+                  ptExpired
+                    ? 'à fermer ou changer de marché'
+                    : horizonYield !== undefined
+                      ? `${fmtDate(pt.expiry)} · APY coûts compris ${fmtPct(horizonYield)}`
+                      : fmtDate(pt.expiry)
+                }
+                tone={ptExpired ? 'bad' : ptDays! < 14 ? 'warn' : undefined}
+              />
+            </>
+          ) : (
+            <>
+              <Metric
+                label="Levier effectif"
+                value={loopLev !== undefined ? fmtX(loopLev) : undefined}
+                sub={hasPosition ? 'toute la position' : 'après le swap'}
+              />
+              <Metric
+                label={`APY sur ${fmtDays(horizon)}`}
+                value={horizonYield !== undefined ? fmtPct(horizonYield) : undefined}
+                sub={breakEven === undefined ? 'coûts compris' : Number.isFinite(breakEven) ? `rentable après ${Math.ceil(breakEven)} j` : 'jamais rentable'}
+                tone={apyTone(horizonYield)}
+              />
+            </>
+          )}
+        </div>
+
+        {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
+        {problems.map((p) => (
+          <Notice key={p} tone="bad">
+            {p}
+          </Notice>
+        ))}
+        {warnings.map((w) => (
+          <Notice key={w}>{w}</Notice>
+        ))}
+
+        <Fold
+          title="Réglages"
+          value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)}${pt ? '' : ` · ${fmtDays(horizon)}`}`}
+        >
+          {ctx.common}
+          <div className="grid2">
+            <div className="field">
+              <span>Slippage max</span>
+              <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000) }))} />
+            </div>
+            {!pt && (
+              <div className="field">
+                <span>Durée prévue</span>
+                <Segmented value={horizonText} onChange={setHorizon} options={HORIZONS.map((h) => ({ value: String(h), label: fmtDays(h) }))} />
+              </div>
+            )}
+          </div>
+        </Fold>
+
+        {hf !== undefined && loopLev !== undefined && (
+          <RiskPanel
+            collateral={C.symbol}
+            debt={L.symbol}
+            healthFactor={hf}
+            leverage={loopLev}
+            supplyApy={collateralApy}
+            borrowApy={ctx.borrowApy}
+            rewardsApy={ctx.rewardsApr * (loopLev - 1)}
+            correlated={correlated}
+            apy={apy}
+          />
+        )}
+
+        {q && (
+          <Fold title="Devis" value={`${quoteLabel(q)} · minimum ${fmtAmount(capColl + q.minOut, C.decimals)} ${ptShortSymbol(C.symbol)}`}>
+            <QuoteCompare quote={q} token={C} />
+            {q.route && (
+              <p className="small">
+                Route : {q.route.map((l) => `${l.sell.symbol} → ${l.buy.symbol} (${l.via === 'pendle' ? 'Pendle' : AGGREGATORS[l.via].label})`).join(', ')}.
+              </p>
+            )}
+            {preview && (
+              <dl className="preview">
+                <dt>Contrat</dt>
+                <dd>{executor}</dd>
+                <dt>Routeur</dt>
+                <dd>{[...new Set(q.route?.map((l) => l.router) ?? [q.router])].join(' puis ')}</dd>
+                <dt>Calldata open()</dt>
+                <dd className="mono">{preview}</dd>
+              </dl>
+            )}
+          </Fold>
+        )}
+
+        <Fold title="Étapes" value={ctx.batch ? 'une seule confirmation' : `${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
+          <Steps steps={steps} />
+          <p className="muted small">
+            Le contrat n’agit sur le compte Morpho que pendant cette transaction : l’autorisation est donnée puis retirée dedans, et la transaction échoue si
+            elle restait en place.
+          </p>
+        </Fold>
+      </Card>
+    </LoopLayout>
+  )
+}

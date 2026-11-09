@@ -169,7 +169,7 @@ export function AggregatorPicker({ chainId, value, onChange }: { chainId: number
 export const aggregatorLabel = (a: AggregatorChoice) => (a === 'best' ? 'Meilleur prix' : AGGREGATORS[a].label)
 
 /** Link to a transaction on the market's block explorer. */
-export function TxLink({ market, hash }: { market: Market; hash: string }) {
+export function TxLink({ market, hash }: { market: Pick<Market, 'chain'>; hash: string }) {
   const explorer = market.chain.blockExplorers?.default
   if (!explorer) return null
   return (
@@ -180,7 +180,7 @@ export function TxLink({ market, hash }: { market: Market; hash: string }) {
 }
 
 /** Outcome of a transaction: a green line with the explorer link, or a red banner. */
-export function TxResult({ market, result }: { market: Market; result?: { ok: boolean; text: string; hash?: string; details?: string[] } }) {
+export function TxResult({ market, result }: { market: Pick<Market, 'chain'>; result?: { ok: boolean; text: string; hash?: string; details?: string[] } }) {
   if (!result) return null
   return result.ok ? (
     <>

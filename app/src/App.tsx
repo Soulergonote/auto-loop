@@ -7,8 +7,11 @@ import {
   DEFAULT_MARKET_ID,
   DEMO,
   MARKETS,
+  MORPHO_NETWORKS,
   QUOTE_MODE,
   getMarket,
+  getMorphoNet,
+  isMorphoId,
   savedExecutors,
   storeExecutors,
   supportsChain,
@@ -28,7 +31,9 @@ import { OpenPanel } from './components/OpenPanel'
 import { ClosePanel } from './components/ClosePanel'
 import { SwapCollateralPanel } from './components/SwapCollateralPanel'
 import { DeployPanel } from './components/DeployPanel'
-import { useExecutorCheck } from './lib/deploy'
+import { useExecutorCheck, useMorphoExecutorCheck } from './lib/deploy'
+import { MorphoView, type MorphoSeed, type MorphoTab } from './components/MorphoView'
+import type { MorphoMarket } from './lib/morpho'
 import { Scanner, type Pick } from './components/Scanner'
 import { needsRenewal } from './lib/pendle'
 import { toBase } from './lib/math'
@@ -38,7 +43,7 @@ type View = 'loop' | 'scan' | 'positions'
 /** How the Boucle screen opens a pair: eMode and leverage, the tab, and for « Ouvrir » a capital amount and token. */
 type Seed = { emode: number; leverage: number; tab?: Pick['tab']; amount?: string; capital?: Address }
 
-function WalletButton({ market }: { market: Market }) {
+function WalletButton({ market }: { market: { chain: Market['chain'] } }) {
   const { address, chainId, isConnected } = useAccount()
   const { connect, connectors, isPending } = useConnect()
   const { disconnect } = useDisconnect()
@@ -130,6 +135,20 @@ export function App() {
     setLocalExecutors(next)
     storeExecutors(next)
   }
+  // Morpho Blue: a network of the selector whose id starts with morpho-; the executor is checked the same way
+  const morpho = isMorphoId(marketId)
+  const declaredMorpho = useMemo(() => getMorphoNet(marketId, localExecutors), [marketId, localExecutors])
+  const morphoCheck = useMorphoExecutorCheck(morpho ? declaredMorpho : { ...declaredMorpho, executor: undefined })
+  const morphoNet = useMemo(() => (morphoCheck.data ? declaredMorpho : { ...declaredMorpho, executor: undefined }), [declaredMorpho, morphoCheck.data])
+  const [morphoSeed, setMorphoSeed] = useState<MorphoSeed>()
+  function openMorpho(m: MorphoMarket, tab?: MorphoTab, leverage?: number) {
+    const net = MORPHO_NETWORKS.find((n) => n.chain.id === m.chainId)
+    if (!net) return
+    chooseMarket(net.id)
+    setMorphoSeed({ market: m, tab, leverage, nonce: Date.now() })
+    setView('loop')
+    window.scrollTo({ top: 0 })
+  }
   const reserveTokens = useReserveTokens(market)
   // after 15 s without the asset list, say so instead of an endless "loading"
   const [slow, setSlow] = useState(false)
@@ -141,7 +160,8 @@ export function App() {
   const tokens = reserveTokens.tokens
   const [preferredAggregator, setAggregator] = useState<AggregatorChoice>('best')
   // keep the choice when it quotes on this chain, otherwise compare all those that do
-  const aggregator: AggregatorChoice = preferredAggregator === 'best' || supportsChain(preferredAggregator, market.chain.id) ? preferredAggregator : 'best'
+  const aggregator: AggregatorChoice =
+    preferredAggregator === 'best' || supportsChain(preferredAggregator, (morpho ? morphoNet : market).chain.id) ? preferredAggregator : 'best'
   const [view, setView] = useState<View>('loop')
   const [picked, setPicked] = useState<{
     market: string
@@ -185,18 +205,30 @@ export function App() {
       seed: seed && { ...seed, nonce: Date.now() },
     })
 
-  const selectors = (
-    <div className="market-row">
-      <label className="field">
-        <span>Réseau</span>
-        <select value={market.id} onChange={(e) => chooseMarket(e.target.value)}>
+  const networkSelect = (
+    <label className="field">
+      <span>Réseau</span>
+      <select value={morpho ? morphoNet.id : market.id} onChange={(e) => chooseMarket(e.target.value)}>
+        <optgroup label="Aave v3">
           {MARKETS.filter((m) => !m.soon).map((m) => (
             <option key={m.id} value={m.id}>
               {m.label}
             </option>
           ))}
-        </select>
-      </label>
+        </optgroup>
+        <optgroup label="Morpho Blue">
+          {MORPHO_NETWORKS.map((n) => (
+            <option key={n.id} value={n.id}>
+              Morpho · {n.label}
+            </option>
+          ))}
+        </optgroup>
+      </select>
+    </label>
+  )
+  const selectors = (
+    <div className="market-row">
+      {networkSelect}
       {tokens && pair ? (
         <div className="pair">
           <TokenSelect tokens={tokens} label="Collatéral" value={pair.collateral} onChange={(t) => setPair(t, pair.debt)} exclude={pair.debt} />
@@ -263,11 +295,52 @@ export function App() {
     </>
   )
 
+  const morphoCommon = (
+    <>
+      <AggregatorPicker chainId={morphoNet.chain.id} value={aggregator} onChange={setAggregator} />
+      <p className="muted small">
+        Plateforme : Morpho Blue.{' '}
+        {morphoNet.executor && (
+          <>
+            Contrat Auto-loop vérifié :{' '}
+            <a
+              href={`${morphoNet.chain.blockExplorers?.default.url}/address/${morphoNet.executor}`}
+              target="_blank"
+              rel="noreferrer"
+              title={morphoNet.executor}
+            >
+              {fmtAddress(morphoNet.executor)}
+            </a>
+            {morphoNet.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
+          </>
+        )}
+      </p>
+    </>
+  )
+  const morphoNotes = (
+    <>
+      {QUOTE_MODE === 'mock' && <p className="muted small">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</p>}
+      {declaredMorpho.executor && morphoCheck.isPending && <p className="muted small">Vérification du contrat Auto-loop sur {declaredMorpho.label}…</p>}
+      {declaredMorpho.executor && morphoCheck.isError && (
+        <Notice tone="bad">
+          <span>
+            Contrat {fmtAddress(declaredMorpho.executor)} refusé : {morphoCheck.error.message}. Aucune transaction ne sera proposée avec lui.
+          </span>
+          {declaredMorpho.executorSource === 'wallet' && (
+            <button className="btn" onClick={() => setLocalExecutor(declaredMorpho.id)}>
+              Oublier cette adresse
+            </button>
+          )}
+        </Notice>
+      )}
+    </>
+  )
+
   return (
     <div className={`page ${view === 'positions' ? 'narrow' : ''}`}>
       <header className="top">
         <h1>Auto-loop</h1>
-        <WalletButton market={market} />
+        <WalletButton market={morpho ? morphoNet : market} />
       </header>
       <nav className="nav">
         {(
@@ -283,9 +356,23 @@ export function App() {
         ))}
       </nav>
 
-      {view === 'scan' && !DEMO && <Scanner onPick={openPick} />}
-      {view === 'positions' && !DEMO && <Positions account={address} onManage={openPick} onScan={() => setView('scan')} />}
+      {view === 'scan' && !DEMO && <Scanner onPick={openPick} onPickMorpho={openMorpho} />}
+      {view === 'positions' && !DEMO && <Positions account={address} onManage={openPick} onManageMorpho={openMorpho} onScan={() => setView('scan')} />}
+      {view === 'loop' && morpho && !DEMO && (
+        <MorphoView
+          key={morphoNet.id}
+          net={morphoNet}
+          networkSelect={networkSelect}
+          account={address}
+          aggregator={aggregator}
+          common={morphoCommon}
+          notes={morphoNotes}
+          seed={morphoSeed?.market.chainId === morphoNet.chain.id ? morphoSeed : undefined}
+          onExecutor={(a) => setLocalExecutor(morphoNet.id, a)}
+        />
+      )}
       {view === 'loop' &&
+        !morpho &&
         (pair ? (
           <PairView
             key={`${market.id}-${seed?.nonce ?? ''}`}
