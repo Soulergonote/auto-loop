@@ -1,9 +1,10 @@
 import { createConfig, fallback, http } from 'wagmi'
 import { injected } from 'wagmi/connectors'
 import type { Chain } from 'viem'
-import { MARKETS, rpcUrls } from './config'
+import { MARKETS, MORPHO_NETWORKS, rpcUrls } from './config'
 
-const chains = [...new Map(MARKETS.map((m) => [m.chain.id, m.chain])).values()] as [Chain, ...Chain[]]
+// Aave markets' chains, then Morpho's (Arc has no Aave market)
+const chains = [...new Map([...MARKETS, ...MORPHO_NETWORKS].map((m) => [m.chain.id, m.chain])).values()] as [Chain, ...Chain[]]
 
 export const wagmiConfig = createConfig({
   chains,

@@ -1,5 +1,5 @@
 import { getAddress, isAddress, keccak256, slice, toBytes, type Address, type Chain } from 'viem'
-import { arbitrum, avalanche, base, bsc, linea, mainnet, mantle, monad, optimism, plasma, polygon, sonic } from 'viem/chains'
+import { arbitrum, arc, avalanche, base, bsc, linea, mainnet, mantle, monad, optimism, plasma, polygon, sonic } from 'viem/chains'
 
 export type Token = { symbol: string; name: string; address: Address; decimals: number }
 
@@ -79,8 +79,8 @@ export const AGGREGATORS: Record<AggregatorId, Aggregator> = {
     router: '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5',
     needsKey: false,
     available: true,
-    // Mantle answers 404 (checked 2026-11-01)
-    chains: [1, 10, 56, 137, 143, 146, 8453, 9745, 42161, 43114, 59144],
+    // Mantle answers 404 (checked 2026-11-01); Arc quotes since 2026-11-10 (router checked in its route answer)
+    chains: [1, 10, 56, 137, 143, 146, 5042, 8453, 9745, 42161, 43114, 59144],
   },
 }
 
@@ -92,6 +92,7 @@ export const KYBER_CHAIN_SLUGS: Record<number, string> = {
   137: 'polygon',
   143: 'monad',
   146: 'sonic',
+  5042: 'arc',
   8453: 'base',
   9745: 'plasma',
   42161: 'arbitrum',
@@ -164,12 +165,14 @@ export const MORPHO_BLUE: Record<number, Address> = {
   43114: '0x895383274303AA19fe978AFB4Ac55C7f094f982C',
   56: '0x01b0Bd309AA75547f7a37Ad7B1219A898E67a83a',
   146: '0xd6c916eB7542D0Ad3f18AEd0FCBD50C582cfa95f',
+  // Arc: from Morpho's own address list (morpho-org/sdks, morpho-ts addresses.ts), 2026-11-10
+  5042: '0x34CD04070dD72b14E241112F6d83812Df5Af7fCD',
 }
 
 /**
  * Morpho Blue as a lending platform (LeverageExecutorMorpho): the app networks where Morpho Blue is deployed and its
  * API (blue-api.morpho.org, market list and rates) answers. Checked 2026-11-09: the API refuses Avalanche, BNB and
- * Plasma; Sonic has no API data. Ethereum first, as Azerty asked.
+ * Plasma; Sonic has no API data. Ethereum first, as Azerty asked; Arc added 2026-11-10.
  */
 export type MorphoNetDef = { id: string; label: string; chain: Chain; morpho: Address }
 export const MORPHO_NETWORKS: MorphoNetDef[] = [
@@ -178,6 +181,8 @@ export const MORPHO_NETWORKS: MorphoNetDef[] = [
   { id: 'morpho-arbitrum', label: 'Arbitrum', chain: arbitrum, morpho: MORPHO_BLUE[42161] },
   { id: 'morpho-optimism', label: 'Optimism', chain: optimism, morpho: MORPHO_BLUE[10] },
   { id: 'morpho-polygon', label: 'Polygon', chain: polygon, morpho: MORPHO_BLUE[137] },
+  // Arc (Circle): gas paid in USDC, KyberSwap only, no Pendle; added 2026-11-10 at Azerty's request
+  { id: 'morpho-arc', label: 'Arc', chain: arc, morpho: MORPHO_BLUE[5042] },
 ]
 export const isMorphoId = (id: string) => id.startsWith('morpho-')
 
@@ -383,7 +388,8 @@ export function rpcUrls(chain: Chain): string[] {
   const env = import.meta.env as Record<string, string | undefined>
   const override = env[`VITE_RPC_URL_${chain.id}`] || (chain.id === base.id ? env.VITE_RPC_URL : undefined)
   if (override) return [override]
-  return [PUBLICNODE[chain.id], chain.rpcUrls.default.http[0]].filter((u): u is string => !!u)
+  // without a PublicNode endpoint, every public RPC of the chain in turn (Arc lists four)
+  return PUBLICNODE[chain.id] ? [PUBLICNODE[chain.id], chain.rpcUrls.default.http[0]] : [...chain.rpcUrls.default.http]
 }
 
 export type QuoteMode = 'auto' | 'live' | 'mock'
