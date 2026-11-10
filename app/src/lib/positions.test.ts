@@ -88,6 +88,6 @@ describe('positions', () => {
         ],
       },
     ])
-    expect(b).toEqual([{ symbol: 'USDe', claimable: 2, pending: 0.5, usd: 2.5 }])
+    expect(b).toEqual([{ address: '0x1', symbol: 'USDe', claimable: 2, pending: 0.5, usd: 2.5 }])
   })
 })

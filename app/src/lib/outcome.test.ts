@@ -54,9 +54,9 @@ describe('decodeOutcome', () => {
     expect(plain(outcomeLines(o, tokens, { supplied: 1873n * 10n ** 15n }))).toEqual([
       'Capital 0,5 wstETH',
       'Déposé 1,872 WETH (devis 1,873)',
-      'Emprunté 2 790,4 USDC',
+      'Emprunté 2 790,40 USDC',
       'Swap 0,5 wstETH → 0,624 WETH',
-      'Swap 2 790,4 USDC → 1,248 WETH',
+      'Swap 2 790,40 USDC → 1,248 WETH',
       'Health factor 1,26',
     ])
   })
@@ -82,9 +82,9 @@ describe('decodeOutcome', () => {
     const o = decodeOutcome(logs, EXECUTOR, USER)!
     expect(o.healthFactor).toBe(Infinity)
     expect(plain(outcomeLines(o, tokens, { collateralReturned: 125n * 10n ** 16n }))).toEqual([
-      'Dette remboursée 4 470,5 USDC',
+      'Dette remboursée 4 470,50 USDC',
       'Collatéral retiré 3 WETH',
-      'Swap 1,75 WETH → 4 483 USDC',
+      'Swap 1,75 WETH → 4 483,00 USDC',
       'Rendu 1,25 WETH',
       'Rendu 12,5 USDC',
       'Health factor ∞',

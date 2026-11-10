@@ -12,7 +12,7 @@ import { GAS_UNITS, GAS_UNITS_PT, swapCostBase, swapLoss, swapLossProblem } from
 import { encodeCall, executeSwapCollateral, explainError, swapCollateralCall } from '../lib/execute'
 import { executeSwapCollateralBatch, useAtomicBatch } from '../lib/oneClick'
 import { aTokensToApprove, flashAmountFor, projectSwap, rollTargets, swapTargets, thresholdIn, type SwapCollateralPlan } from '../lib/swapCollateral'
-import { fmtAmount, fmtDate, fmtHf, fmtMaturity, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { fmtBps, fmtAmount, fmtDate, fmtHf, fmtMaturity, fmtPct, fmtUsd, fmtX } from '../lib/format'
 import { isExpired } from '../lib/pendle'
 import { outcomeLines, readOutcome } from '../lib/outcome'
 import { isCorrelated } from '../lib/scan'
@@ -401,12 +401,12 @@ export function SwapCollateralPanel({
 
         <Fold
           title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan Aave ${fmtPct(Number(reserves.premiumBps) / 10_000)}`}`}
+          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan Aave ${fmtPct(Number(reserves.premiumBps) / 10_000)}`}`}
         >
           {common}
           <div className="field">
             <span>Slippage max</span>
-            <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000) }))} />
+            <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
           </div>
         </Fold>
 

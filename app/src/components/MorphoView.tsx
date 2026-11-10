@@ -9,7 +9,7 @@ import { deployMorphoExecutor, verifyMorphoExecutor } from '../lib/deploy'
 import { revokeMorphoAuthorization } from '../lib/morphoExecute'
 import { useAtomicBatch } from '../lib/oneClick'
 import { explainError } from '../lib/execute'
-import { fmtAddress, fmtDollars, fmtPct, ptShortSymbol } from '../lib/format'
+import { fmtLltv, fmtAddress, fmtDollars, fmtPct, ptShortSymbol } from '../lib/format'
 import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, Tag, TxResult, useSlow } from './ui'
 import { MorphoOpenPanel } from './MorphoOpenPanel'
 import { MorphoClosePanel } from './MorphoClosePanel'
@@ -127,7 +127,7 @@ function MorphoDeployPanel({ net, onReady }: { net: MorphoNet; onReady: (a: Addr
 
 /** Label of a market among those of the same pair: LLTV, oracle, liquidity. */
 const marketLabel = (m: MorphoMarket) =>
-  `LLTV ${fmtPct(m.lltv, 1)} · liquidité ${usd(m.liquidityUsd)} · emprunt ${fmtPct(m.borrowApy)}${m.listed ? '' : ' · non listé'}`
+  `LLTV ${fmtLltv(m.lltv)} · liquidité ${usd(m.liquidityUsd)} · emprunt ${fmtPct(m.borrowApy)}${m.listed ? '' : ' · non listé'}`
 
 type Props = {
   net: MorphoNet
@@ -302,7 +302,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
         {market && (
           <Fold
             title="Taux Morpho"
-            value={`emprunt ${market.loan.symbol} ${fmtPct(borrowApy)}${market.borrowRewardsApr > 0 ? ` − ${fmtPct(market.borrowRewardsApr)} récompenses` : ''} · LLTV ${fmtPct(market.lltv, 1)}`}
+            value={`emprunt ${market.loan.symbol} ${fmtPct(borrowApy)}${market.borrowRewardsApr > 0 ? ` − ${fmtPct(market.borrowRewardsApr)} récompenses` : ''} · LLTV ${fmtLltv(market.lltv)}`}
           >
             <dl className="preview">
               <dt>Marché</dt>
@@ -412,7 +412,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
 }
 
 /** Short name of a market for lists: collateral / loan, LLTV. */
-export const morphoMarketName = (m: MorphoMarket) => `${ptShortSymbol(m.collateral.symbol)} / ${m.loan.symbol} · ${fmtPct(m.lltv, 1)}`
+export const morphoMarketName = (m: MorphoMarket) => `${ptShortSymbol(m.collateral.symbol)} / ${m.loan.symbol} · ${fmtLltv(m.lltv)}`
 
 export function MorphoTag() {
   return <Tag>Morpho</Tag>

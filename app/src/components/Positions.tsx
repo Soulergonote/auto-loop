@@ -7,7 +7,7 @@ import { snapshotQuery, userPositionQuery, type Snapshot, type UserPosition } fr
 import { merklBalances, summarizePosition, userRewardsQuery, type PositionSummary } from '../lib/positions'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfTone } from '../lib/tone'
-import { fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtNum, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { fmtAddress, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtNum, fmtPct, fmtUsd, fmtX } from '../lib/format'
 import { daysToMaturity, isExpired, needsRenewal } from '../lib/pendle'
 import { Card, Fold, Metric, Notice, useSlow } from './ui'
 import type { Pick } from './Scanner'
@@ -182,9 +182,13 @@ export function Positions({
             <tbody>
               {claim.flatMap((c) =>
                 c.balances.map((b) => (
-                  <tr key={c.chain.id + b.symbol}>
+                  <tr key={`${c.chain.id}-${b.address}`}>
                     <td className="lead">{c.chain.name}</td>
-                    <td data-label="Token">{b.symbol}</td>
+                    <td data-label="Token">
+                      {b.symbol}
+                      {/* two tokens with one symbol (two WMON on Monad): the address tells them apart */}
+                      {c.balances.some((o) => o !== b && o.symbol === b.symbol) && <span className="muted small"> {fmtAddress(b.address)}</span>}
+                    </td>
                     <td data-label="À réclamer">{fmtNum(b.claimable)}</td>
                     <td data-label="En cours">{fmtNum(b.pending)}</td>
                     <td data-label="Valeur">{b.usd > 0 ? fmtDollars(b.usd) : '—'}</td>

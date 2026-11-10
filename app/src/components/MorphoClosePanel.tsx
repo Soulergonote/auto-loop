@@ -10,10 +10,10 @@ import { daysToMaturity, isExpired } from '../lib/pendle'
 import { collateralToSellForRepay, roundSignificant, toBase } from '../lib/math'
 import { swapLoss, swapLossProblem } from '../lib/economics'
 import { explainError } from '../lib/execute'
-import { fmtAmount, fmtDate, fmtHf, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
+import { fmtBps, fmtAmount, fmtDate, fmtHf, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
-import { Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { Card, Fold, LoopLayout, Metric, NA, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 import type { MorphoCtx } from './MorphoView'
 
 const SLIPPAGES = ['1', '10', '50', '100'] as const
@@ -63,6 +63,39 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
   const quote = useQuote(quoteReq)
   const q = quote.data
 
+  if (coll === 0n)
+    return (
+      // a full close lands here: its confirmation stays visible under the button
+      <LoopLayout
+        summary={
+          <Summary
+            items={[
+              { label: 'Dette remboursée', value: NA },
+              { label: 'Health factor après', value: NA, key: true },
+              { label: 'Rendu', value: NA },
+            ]}
+            action={
+              <button className="btn primary" disabled>
+                Fermer la position
+              </button>
+            }
+            reason={account ? 'Aucune position à fermer' : 'Connecter le portefeuille'}
+          >
+            <TxResult market={net} result={result?.ok ? result : undefined} />
+          </Summary>
+        }
+      >
+        {ctx.head}
+        <Card title="Fermer ou réduire">
+          <p className="muted">
+            {account
+              ? `Aucune position ${ptShortSymbol(C.symbol)} / ${L.symbol} sur ce marché Morpho pour cette adresse. Pour en ouvrir une : onglet « Ouvrir / augmenter ».`
+              : `Portefeuille non connecté : la position ${ptShortSymbol(C.symbol)} / ${L.symbol} n’est pas lisible.`}
+          </p>
+        </Card>
+      </LoopLayout>
+    )
+
   const collAfter = coll - withdraw
   const debtAfter = full ? 0n : debt - repay
   const hfAfter = morphoHf(collAfter, debtAfter, state.price, M.params.lltv)
@@ -71,7 +104,6 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
   const loanBackMin = q ? (q.minOut > repay ? q.minOut - repay : 0n) : undefined
 
   const problems: string[] = []
-  if (coll === 0n) problems.push('Aucune position sur ce marché.')
   if (q && q.minOut < repay)
     problems.push(`Le minimum du devis (${fmtAmount(q.minOut, L.decimals)} ${L.symbol}) ne couvre pas la dette remboursée : augmenter le slippage ou recoter.`)
   if (!full && hfAfter < 1) problems.push('La réduction laisserait la position sous le LLTV.')
@@ -218,11 +250,11 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
         {warnings.map((w) => (
           <Notice key={w}>{w}</Notice>
         ))}
-        <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)}`}>
+        <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}`}>
           {ctx.common}
           <div className="field">
             <span>Slippage max</span>
-            <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000) }))} />
+            <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
           </div>
         </Fold>
         {q && (

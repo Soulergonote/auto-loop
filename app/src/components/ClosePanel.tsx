@@ -12,11 +12,11 @@ import { useDebounced } from '../lib/useDebounced'
 import { swapLoss, swapLossProblem } from '../lib/economics'
 import { closeCall, encodeCall, executeClose, explainError, type ClosePlan } from '../lib/execute'
 import { executeCloseBatch, useAtomicBatch } from '../lib/oneClick'
-import { fmtAmount, fmtDate, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { fmtBps, fmtAmount, fmtDate, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/format'
 import { outcomeLines, readOutcome } from '../lib/outcome'
 import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
-import { Card, Fold, LoopLayout, QuoteCompare, Metric, Notice, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { Card, Fold, LoopLayout, QuoteCompare, Metric, NA, Notice, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 
 /** slippage choices in bps; 1 (0,01 %) by default, Azerty's choice: a tighter swap reverts sooner when the price moves */
 const SLIPPAGES = ['1', '10', '50', '100'] as const
@@ -38,7 +38,11 @@ type Props = {
 /** Summary while there is nothing to close: the button stays, disabled, with the reason. */
 const idleSummary = (reason: string, children?: ReactNode) => (
   <Summary
-    items={[{ label: 'Dette remboursée' }, { label: 'Health factor après', key: true }, { label: 'Rendu' }]}
+    items={[
+      { label: 'Dette remboursée', value: NA },
+      { label: 'Health factor après', value: NA, key: true },
+      { label: 'Rendu', value: NA },
+    ]}
     action={
       <button className="btn primary" disabled>
         Fermer la position
@@ -433,14 +437,14 @@ function ClosePanelInner(p: {
 
         <Fold
           title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan Aave ${fmtPct(Number(premiumBps) / 10_000)}`}`}
+          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan Aave ${fmtPct(Number(premiumBps) / 10_000)}`}`}
         >
           {p.common}
           {/* after maturity the PT is redeemed 1 for 1: no pool, nothing to slip */}
           {!ptExpired && (
             <div className="field">
               <span>Slippage max</span>
-              <Segmented value={slippage} onChange={p.setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000) }))} />
+              <Segmented value={slippage} onChange={p.setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
             </div>
           )}
         </Fold>

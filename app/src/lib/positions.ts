@@ -138,7 +138,7 @@ export function merklBalances(data: MerklUserRewards | undefined) {
         const claimable = Math.max(0, Number(BigInt(r.amount) - BigInt(r.claimed)) / unit)
         const pending = Number(BigInt(r.pending)) / unit
         const price = r.token.price ?? 0
-        return { symbol: r.token.symbol, claimable, pending, usd: (claimable + pending) * price, price }
+        return { address: r.token.address, symbol: r.token.symbol, claimable, pending, usd: (claimable + pending) * price, price }
       })
       // nothing worth a line: under a cent when the price is known, under 0.0001 token otherwise
       .filter((r) => (r.price > 0 ? r.usd >= 0.01 : r.claimable + r.pending >= 1e-4))

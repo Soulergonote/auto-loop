@@ -15,7 +15,7 @@ import { claimRewards, rewardAction, swapFromWallet, usdValue, useClaimables, wi
 import { buildReinvestBatch, sendBatch, swapCapital, useAtomicBatch, walletQuote, type BatchCall, type WalletSwap } from '../lib/oneClick'
 import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
-import { fmtAmount, fmtDollars, fmtHf, fmtPct, fmtX } from '../lib/format'
+import { fmtBps, fmtAmount, fmtDollars, fmtHf, fmtPct, fmtX } from '../lib/format'
 import { Card, Fold, QuoteCompare, LoopLayout, Notice, Segmented, Skel, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 
 /** same choices and default as the open and close panels (0,01 %, Azerty's choice) */
@@ -492,11 +492,11 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
             </tbody>
           </table>
         )}
-        <Fold title="Réglages" value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)}`}>
+        <Fold title="Réglages" value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}`}>
           {common}
           <div className="field">
             <span>Slippage max</span>
-            <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000) }))} />
+            <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
           </div>
         </Fold>
         {oneClick && lq && (

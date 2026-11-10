@@ -13,10 +13,11 @@ const nf = (max: number, min = 0) => new Intl.NumberFormat('fr-FR', { maximumFra
 const minus = (s: string) => s.replace(/^-/, MINUS)
 const num = (x: number, max: number, min = 0) => minus(nf(max, min).format(x))
 
-/** Token amount: 4 decimals from 1, 4 significant digits below. `max` caps the decimals (8 to fill an input). */
+/** Token amount: 2 fixed decimals from 1 000 ("2 118,90"), 4 at most from 1, 4 significant digits below. `max` caps the decimals (8 to fill an input). */
 export function fmtAmount(amount: bigint, decimals: number, max?: number): string {
   const n = Number(formatUnits(amount, decimals))
   if (max !== undefined) return num(n, max)
+  if (Math.abs(n) >= 1000) return num(n, 2, 2)
   if (n === 0 || Math.abs(n) >= 1) return num(n, 4)
   return minus(new Intl.NumberFormat('fr-FR', { maximumSignificantDigits: 4 }).format(n))
 }
@@ -40,12 +41,14 @@ export function fmtPrice(base: bigint): string {
   return n < 10 ? `${num(n, 4, 2)}${NBSP}$` : fmtDollars(n)
 }
 
-/** Fraction as a percentage: 2 decimals (0 for LTV and liquidation thresholds). */
-export const fmtPct = (x: number, digits = 2) => (Number.isFinite(x) ? `${num(x * 100, digits)}${NBSP}%` : '∞')
+/** Fraction as a percentage, with a fixed number of decimals: 2 (0 for LTV and liquidation thresholds). */
+export const fmtPct = (x: number, digits = 2) => (Number.isFinite(x) ? `${num(x * 100, digits, digits)}${NBSP}%` : '∞')
 
-export const fmtHf = (x: number) => (Number.isFinite(x) ? num(x, 2) : '∞')
+/** Health factor: 2 fixed decimals, ∞ without debt. */
+export const fmtHf = (x: number) => (Number.isFinite(x) ? num(x, 2, 2) : '∞')
 
-export const fmtX = (x: number) => (Number.isFinite(x) ? `${num(x, 2)}x` : '∞')
+/** Leverage: "2x", "6,47x"; `fixed` keeps 2 decimals ("2,00x") so that a table column lines up. */
+export const fmtX = (x: number, fixed = false) => (Number.isFinite(x) ? `${num(x, 2, fixed ? 2 : 0)}x` : '∞')
 
 /** Plain number (Merkl reward amounts…): 4 decimals, none from 100. */
 export const fmtNum = (x: number) => num(x, Math.abs(x) >= 100 ? 0 : 4)
@@ -71,3 +74,9 @@ export function fmtMaturity(expirySec: number, nowSec = Date.now() / 1000): stri
 
 /** A PT's symbol without its maturity, for tight tiles: "PT-reUSDe-10DEC2026" → "PT-reUSDe". */
 export const ptShortSymbol = (symbol: string) => symbol.replace(/-\d{1,2}[A-Z]{3}\d{4}$/, '')
+
+/** A setting given in basis points (slippage choices): "0,01 %", "0,5 %", "1 %", no padding zeros. */
+export const fmtBps = (bps: number | string | bigint) => `${num(Number(bps) / 100, 2)}${NBSP}%`
+
+/** A market parameter (Morpho LLTV): "86 %", "91,5 %", no padding zero. */
+export const fmtLltv = (x: number) => `${num(x * 100, 1)}${NBSP}%`

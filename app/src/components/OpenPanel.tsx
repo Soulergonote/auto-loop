@@ -30,10 +30,10 @@ import { encodeCall, executeOpen, explainError, openCall, type OpenPlan } from '
 import { executeOpenBatch, useAtomicBatch } from '../lib/oneClick'
 import { capitalKind, useWalletTokens } from '../lib/capital'
 import { outcomeLines, readOutcome } from '../lib/outcome'
-import { fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
+import { fmtBps, fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
-import { Card, Fold, LoopLayout, QuoteCompare, Metric, Notice, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { Card, Fold, LoopLayout, QuoteCompare, Metric, NA, Notice, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 
 /** slippage choices in bps; 1 (0,01 %) by default, Azerty's choice: a tighter swap reverts sooner when the price moves */
 const SLIPPAGES = ['1', '10', '50', '100'] as const
@@ -232,6 +232,8 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   if (lossIssue) (lossIssue.block ? problems : warnings).push(lossIssue.text)
   const capLossIssue = cq && swapLossProblem(swapLoss(cq.sellAmount, capSide, cq.buyAmount, C.side), K.symbol, C.token.symbol, cq.simulated)
   if (capLossIssue) (capLossIssue.block ? problems : warnings).push(capLossIssue.text)
+  // an input the protocol would refuse: values derived from it would be meaningless, they show a dash
+  const unreal = (!!worst && worst.ltv > maxLtv) || !!lossIssue?.block || !!capLossIssue?.block
   const correlated = isCorrelated(C, D)
   if (pt && ptDays !== undefined && !ptExpired && ptDays < 14)
     warnings.push(`Échéance dans ${Math.floor(ptDays)} j : le rendement fixe ne court plus que jusqu’au ${fmtDate(pt.expiry)}.`)
@@ -461,7 +463,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
         ]),
   ]
   const liqPrice =
-    proj && Number.isFinite(proj.healthFactor) ? fmtPrice(BigInt(Math.round(Number(C.price) * (1 - proj.dropToLiquidation)))) : proj ? '—' : undefined
+    proj && Number.isFinite(proj.healthFactor) && !unreal ? fmtPrice(BigInt(Math.round(Number(C.price) * (1 - proj.dropToLiquidation)))) : proj ? NA : undefined
   const counted = yields.filter((y) => y.apy > 0).length
 
   const summary = (
@@ -477,19 +479,20 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
         {
           label: `Liquidation si ${C.token.symbol} à`,
           value: liqPrice,
-          sub: proj && Number.isFinite(proj.healthFactor) ? `baisse de ${fmtPct(proj.dropToLiquidation, 1)} face à ${D.token.symbol}` : undefined,
+          sub: proj && Number.isFinite(proj.healthFactor) && !unreal ? `baisse de ${fmtPct(proj.dropToLiquidation, 1)} face à ${D.token.symbol}` : undefined,
         },
         {
           label: 'APY net',
-          value: apy !== undefined ? fmtPct(apy) : undefined,
+          value: unreal || (proj && apy === undefined) ? NA : apy !== undefined ? fmtPct(apy) : undefined,
           sub: apyParts.length > 0 && ratesApy !== undefined ? `dont ${apyParts.join(', ')}` : 'taux variables, hors coûts',
           tone: apyTone(apy),
           key: true,
         },
         {
           label: 'Coût total',
-          value: costs ? fmtUsd(costs.total) : undefined,
+          value: unreal ? NA : costs ? fmtUsd(costs.total) : undefined,
           sub:
+            !unreal &&
             costs &&
             `entrée ${fmtUsd(costs.entrySwap)} · sortie ${fmtUsd(costs.exitPremium + costs.exitSwap)} · gas ${costs.gas !== undefined ? fmtUsd(costs.gas) : 'non estimé'}`,
         },
@@ -604,13 +607,19 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
             <>
               <Metric
                 label="Levier effectif"
-                value={loopLev !== undefined ? fmtX(loopLev) : undefined}
+                value={unreal || (loopLev !== undefined && !Number.isFinite(loopLev)) ? NA : loopLev !== undefined ? fmtX(loopLev) : undefined}
                 sub={hasPosition ? 'toute la position' : 'après le swap'}
               />
               <Metric
                 label={`APY sur ${fmtDays(horizon)}`}
-                value={horizonYield !== undefined ? fmtPct(horizonYield) : undefined}
-                sub={breakEven === undefined ? 'coûts compris' : Number.isFinite(breakEven) ? `rentable après ${Math.ceil(breakEven)} j` : 'jamais rentable'}
+                value={unreal || (costs && horizonYield === undefined) ? NA : horizonYield !== undefined ? fmtPct(horizonYield) : undefined}
+                sub={
+                  unreal || breakEven === undefined
+                    ? 'coûts compris'
+                    : Number.isFinite(breakEven)
+                      ? `rentable après ${Math.ceil(breakEven)} j`
+                      : 'jamais rentable'
+                }
                 tone={apyTone(horizonYield)}
               />
             </>
@@ -632,15 +641,12 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           <Notice key={w}>{w}</Notice>
         ))}
 
-        <Fold
-          title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)}${pt ? '' : ` · ${fmtDays(horizon)}`} · ${emodeLabel}`}
-        >
+        <Fold title="Réglages" value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${pt ? '' : ` · ${fmtDays(horizon)}`} · ${emodeLabel}`}>
           {common}
           <div className="grid2">
             <div className="field">
               <span>Slippage max</span>
-              <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000) }))} />
+              <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
             </div>
             {!pt && (
               <div className="field">

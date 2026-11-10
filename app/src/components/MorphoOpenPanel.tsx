@@ -19,11 +19,11 @@ import { daysToMaturity, isExpired } from '../lib/pendle'
 import { roundSignificant, toBase } from '../lib/math'
 import { GAS_UNITS_PT, HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
 import { explainError } from '../lib/execute'
-import { fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
+import { fmtLltv, fmtBps, fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
 import { RiskPanel } from './RiskPanel'
-import { Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { Card, Fold, LoopLayout, Metric, NA, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 import type { MorphoCtx } from './MorphoView'
 
 /** slippage choices in bps, as on Aave: 0,01 % by default */
@@ -148,6 +148,8 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
   const warnings: string[] = []
   const lossIssue = q && swapLossProblem(swapLoss(q.sellAmount, sides.loan, q.buyAmount, sides.collateral), L.symbol, C.symbol, q.simulated)
   if (lossIssue) (lossIssue.block ? problems : warnings).push(lossIssue.text)
+  // an input Morpho would refuse: values derived from it would be meaningless, they show a dash
+  const unreal = (worstHf !== undefined && worstHf < 1) || debtAmount > state.liquidity || !!lossIssue?.block
   if (pt && ptDays !== undefined && !ptExpired && ptDays < 14)
     warnings.push(`Échéance dans ${Math.floor(ptDays)} j : le rendement fixe ne court plus que jusqu’au ${fmtDate(pt.expiry)}.`)
   if (fixedApy !== undefined && netBorrow > fixedApy)
@@ -278,12 +280,12 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
         },
         {
           label: 'Liquidation si baisse de',
-          value: hf !== undefined ? (Number.isFinite(hf) ? fmtPct(dropToLiquidation(hf), 1) : '—') : undefined,
+          value: hf !== undefined ? (Number.isFinite(hf) && !unreal ? fmtPct(dropToLiquidation(hf), 1) : NA) : undefined,
           sub: `de ${ptShortSymbol(C.symbol)} face à ${L.symbol}, à l’oracle`,
         },
         {
           label: 'APY net',
-          value: apy !== undefined ? fmtPct(apy) : undefined,
+          value: unreal || (q && apy === undefined) ? NA : apy !== undefined ? fmtPct(apy) : undefined,
           sub: pt
             ? `dont ${fmtPct(collateralApy)} fixe sur le collatéral`
             : ctx.rewardsApr > 0
@@ -294,8 +296,8 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
         },
         {
           label: 'Coût total',
-          value: costs ? fmtUsd(costs.total) : undefined,
-          sub: costs && `entrée ${fmtUsd(costs.entrySwap)} · sortie ${fmtUsd(costs.exitSwap)} · flash loan gratuit · gas non compté`,
+          value: unreal ? NA : costs ? fmtUsd(costs.total) : undefined,
+          sub: !unreal && costs && `entrée ${fmtUsd(costs.entrySwap)} · sortie ${fmtUsd(costs.exitSwap)} · flash loan gratuit · gas non compté`,
         },
       ]}
       action={
@@ -350,7 +352,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
             <span>
               Levier <strong className="lev">{fmtX(lev)}</strong>
               <span className="muted small">
-                max {fmtX(maxLev)} (LLTV {fmtPct(M.lltv, 1)})
+                max {fmtX(maxLev)} (LLTV {fmtLltv(M.lltv)})
               </span>
             </span>
             <input type="range" min={sliderMin} max={sliderMax} step={0.05} value={lev} onChange={(e) => setLeverage(Number(e.target.value))} />
@@ -389,13 +391,19 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
             <>
               <Metric
                 label="Levier effectif"
-                value={loopLev !== undefined ? fmtX(loopLev) : undefined}
+                value={unreal || (loopLev !== undefined && !Number.isFinite(loopLev)) ? NA : loopLev !== undefined ? fmtX(loopLev) : undefined}
                 sub={hasPosition ? 'toute la position' : 'après le swap'}
               />
               <Metric
                 label={`APY sur ${fmtDays(horizon)}`}
-                value={horizonYield !== undefined ? fmtPct(horizonYield) : undefined}
-                sub={breakEven === undefined ? 'coûts compris' : Number.isFinite(breakEven) ? `rentable après ${Math.ceil(breakEven)} j` : 'jamais rentable'}
+                value={unreal || (costs && horizonYield === undefined) ? NA : horizonYield !== undefined ? fmtPct(horizonYield) : undefined}
+                sub={
+                  unreal || breakEven === undefined
+                    ? 'coûts compris'
+                    : Number.isFinite(breakEven)
+                      ? `rentable après ${Math.ceil(breakEven)} j`
+                      : 'jamais rentable'
+                }
                 tone={apyTone(horizonYield)}
               />
             </>
@@ -412,15 +420,12 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
           <Notice key={w}>{w}</Notice>
         ))}
 
-        <Fold
-          title="Réglages"
-          value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)}${pt ? '' : ` · ${fmtDays(horizon)}`}`}
-        >
+        <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}${pt ? '' : ` · ${fmtDays(horizon)}`}`}>
           {ctx.common}
           <div className="grid2">
             <div className="field">
               <span>Slippage max</span>
-              <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000) }))} />
+              <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
             </div>
             {!pt && (
               <div className="field">

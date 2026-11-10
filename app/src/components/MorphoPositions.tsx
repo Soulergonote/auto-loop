@@ -18,7 +18,7 @@ import { toBase } from '../lib/math'
 import { daysToMaturity, isExpired, needsRenewal, ptInfosQuery, type PtInfo } from '../lib/pendle'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfTone } from '../lib/tone'
-import { fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { fmtLltv, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtPct, fmtUsd, fmtX } from '../lib/format'
 import { Card, Fold, Metric, Notice } from './ui'
 import { morphoMarketName, type MorphoTab } from './MorphoView'
 
@@ -206,7 +206,7 @@ function MorphoPosition({ onManage, ...row }: Row & { onManage: (m: MorphoMarket
         {pt ? (
           <Metric label="Échéance du PT" value={fmtMaturity(pt.expiry)} tone={ptTone || undefined} sub={`${fmtDate(pt.expiry)} · levier ${fmtX(leverage)}`} />
         ) : (
-          <Metric label="Levier" value={fmtX(leverage)} sub={`LLTV ${fmtPct(m.lltv, 1)}`} />
+          <Metric label="Levier" value={fmtX(leverage)} sub={`LLTV ${fmtLltv(m.lltv)}`} />
         )}
         <Metric label="Health factor" value={fmtHf(hf)} tone={tone} sub={correlated ? 'paire corrélée' : undefined} />
         <Metric

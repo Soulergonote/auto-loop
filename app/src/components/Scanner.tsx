@@ -8,7 +8,7 @@ import { scanMarket, type ScanFlag } from '../lib/scan'
 import { morphoMarketsQuery, type MorphoMarket } from '../lib/morpho'
 import { scanMorpho, type MorphoScanFlag } from '../lib/morphoScan'
 import { ptInfosQuery } from '../lib/pendle'
-import { fmtDate, fmtDollars, fmtMaturity, fmtPct, fmtX, ptShortSymbol } from '../lib/format'
+import { fmtLltv, fmtDate, fmtDollars, fmtMaturity, fmtPct, fmtX, ptShortSymbol } from '../lib/format'
 import { Card, Fold, Notice, Segmented, Skel, Tag, useSlow } from './ui'
 import type { MorphoTab } from './MorphoView'
 
@@ -128,7 +128,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           pair: `${ptShortSymbol(r.market.collateral.symbol)} / ${r.market.loan.symbol}`,
           place: `Morpho · ${n.label}`,
           tags: [
-            <Tag key="morpho">Morpho · LLTV {fmtPct(r.market.lltv, 1)}</Tag>,
+            <Tag key="morpho">Morpho · LLTV {fmtLltv(r.market.lltv)}</Tag>,
             r.pt && <span key="pt">{ptTag(r.pt.expiry)}</span>,
             r.market.borrowRewardsApr > 0 && (
               <Tag key="bonus" tone="good">
@@ -260,7 +260,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                   <div className="tags">{r.tags}</div>
                 </td>
                 <td data-label="Levier" className="num">
-                  {fmtX(r.leverage)}
+                  {fmtX(r.leverage, true)}
                 </td>
                 <td data-label="APY net" className={`num ${r.apy < 0 ? 'bad' : 'good'}`}>
                   <strong>{fmtPct(r.apy)}</strong>

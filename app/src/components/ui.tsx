@@ -40,12 +40,16 @@ export function Segmented<T extends string>({ value, options, onChange }: { valu
   )
 }
 
-/** Tile: label of 3 words at most, a value, one line of sub-text at most. */
+/** A value that cannot be computed (no position, invalid input): a muted dash, never a loading rectangle or a wild number. */
+export const NA = null
+const shown = (value: ReactNode | undefined, w?: number) => (value === undefined ? <Skel w={w} /> : value === null ? <span className="na">—</span> : value)
+
+/** Tile: label of 3 words at most, a value (undefined = being read, null = not computable), one line of sub-text at most. */
 export function Metric({ label, value, sub, tone }: { label: ReactNode; value?: ReactNode; sub?: ReactNode; tone?: Tone }) {
   return (
-    <div className={`metric ${tone ?? ''}`}>
+    <div className={`metric ${value === null ? '' : (tone ?? '')}`}>
       <div className="metric-label">{label}</div>
-      <div className="metric-value">{value ?? <Skel />}</div>
+      <div className="metric-value">{shown(value)}</div>
       {sub && <div className="metric-sub">{sub}</div>}
     </div>
   )
@@ -107,6 +111,7 @@ export function LoopLayout({ children, summary }: { children: ReactNode; summary
 
 export type SummaryItem = {
   label: string
+  /** undefined = being read (grey rectangle), null = not computable (a dash) */
   value?: ReactNode
   sub?: ReactNode
   tone?: Tone
@@ -120,9 +125,9 @@ export function Summary({ items, action, reason, children }: { items: SummaryIte
     <aside className="card summary">
       <div className="sum-items">
         {items.map((it) => (
-          <div key={it.label} className={`sum-item ${it.tone ?? ''} ${it.key ? 'key' : ''}`}>
+          <div key={it.label} className={`sum-item ${it.value === null ? '' : (it.tone ?? '')} ${it.key ? 'key' : ''}`}>
             <div className="sum-label">{it.label}</div>
-            <div className="sum-value">{it.value ?? <Skel w={5} />}</div>
+            <div className="sum-value">{shown(it.value, 5)}</div>
             {it.sub && <div className="sum-sub">{it.sub}</div>}
           </div>
         ))}

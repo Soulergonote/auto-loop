@@ -9,7 +9,7 @@ import { getQuote, quoteLabel } from '../lib/quotes'
 import { isExpired, ptInfosQuery, type PtInfo } from '../lib/pendle'
 import { swapLoss, swapLossProblem } from '../lib/economics'
 import { explainError } from '../lib/execute'
-import { fmtAmount, fmtDate, fmtDollars, fmtHf, fmtPct, fmtX, ptShortSymbol } from '../lib/format'
+import { fmtLltv, fmtBps, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtPct, fmtX, ptShortSymbol } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
 import { Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
@@ -248,7 +248,7 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
           <select value={T?.id ?? ''} onChange={(e) => setChoice(e.target.value)} disabled={targets.length === 0}>
             {targets.map((t) => (
               <option key={t.m.id} value={t.m.id}>
-                {t.m.collateral.symbol} / {L.symbol} · LLTV {fmtPct(t.m.lltv, 1)} · emprunt {fmtPct(t.m.borrowApy)}
+                {t.m.collateral.symbol} / {L.symbol} · LLTV {fmtLltv(t.m.lltv)} · emprunt {fmtPct(t.m.borrowApy)}
                 {t.pt?.impliedApy !== undefined ? ` · fixe ${fmtPct(t.pt.impliedApy)}` : ''} · liquidité {fmtDollars(t.m.liquidityUsd, true)}
               </option>
             ))}
@@ -276,11 +276,11 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
         {warnings.map((w) => (
           <Notice key={w}>{w}</Notice>
         ))}
-        <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtPct(Number(slippage) / 10_000)}`}>
+        <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}`}>
           {ctx.common}
           <div className="field">
             <span>Slippage max</span>
-            <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtPct(Number(s) / 10_000) }))} />
+            <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
           </div>
         </Fold>
         {q && T && (

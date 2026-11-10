@@ -337,7 +337,7 @@ export function App() {
   )
 
   return (
-    <div className={`page ${view === 'positions' ? 'narrow' : ''}`}>
+    <div className="page">
       <header className="top">
         <h1>Auto-loop</h1>
         <WalletButton market={morpho ? morphoNet : market} />
@@ -531,26 +531,30 @@ function PairView({
                       {fmtPct(x.config.ltvBps / 10_000, 0)} / {fmtPct(x.config.liquidationThresholdBps / 10_000, 0)}
                     </td>
                     <td data-label="APY dépôt">
-                      {fmtPct(x.supplyApy)}
-                      {x.native && (
-                        <span className="muted">
-                          {' '}
-                          + {fmtPct(x.native.apy)} {x.native.fixedUntil ? 'fixe' : 'token'}
-                        </span>
-                      )}
-                      {x.supplyRewardApr > 0 && <span className="reward"> + {fmtPct(x.supplyRewardApr)} Merkl</span>}
-                      <Averages values={averages.data?.get(x.token.address.toLowerCase())?.supply} pending={averages.isPending} />
+                      <div>
+                        {fmtPct(x.supplyApy)}
+                        {x.native && (
+                          <span className="muted">
+                            {' '}
+                            + {fmtPct(x.native.apy)} {x.native.fixedUntil ? 'fixe' : 'token'}
+                          </span>
+                        )}
+                        {x.supplyRewardApr > 0 && <span className="reward"> + {fmtPct(x.supplyRewardApr)} Merkl</span>}
+                        <Averages values={averages.data?.get(x.token.address.toLowerCase())?.supply} pending={averages.isPending} />
+                      </div>
                     </td>
                     <td data-label="APY emprunt">
-                      {fmtPct(x.borrowApy)}
-                      {x.native && (
-                        <span className="muted">
-                          {' '}
-                          + {fmtPct(x.native.apy)} {x.native.fixedUntil ? 'fixe' : 'token'}
-                        </span>
-                      )}
-                      {x.borrowRewardApr > 0 && <span className="reward"> − {fmtPct(x.borrowRewardApr)} Merkl</span>}
-                      <Averages values={averages.data?.get(x.token.address.toLowerCase())?.borrow} pending={averages.isPending} />
+                      <div>
+                        {fmtPct(x.borrowApy)}
+                        {x.native && (
+                          <span className="muted">
+                            {' '}
+                            + {fmtPct(x.native.apy)} {x.native.fixedUntil ? 'fixe' : 'token'}
+                          </span>
+                        )}
+                        {x.borrowRewardApr > 0 && <span className="reward"> − {fmtPct(x.borrowRewardApr)} Merkl</span>}
+                        <Averages values={averages.data?.get(x.token.address.toLowerCase())?.borrow} pending={averages.isPending} />
+                      </div>
                     </td>
                   </tr>
                 ))}
