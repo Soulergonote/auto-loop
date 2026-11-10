@@ -178,7 +178,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const q = quote.data
   // a PT's yield is the one its price locks in: the quote's (price paid), the market's implied APY until it arrives
   const fixedApy = pt && !ptExpired ? (q?.pendle?.kind === 'buy' && q.pendle.fixedApy !== undefined ? q.pendle.fixedApy : C.native?.apy) : undefined
-  const cNative = pt ? (fixedApy !== undefined ? { apy: fixedApy, since: 0, fixedUntil: pt.expiry } : undefined) : C.native
+  const cNative = pt ? (fixedApy !== undefined ? { apy: fixedApy, source: 'pt' as const, fixedUntil: pt.expiry } : undefined) : C.native
 
   // a PT whose SY gives back a token no aggregator sells for the debt asset could not be closed by the app, before or
   // after maturity: the way out is quoted (PT → debt asset, the size of the position) before anything is signed

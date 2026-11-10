@@ -4,6 +4,7 @@ import { getAddress, isAddress, type Address, type Hash, type Hex } from 'viem'
 import { executorRouters, type AggregatorChoice, type MorphoNet } from '../config'
 import { morphoMarketsQuery, readMorphoState, morphoSides, type MorphoMarket, type MorphoState } from '../lib/morpho'
 import { ptInfosQuery, needsRenewal, type PtInfo } from '../lib/pendle'
+import { yieldSourceText } from '../lib/nativeYield'
 import { verifyMorphoExecutor } from '../lib/deploy'
 import { revokeMorphoAuthorization } from '../lib/morphoExecute'
 import { useAtomicBatch } from '../lib/oneClick'
@@ -186,7 +187,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
   const s = state.data
   const hasPosition = !!s?.user && s.user.collateral > 0n
   const borrowApy = s?.borrowApy ?? market?.borrowApy ?? 0
-  const collateralApy = pt ? (pt.expired ? 0 : (pt.impliedApy ?? 0)) : (market?.collateralYield ?? 0)
+  const collateralApy = pt ? (pt.expired ? 0 : (pt.impliedApy ?? 0)) : (market?.collateralYield?.apy ?? 0)
   const canRoll = hasPosition
   const rollLabel = pt && needsRenewal(pt) ? 'Renouveler' : 'Changer de marché'
 
@@ -304,7 +305,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
                 {pt
                   ? ` · PT, APY implicite ${fmtPct(collateralApy)}`
                   : market.collateralYield
-                    ? ` · rendement propre ${fmtPct(market.collateralYield)} (API Morpho)`
+                    ? ` · rendement propre ${fmtPct(market.collateralYield.apy)} (${yieldSourceText(market.collateralYield)})`
                     : ''}
               </dd>
               <dt>Emprunt</dt>

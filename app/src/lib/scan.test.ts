@@ -99,9 +99,9 @@ describe('scanMarket', () => {
 
   it('counts the intrinsic yield of the collateral on L and of a yield-bearing debt on L - 1', () => {
     const since = 1_700_000_000
-    const wsteth = reserve(0, 'wstETH', { price: 3600n * USD, supplyApy: 0, native: { apy: 0.03, since } })
+    const wsteth = reserve(0, 'wstETH', { price: 3600n * USD, supplyApy: 0, native: { apy: 0.03, source: 'aave', since } })
     const weth = reserve(1, 'WETH', { price: 3000n * USD, borrowApy: 0.02 })
-    const weeth = reserve(2, 'weETH', { price: 3200n * USD, borrowApy: 0.01, native: { apy: 0.025, since } })
+    const weeth = reserve(2, 'weETH', { price: 3200n * USD, borrowApy: 0.01, native: { apy: 0.025, source: 'aave', since } })
     const rows = scanMarket(snapshot([wsteth, weth, weeth], [emode(1, [0], [1, 2], 9300, 9500)]), [], { targetHf: 1.1 })
     const onWeth = rows.find((r) => r.collateral.token.symbol === 'wstETH' && r.debt.token.symbol === 'WETH')!
     const L = onWeth.leverage

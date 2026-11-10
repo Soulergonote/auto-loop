@@ -41,6 +41,7 @@ import { MorphoView, type MorphoSeed, type MorphoTab } from './components/Morpho
 import type { MorphoMarket } from './lib/morpho'
 import { Scanner, type Pick } from './components/Scanner'
 import { needsRenewal } from './lib/pendle'
+import { yieldSourceText } from './lib/nativeYield'
 import { toBase } from './lib/math'
 import { Positions } from './components/Positions'
 
@@ -727,8 +728,10 @@ function PairView({
   const pt = r?.collateral.pt
   const canRenew = canSwap && !!pt && needsRenewal(pt)
   const averages = useRateAverages(m.chain.id, m.pool, [collateral.address, debt.address])
-  const natives = r ? [r.collateral.native, r.debt.native].filter((n): n is NonNullable<typeof n> => n !== undefined && !n.fixedUntil) : []
-  const nativeSince = natives.length ? Math.min(...natives.map((n) => n.since)) : undefined
+  // where each token's own yield comes from, shown under the rates
+  const nativeNotes = r
+    ? [r.collateral, r.debt].flatMap((x) => (x.native && !x.native.fixedUntil ? [`${x.token.symbol} : ${yieldSourceText(x.native)}`] : []))
+    : []
 
   const head = (
     <>
@@ -801,8 +804,8 @@ function PairView({
                 « fixe » : APY implicite du marché Pendle de {r.collateral.token.symbol}, acquis jusqu’à l’échéance du {fmtDate(pt.expiry)}.
               </p>
             )}
-            {nativeSince !== undefined && (
-              <p className="muted small">« token » : rendement propre du token, hausse de son taux de change depuis le {fmtDate(nativeSince)}, annualisée.</p>
+            {nativeNotes.length > 0 && (
+              <p className="muted small">« token » : rendement propre du token, hausse de son taux de change ({nativeNotes.join(' ; ')}).</p>
             )}
             {incentives.isError && <p className="muted small">Merkl indisponible : APY sans bonus.</p>}
           </Fold>

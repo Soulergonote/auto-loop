@@ -26,7 +26,7 @@ const withPt = (r: SnapReserve, pt: PtInfo): SnapReserve => ({ ...r, pt, native:
 
 describe('PT yield and maturity', () => {
   it('counts the implied APY as a fixed yield until maturity, nothing after', () => {
-    expect(ptYield(info(0), NOW)).toEqual({ apy: 0.12, since: NOW, fixedUntil: NOW + 90 * DAY })
+    expect(ptYield(info(0), NOW)).toEqual({ apy: 0.12, source: 'pt', fixedUntil: NOW + 90 * DAY })
     expect(ptYield(info(0, { expired: true }), NOW)).toBeUndefined()
     expect(ptYield(info(0, { expiry: NOW - 1 }), NOW)).toBeUndefined()
     expect(ptYield(info(0, { impliedApy: undefined }), NOW)).toBeUndefined()

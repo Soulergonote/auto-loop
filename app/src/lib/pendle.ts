@@ -94,7 +94,7 @@ export function fixedApy(ptOut: bigint, assetIn: bigint, secondsLeft: number): n
 /** The PT's yield as the app counts it: the market's implied APY until maturity, nothing after (redeemed 1 for 1). */
 export function ptYield(pt: PtInfo, nowSec = Date.now() / 1000): NativeYield | undefined {
   if (isExpired(pt, nowSec) || pt.impliedApy === undefined) return undefined
-  return { apy: pt.impliedApy, since: nowSec, fixedUntil: pt.expiry }
+  return { apy: pt.impliedApy, source: 'pt', fixedUntil: pt.expiry }
 }
 
 export const isExpired = (pt: Pick<PtInfo, 'expiry' | 'expired'>, nowSec = Date.now() / 1000) => pt.expired || nowSec >= pt.expiry

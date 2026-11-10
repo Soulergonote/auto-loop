@@ -40,7 +40,14 @@ Les APY ajoutent les campagnes Merkl en cours sur Aave (`api.merkl.xyz/v4/opport
 
 ## Rendement propre des tokens
 
-Les APY comptent aussi le rendement propre des tokens à rendement (wstETH, weETH, cbETH, rETH, sUSDe, syrupUSDC, sDAI…), qu'Aave intègre au prix mais n'affiche pas comme un taux. Source : l'adaptateur de prix « CAPO » d'Aave de chaque token (`getSourceOfAsset` sur l'oracle), qui garde un relevé du taux de change et sa date (`getSnapshotRatio`, `getSnapshotTimestamp`). La hausse entre ce relevé et le taux actuel (`getRatio`), annualisée, donne un rendement moyen lu sur la même chaîne, sans API tierce ni nœud d'archive (`src/lib/nativeYield.ts`). Il s'ajoute sur le collatéral (× levier) et se retranche sur une dette qui en a un (× levier − 1). Un PT Pendle compte son APY implicite, fixe jusqu'à l'échéance (voir plus bas). Un token sans adaptateur CAPO (adaptateur Chainlink simple) n'a pas de valeur : le Scanner l'étiquette « rendement du token non compté » quand son prix laisse penser qu'il en a un. Relevé de moins de 7 jours : ignoré.
+Les APY comptent aussi le rendement propre des tokens à rendement (wstETH, weETH, sUSDe, syrupUSDC, sUSDS, sDAI…), qu'Aave et Morpho intègrent au prix mais n'affichent pas comme un taux. Il est pris à la source la plus récente qui connaît le token (`src/lib/tokenYield.ts`), dans cet ordre :
+
+1. taux publié on-chain par le contrat du token (sDAI : DSR, sUSDS : SSR, stUSDS : STR) ;
+2. rendement sous-jacent que montre l'API Pendle quand Pendle a un marché sur le token ;
+3. rendement de l'actif dans l'API Morpho ;
+4. pour une réserve Aave, à défaut : l'adaptateur de prix « CAPO » d'Aave (`getSourceOfAsset` sur l'oracle), dont la hausse entre le relevé (`getSnapshotRatio`, `getSnapshotTimestamp`) et le taux actuel (`getRatio`), annualisée, donne une moyenne parfois sur plusieurs mois (`src/lib/nativeYield.ts`, relevé de moins de 7 jours ignoré).
+
+Un token qui existe sur plusieurs chaînes (syrupUSDC sur Base, Arbitrum et Arc, sUSDe OFT…) prend le rendement trouvé pour une autre copie quand aucune source ne le connaît sur sa chaîne. La liste de ces copies et des taux on-chain est dans `src/lib/yieldTokens.ts` : c'est le seul fichier à compléter pour un nouveau token ; une valeur nulle ou au-dessus de 100 % est ignorée. L'écran indique la source sous les taux (« Taux Aave », détails du marché Morpho). Le rendement s'ajoute sur le collatéral (× levier) et se retranche sur une dette qui en a un (× levier − 1). Un PT Pendle compte son APY implicite, fixe jusqu'à l'échéance (voir plus bas). Sans aucune source, le Scanner étiquette « rendement du token non compté » un token dont le prix laisse penser qu'il en a un (au 10/11/2026 : savUSD, wsrUSD, yoUSD, syrupUSDG, wstUSR…).
 
 ## Boucles Pendle PT
 

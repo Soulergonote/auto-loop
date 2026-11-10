@@ -367,10 +367,11 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           Les bonus Merkl ne comptent que si la position y a droit à ce health factor. Les taux sont variables : l’APY change avec l’utilisation du marché.
         </p>
         <p className="muted small">
-          « Rendement du token » est le rendement propre des tokens à rendement (wstETH, sUSDe…) : la hausse de leur taux de change depuis le dernier relevé de
-          leur adaptateur de prix Aave, annualisée, sur le collatéral moins celle d’une dette qui en a un, multipliée par le levier : un rendement brut, avant
-          le coût de l’emprunt, qui peut dépasser l’APY net. Sans adaptateur lisible, l’étiquette « rendement du token non compté » le signale. Pour un PT
-          Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe de son marché Pendle, valable jusqu’à l’échéance.
+          « Rendement du token » est le rendement propre des tokens à rendement (wstETH, sUSDe, syrupUSDC…) : la hausse de leur taux de change, prise à la
+          source la plus récente qui connaît le token (taux publié on-chain, Pendle, API Morpho, sinon moyenne de l’adaptateur de prix Aave), sur le collatéral
+          moins celle d’une dette qui en a un, multipliée par le levier : un rendement brut, avant le coût de l’emprunt, qui peut dépasser l’APY net. Sans
+          source, l’étiquette « rendement du token non compté » le signale. Pour un PT Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe
+          de son marché Pendle, valable jusqu’à l’échéance.
         </p>
         <p className="muted small">
           Non compté : le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes Merkl à public restreint. La capacité est le capital encore «

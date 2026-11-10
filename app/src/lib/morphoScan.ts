@@ -51,7 +51,7 @@ export function scanMorpho(markets: MorphoMarket[], opts: MorphoScanOptions): Mo
     const leverage = Math.min(leverageAtMorphoHf(m.lltv, opts.targetHf), leverageAtMorphoHf(m.lltv, SLIDER_HF), MAX_SCAN_LEVERAGE)
     if (!(leverage >= MIN_SCAN_LEVERAGE)) continue
     const healthFactor = (m.lltv * leverage) / (leverage - 1)
-    const collateralApy = pt ? (pt.impliedApy ?? 0) : (m.collateralYield ?? 0)
+    const collateralApy = pt ? (pt.impliedApy ?? 0) : (m.collateralYield?.apy ?? 0)
     const borrowApy = m.borrowApy - m.borrowRewardsApr
     const apy = morphoNetApy(leverage, collateralApy, borrowApy)
     const C = priced(m.collateral, m.collateralUsd)

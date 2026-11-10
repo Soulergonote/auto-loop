@@ -155,7 +155,7 @@ function figures({ market: m, state, pt }: Row) {
   const collUsd = toBase(u.collateral, sides.collateral)
   const debtUsd = toBase(u.debt, sides.loan)
   const leverage = morphoLeverage(u.collateral, u.debt, state.price)
-  const collateralApy = pt ? (isExpired(pt) ? 0 : (pt.impliedApy ?? 0)) : (m.collateralYield ?? 0)
+  const collateralApy = pt ? (isExpired(pt) ? 0 : (pt.impliedApy ?? 0)) : (m.collateralYield?.apy ?? 0)
   const borrowApy = state.borrowApy ?? m.borrowApy
   return {
     collUsd,

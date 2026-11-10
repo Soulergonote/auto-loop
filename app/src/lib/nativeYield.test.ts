@@ -22,8 +22,8 @@ describe('intrinsic yield from an Aave CAPO adapter', () => {
   })
 
   it('nets a yield-bearing debt against the collateral', () => {
-    expect(loopNativeApy(5, { apy: 0.03, since: 0 })).toBeCloseTo(0.15)
-    expect(loopNativeApy(5, { apy: 0.03, since: 0 }, { apy: 0.025, since: 0 })).toBeCloseTo(0.05)
+    expect(loopNativeApy(5, { apy: 0.03, source: 'aave', since: 0 })).toBeCloseTo(0.15)
+    expect(loopNativeApy(5, { apy: 0.03, source: 'aave', since: 0 }, { apy: 0.025, source: 'aave', since: 0 })).toBeCloseTo(0.05)
     expect(loopNativeApy(5)).toBe(0)
   })
 })

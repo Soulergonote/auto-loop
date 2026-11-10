@@ -12,8 +12,10 @@ import { wagmiConfig } from '../wagmi'
 import { erc20Abi, morphoAbi, morphoIrmAbi, morphoOracleAbi } from '../abi'
 import type { Token } from '../config'
 import type { Side } from './math'
+import { gql } from './morphoApi'
+import type { NativeYield } from './nativeYield'
+import { aprToApy, plausible, readTokenYields } from './tokenYield'
 
-export const MORPHO_API = 'https://blue-api.morpho.org/graphql'
 const WAD = 10n ** 18n
 const ORACLE_SCALE = 10n ** 36n
 const VIRTUAL_SHARES = 10n ** 6n
@@ -43,8 +45,8 @@ export type MorphoMarket = {
   /** USD prices from the API (0 when it has none) */
   collateralUsd: number
   loanUsd: number
-  /** the collateral's own yield (staking, savings rate), from the API; PTs get theirs from Pendle */
-  collateralYield?: number
+  /** the collateral's own yield (staking, savings rate): see tokenYield.ts; PTs get theirs from Pendle */
+  collateralYield?: NativeYield
   lltv: number
   oracleType?: string
   borrowApy: number
@@ -106,7 +108,7 @@ export function parseMarkets(chainId: number, items: ApiMarket[]): MorphoMarket[
       loan: token(m.loanAsset),
       collateralUsd: m.collateralAsset.price?.usd ?? 0,
       loanUsd: m.loanAsset.price?.usd ?? 0,
-      collateralYield: m.collateralAsset.yield?.apr ?? undefined,
+      collateralYield: plausible(m.collateralAsset.yield?.apr ?? undefined) ? { apy: aprToApy(m.collateralAsset.yield!.apr!), source: 'morpho' } : undefined,
       lltv: Number(params.lltv) / 1e18,
       oracleType: m.oracle.type ?? undefined,
       borrowApy: st.borrowApy ?? 0,
@@ -131,20 +133,6 @@ const MARKET_FIELDS = `marketId listed lltv irmAddress oracle { address type }
 /** Unlisted markets are only fetched with at least this much supplied (most are empty or tests). */
 export const UNLISTED_MIN_SUPPLY_USD = 10_000
 
-async function gql<T>(query: string, variables: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(MORPHO_API, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ query, variables }),
-    signal,
-  })
-  if (!res.ok) throw new Error(`API Morpho : HTTP ${res.status}`)
-  const body = (await res.json()) as { data?: T; errors?: { message: string }[] }
-  if (body.errors?.length) throw new Error(`API Morpho : ${body.errors[0].message}`)
-  if (!body.data) throw new Error('API Morpho : réponse vide')
-  return body.data
-}
-
 /** Every market of the chain the API lists (listed ones; unlisted ones with some supply when asked), 1 000 per page. */
 export async function fetchMorphoMarkets(chainId: number, unlisted = false, signal?: AbortSignal): Promise<MorphoMarket[]> {
   const where = unlisted
@@ -160,7 +148,13 @@ export async function fetchMorphoMarkets(chainId: number, unlisted = false, sign
     items.push(...data.markets.items)
     if (items.length >= data.markets.pageInfo.countTotal || data.markets.items.length === 0) break
   }
-  return parseMarkets(chainId, items)
+  return withTokenYields(chainId, parseMarkets(chainId, items))
+}
+
+/** Collateral yields from the best source that knows the token (tokenYield.ts), else the one the market came with. */
+async function withTokenYields(chainId: number, markets: MorphoMarket[]): Promise<MorphoMarket[]> {
+  const found = await readTokenYields(chainId, [...new Set(markets.map((m) => m.collateral.address))]).catch(() => new Map<string, NativeYield>())
+  return markets.map((m) => ({ ...m, collateralYield: found.get(m.collateral.address.toLowerCase()) ?? m.collateralYield }))
 }
 
 export const morphoMarketsQuery = (chainId: number, unlisted = false) => ({
@@ -179,7 +173,18 @@ export async function fetchPositionMarkets(user: Address, chainIds: number[], si
     { user: [user], chains: chainIds },
     signal,
   )
-  return data.marketPositions.items.flatMap((p) => parseMarkets(p.market.chain.id, [p.market]))
+  const markets = data.marketPositions.items.flatMap((p) => parseMarkets(p.market.chain.id, [p.market]))
+  const chains = [...new Set(markets.map((m) => m.chainId))]
+  return (
+    await Promise.all(
+      chains.map((c) =>
+        withTokenYields(
+          c,
+          markets.filter((m) => m.chainId === c),
+        ),
+      ),
+    )
+  ).flat()
 }
 
 /**

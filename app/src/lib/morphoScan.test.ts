@@ -28,7 +28,7 @@ describe('scanMorpho', () => {
     expect(eth.healthFactor).toBeCloseTo(1.1, 9)
     expect(eth.correlated).toBe(true)
     expect(eth.stable).toBe(false)
-    const y = bySymbol('wstETH').collateralYield!
+    const y = bySymbol('wstETH').collateralYield!.apy
     expect(eth.apy).toBeCloseTo(y * eth.leverage - bySymbol('wstETH').borrowApy * (eth.leverage - 1), 9)
     expect(eth.capacityUsd).toBeCloseTo(bySymbol('wstETH').liquidityUsd / (eth.leverage - 1), 3)
     // at 1.05 the 96.5 % market would go past 15x: capped
