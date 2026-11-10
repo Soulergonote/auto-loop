@@ -239,14 +239,6 @@ function MarketPosition({
   const emode = snapshot.emodes.find((c) => c.id === eModeCategory)
   const collateral = biggest(holdings, 'suppliedBase')
   const debt = biggest(holdings, 'borrowedBase')
-  // the title names the pair: the biggest deposit that is not also the debt asset, when there is one
-  const titleCollateral =
-    collateral === debt
-      ? (biggest(
-          holdings.filter((h) => h !== debt && h.suppliedBase > 0n),
-          'suppliedBase',
-        ) ?? collateral)
-      : collateral
   const excluded = s.campaigns.filter((c) => c.reasons.length > 0)
   const paying = s.campaigns.filter((c) => c.apy > 0)
   const tone = s.debtBase > 0n ? hfTone(healthFactor, correlated) : undefined
@@ -268,7 +260,7 @@ function MarketPosition({
     <Card
       title={
         <>
-          {titleCollateral.reserve.token.symbol}
+          {collateral.reserve.token.symbol}
           {s.debtBase > 0n && ` / ${debt.reserve.token.symbol}`}
           <span className="card-sub">Aave · {market.label}</span>
         </>
