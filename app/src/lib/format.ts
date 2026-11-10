@@ -29,6 +29,8 @@ export function fmtDollars(usd: number, compact = false): string {
     const [v, unit] = Math.abs(usd) >= 1e6 ? [usd / 1e6, 'M'] : [usd / 1e3, 'k']
     return `${num(v, 1)}${NBSP}${unit}${NBSP}$`
   }
+  // compact columns: whole dollars from 100 $, so a capacity of 1 911 $ does not read like 1,9 M
+  if (compact && Math.abs(usd) >= 100) return `${num(Math.round(usd), 0)}${NBSP}$`
   return `${num(usd, 2, 2)}${NBSP}$`
 }
 

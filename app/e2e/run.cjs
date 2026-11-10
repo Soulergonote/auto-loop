@@ -177,7 +177,10 @@ const anvil = async (method, params) =>
   }
   // COLL=cbETH: another collateral than the default pair's
   if (process.env.COLL) {
-    await page.locator('label:has-text("Collatéral") select').selectOption({ label: process.env.COLL })
+    // the collateral picker: open it, search the symbol, take the first match
+    await page.locator('.picker:has-text("Collatéral") .picker-btn').first().click()
+    await page.getByLabel('Rechercher : Collatéral').fill(process.env.COLL)
+    await page.keyboard.press('Enter')
     await page.waitForTimeout(5000)
   }
   if (mode === 'roll2') return roll2(page, browser)

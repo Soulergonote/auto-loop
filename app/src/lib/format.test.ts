@@ -14,7 +14,8 @@ describe('formats of the UI charter', () => {
   it('shortens large amounts in tables from 10 000 $', () => {
     expect(s(fmtDollars(48_312, true))).toBe('48,3 k $')
     expect(s(fmtDollars(1_400_000, true))).toBe('1,4 M $')
-    expect(s(fmtDollars(9_999, true))).toBe('9 999,00 $')
+    expect(s(fmtDollars(9_999, true))).toBe('9 999 $')
+    expect(s(fmtDollars(42.5, true))).toBe('42,50 $')
   })
 
   it('uses the true minus sign', () => {

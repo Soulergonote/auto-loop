@@ -86,3 +86,20 @@ export function walletTokens(all: WalletToken[], collateral: Address, debt: Addr
     .sort((a, b) => a.token.symbol.localeCompare(b.token.symbol, 'en', { sensitivity: 'base' }))
   return [...pair, ...others]
 }
+
+/** Wallet balance of each token (token pickers); nothing is read without a wallet. */
+export function useBalances(chainId: number, tokens: Token[] | undefined, user?: Address): Map<Address, bigint> {
+  const list = useMemo(() => tokens ?? [], [tokens])
+  const reads = useReadContracts({
+    contracts: list.map((t) => ({ chainId, address: t.address, abi: erc20Abi, functionName: 'balanceOf', args: [user ?? zeroAddress] }) as const),
+    query: { enabled: !DEMO && !!user && list.length > 0, refetchInterval: 60_000 },
+  })
+  return useMemo(() => {
+    const m = new Map<Address, bigint>()
+    list.forEach((t, i) => {
+      const r = reads.data?.[i]
+      if (r?.status === 'success') m.set(t.address, r.result as bigint)
+    })
+    return m
+  }, [list, reads.data])
+}

@@ -23,7 +23,9 @@ import {
 } from './config'
 import { eligibleEModes, useEModeCategories, useMarket, useReserveTokens, withEMode, withIncentives } from './lib/useMarket'
 import { useCampaigns } from './lib/merkl'
-import { fmtAddress, fmtDate, fmtPct, fmtPrice } from './lib/format'
+import { fmtAddress, fmtAmount, fmtDate, fmtPct, fmtPrice } from './lib/format'
+import { Picker } from './components/Picker'
+import { useBalances } from './lib/capital'
 import { WINDOWS, useRateAverages, type Window } from './lib/rateHistory'
 import { useClaimables } from './lib/reinvest'
 import { ReinvestPanel } from './components/ReinvestPanel'
@@ -128,20 +130,33 @@ type TokenSelectProps = {
   onChange: (t: Token) => void
   exclude: Token
   label: string
+  /** wallet balances, shown beside each token when a wallet is connected */
+  balances?: Map<Address, bigint>
 }
 
-function TokenSelect({ tokens, value, onChange, exclude, label }: TokenSelectProps) {
+function TokenSelect({ tokens, value, onChange, exclude, label, balances }: TokenSelectProps) {
+  const withBalances = !!balances && balances.size > 0
   return (
-    <label className="field">
-      <span>{label}</span>
-      <select value={value.address} onChange={(e) => onChange(tokens.find((t) => t.address === e.target.value)!)}>
-        {tokens.map((t) => (
-          <option key={t.address} value={t.address} disabled={t.address === exclude.address}>
-            {t.symbol}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Picker
+      label={label}
+      value={value.address}
+      onChange={(a) => onChange(tokens.find((t) => t.address === a)!)}
+      columns={withBalances ? ['Solde'] : undefined}
+      // tokens the wallet holds first
+      options={[...tokens]
+        .sort((a, b) => Number((balances?.get(b.address) ?? 0n) > 0n) - Number((balances?.get(a.address) ?? 0n) > 0n))
+        .map((t) => {
+          const b = balances?.get(t.address)
+          return {
+            value: t.address,
+            label: t.symbol,
+            icon: t.symbol,
+            disabled: t.address === exclude.address,
+            sub: t.address === exclude.address ? 'déjà de l’autre côté de la paire' : undefined,
+            cells: withBalances ? [b ? fmtAmount(b, t.decimals) : <span className="na">—</span>] : undefined,
+          }
+        })}
+    />
   )
 }
 
@@ -230,6 +245,7 @@ export function App() {
     return () => clearTimeout(t)
   }, [market.id])
   const tokens = reserveTokens.tokens
+  const balances = useBalances(market.chain.id, morpho ? undefined : tokens, address)
   const [preferredAggregator, setAggregator] = useState<AggregatorChoice>('best')
   // keep the choice when it quotes on this chain, otherwise compare all those that do
   const aggregator: AggregatorChoice =
@@ -340,7 +356,14 @@ export function App() {
       {networkSelect}
       {tokens && pair ? (
         <div className="pair">
-          <TokenSelect tokens={tokens} label="Collatéral" value={pair.collateral} onChange={(t) => setPair(t, pair.debt)} exclude={pair.debt} />
+          <TokenSelect
+            tokens={tokens}
+            label="Collatéral"
+            value={pair.collateral}
+            onChange={(t) => setPair(t, pair.debt)}
+            exclude={pair.debt}
+            balances={balances}
+          />
           <button
             className="btn swap"
             title="Inverser collatéral et dette"
@@ -349,7 +372,14 @@ export function App() {
           >
             ⇄
           </button>
-          <TokenSelect tokens={tokens} label="Dette" value={pair.debt} onChange={(t) => setPair(pair.collateral, t)} exclude={pair.collateral} />
+          <TokenSelect
+            tokens={tokens}
+            label="Dette"
+            value={pair.debt}
+            onChange={(t) => setPair(pair.collateral, t)}
+            exclude={pair.collateral}
+            balances={balances}
+          />
         </div>
       ) : (
         <div className="field" style={{ gridColumn: 'span 3' }}>

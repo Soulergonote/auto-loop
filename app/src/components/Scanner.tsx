@@ -17,6 +17,9 @@ export type Pick = { marketId: string; collateral: Address; debt: Address; emode
 
 const HFS = ['1.05', '1.1', '1.2', '1.5'] as const
 type Filter = 'correlated' | 'stable' | 'all'
+type Protocol = 'all' | 'aave' | 'morpho'
+/** sortable columns; numbers sort high first on the first click, the pair A to Z */
+type SortKey = 'pair' | 'leverage' | 'apy' | 'nativeApy' | 'rewardsApy' | 'capacityUsd'
 const ROWS = 20
 /** Pairs where less than this (USD) can still be looped are hidden (borrow cap or cash used up). */
 const MIN_CAPACITY_USD = 1_000
@@ -40,6 +43,7 @@ type Line = {
   key: string
   pair: string
   place: string
+  protocol: 'aave' | 'morpho'
   tags: ReactNode[]
   leverage: number
   apy: number
@@ -71,6 +75,9 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
   const [filter, setFilter] = useState<Filter>('correlated')
   const [showNegative, setShowNegative] = useState(false)
   const [all, setAll] = useState(false)
+  const [protocol, setProtocol] = useState<Protocol>('all')
+  const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'apy', desc: true })
   const markets: Market[] = useMemo(() => (scope === 'all' ? SCANNABLE : SCANNABLE.filter((m) => m.id === scope)).map((m) => getMarket(m.id)), [scope])
   const morphoNets = scope === 'all' ? SCANNABLE_MORPHO : SCANNABLE_MORPHO.filter((n) => n.id === scope)
   const snapshots = useQueries({ queries: markets.map((m) => snapshotQuery(m)) })
@@ -96,6 +103,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           key: `${r.marketId}-${r.collateral.token.address}-${r.debt.token.address}`,
           pair: `${r.collateral.token.symbol} / ${r.debt.token.symbol}`,
           place: label(r.marketId),
+          protocol: 'aave',
           tags: [
             r.collateral.pt && <span key="pt">{ptTag(r.collateral.pt.expiry)}</span>,
             r.emode && <Tag key="emode">eMode {r.emode.label}</Tag>,
@@ -127,8 +135,9 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           key: `morpho-${n.chain.id}-${r.market.id}`,
           pair: `${ptShortSymbol(r.market.collateral.symbol)} / ${r.market.loan.symbol}`,
           place: `Morpho · ${n.label}`,
+          protocol: 'morpho',
           tags: [
-            <Tag key="morpho">Morpho · LLTV {fmtLltv(r.market.lltv)}</Tag>,
+            <Tag key="lltv">LLTV {fmtLltv(r.market.lltv)}</Tag>,
             r.pt && <span key="pt">{ptTag(r.pt.expiry)}</span>,
             r.market.borrowRewardsApr > 0 && (
               <Tag key="bonus" tone="good">
@@ -151,11 +160,32 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
     return out.sort((a, b) => b.apy - a.apy)
   }, [version, targetHf])
 
-  const shown = rows.filter(
-    (r) =>
-      (filter === 'all' || (filter === 'stable' ? r.stable : r.correlated)) &&
-      (showNegative || r.apy > 0 || r.nativeUnknown) &&
-      r.capacityUsd >= MIN_CAPACITY_USD,
+  const words = search
+    .trim()
+    .toLowerCase()
+    .split(/[\s/]+/)
+    .filter(Boolean)
+  const shown = rows
+    .filter(
+      (r) =>
+        (filter === 'all' || (filter === 'stable' ? r.stable : r.correlated)) &&
+        (protocol === 'all' || r.protocol === protocol) &&
+        words.every((w) => r.pair.toLowerCase().includes(w)) &&
+        (showNegative || r.apy > 0 || r.nativeUnknown) &&
+        r.capacityUsd >= MIN_CAPACITY_USD,
+    )
+    .sort((a, b) => {
+      const d = sort.key === 'pair' ? a.pair.localeCompare(b.pair) : a[sort.key] - b[sort.key]
+      return sort.desc ? -d : d
+    })
+  const sortBy = (key: SortKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'pair' }))
+  const head = (key: SortKey, text: string, num = true) => (
+    <th className={`sortable ${num ? 'num' : ''}`} aria-sort={sort.key === key ? (sort.desc ? 'descending' : 'ascending') : undefined}>
+      <button onClick={() => sortBy(key)}>
+        {text}
+        {sort.key === key && <span aria-hidden="true">{sort.desc ? ' ↓' : ' ↑'}</span>}
+      </button>
+    </th>
   )
   const loading = snapshots.filter((q) => q.isPending).length + morphoLists.filter((q) => q.isPending).length
   const slow = useSlow(loading > 0)
@@ -196,6 +226,18 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           <Segmented value={hfText} onChange={setHf} options={HFS.map((h) => ({ value: h, label: h.replace('.', ',') }))} />
         </div>
         <div className="field">
+          <span>Protocole</span>
+          <Segmented
+            value={protocol}
+            onChange={setProtocol}
+            options={[
+              { value: 'all' as Protocol, label: 'Tous' },
+              { value: 'aave' as Protocol, label: 'Aave' },
+              { value: 'morpho' as Protocol, label: 'Morpho' },
+            ]}
+          />
+        </div>
+        <div className="field">
           <span>Type de paire</span>
           <Segmented
             value={filter}
@@ -208,6 +250,14 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           />
         </div>
       </div>
+      <input
+        type="search"
+        className="scan-search"
+        aria-label="Rechercher un token"
+        placeholder="Rechercher un token (wstETH, USDC…)"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
       <label className="check">
         <input type="checkbox" checked={showNegative} onChange={(e) => setShowNegative(e.target.checked)} /> Afficher les APY négatifs
       </label>
@@ -241,19 +291,18 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
         <table className="reserves scan cards">
           <thead>
             <tr>
-              <th>Paire</th>
-              <th className="num">Levier</th>
-              <th className="num">APY net</th>
-              <th className="num">dont token</th>
-              <th className="num">dont Merkl</th>
-              <th className="num">Capacité</th>
-              <th>Fin du bonus</th>
+              {head('pair', 'Paire', false)}
+              {head('leverage', 'Levier')}
+              {head('apy', 'APY net')}
+              {head('nativeApy', 'Rendement du token')}
+              {head('rewardsApy', 'Bonus Merkl')}
+              {head('capacityUsd', 'Capacité')}
               <th></th>
             </tr>
           </thead>
           <tbody>
             {visible.map((r) => (
-              <tr key={r.key}>
+              <tr key={r.key} className="clickable" onClick={r.open}>
                 <td className="lead">
                   {r.pair}
                   {scope === 'all' && <span className="muted"> · {r.place}</span>}
@@ -265,18 +314,24 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                 <td data-label="APY net" className={`num ${r.apy < 0 ? 'bad' : 'good'}`}>
                   <strong>{fmtPct(r.apy)}</strong>
                 </td>
-                <td data-label="dont token" className="num">
-                  {r.nativeApy !== 0 ? fmtPct(r.nativeApy) : '—'}
+                <td data-label="Rendement du token" className="num detail">
+                  {r.nativeApy !== 0 ? fmtPct(r.nativeApy) : <span className="na">—</span>}
                 </td>
-                <td data-label="dont Merkl" className="num">
-                  {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : '—'}
+                <td data-label="Bonus Merkl" className="num detail">
+                  {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : <span className="na">—</span>}
+                  {r.rewardsEnd !== undefined && <div className="muted small">jusqu’au {fmtDate(r.rewardsEnd)}</div>}
                 </td>
                 <td data-label="Capacité" className="num">
                   {fmtDollars(r.capacityUsd, true)}
                 </td>
-                <td data-label="Fin du bonus">{r.rewardsEnd ? fmtDate(r.rewardsEnd) : r.rewardsApy > 0 ? 'non indiquée' : '—'}</td>
-                <td>
-                  <button className="btn small" onClick={r.open}>
+                <td className="row-action">
+                  <button
+                    className="btn small"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      r.open()
+                    }}
+                  >
                     Ouvrir
                   </button>
                 </td>
@@ -286,7 +341,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
               visible.length < 5 &&
               Array.from({ length: 5 - visible.length }, (_, i) => (
                 <tr key={`skel-${i}`}>
-                  <td className="lead" colSpan={8}>
+                  <td className="lead" colSpan={7}>
                     <Skel w={16} />
                   </td>
                 </tr>
@@ -312,10 +367,10 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           Les rewards Merkl ne comptent que si la position y a droit à ce health factor. Les taux sont variables : l’APY change avec l’utilisation du marché.
         </p>
         <p className="muted small">
-          « dont token » est le rendement propre des tokens à rendement (wstETH, sUSDe…) : la hausse de leur taux de change depuis le dernier relevé de leur
-          adaptateur de prix Aave, annualisée, sur le collatéral moins celle d’une dette qui en a un. Sans adaptateur lisible, l’étiquette « rendement du token
-          non compté » le signale. Pour un PT Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe de son marché Pendle, valable jusqu’à
-          l’échéance.
+          « Rendement du token » est le rendement propre des tokens à rendement (wstETH, sUSDe…) : la hausse de leur taux de change depuis le dernier relevé de
+          leur adaptateur de prix Aave, annualisée, sur le collatéral moins celle d’une dette qui en a un, multipliée par le levier : un rendement brut, avant
+          le coût de l’emprunt, qui peut dépasser l’APY net. Sans adaptateur lisible, l’étiquette « rendement du token non compté » le signale. Pour un PT
+          Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe de son marché Pendle, valable jusqu’à l’échéance.
         </p>
         <p className="muted small">
           Non compté : le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes Merkl à public restreint. La capacité est le capital encore «
@@ -323,7 +378,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
         </p>
         <p className="muted small">
           Morpho Blue : chaque marché listé par Morpho (un collatéral, un actif emprunté, une LLTV), au levier qui donne ce health factor, plafonné au levier
-          d’un health factor de 1,02 comme le curseur. Taux de l’API Morpho, relus on-chain à l’ouverture ; « dont Merkl » y est la part des rewards d’emprunt
+          d’un health factor de 1,02 comme le curseur. Taux de l’API Morpho, relus on-chain à l’ouverture ; « Bonus Merkl » y est la part des rewards d’emprunt
           que l’API compte. Les marchés avec un avertissement rouge de l’API sont écartés.
         </p>
       </Fold>

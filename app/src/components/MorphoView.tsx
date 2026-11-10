@@ -8,7 +8,9 @@ import { verifyMorphoExecutor } from '../lib/deploy'
 import { revokeMorphoAuthorization } from '../lib/morphoExecute'
 import { useAtomicBatch } from '../lib/oneClick'
 import { explainError } from '../lib/execute'
-import { fmtLltv, fmtAddress, fmtDollars, fmtPct, ptShortSymbol } from '../lib/format'
+import { fmtLltv, fmtAddress, fmtAmount, fmtDollars, fmtPct, ptShortSymbol } from '../lib/format'
+import { useBalances } from '../lib/capital'
+import { Picker } from './Picker'
 import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, Tag, TxResult, useSlow } from './ui'
 import { MorphoOpenPanel } from './MorphoOpenPanel'
 import { MorphoClosePanel } from './MorphoClosePanel'
@@ -159,6 +161,8 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
     }
     return [...by.values()].sort((a, b) => b.usd - a.usd)
   }, [markets])
+  const collateralTokens = useMemo(() => collaterals.map((c) => c.token), [collaterals])
+  const balances = useBalances(net.chain.id, collateralTokens, account)
   const sameCollateral = market ? markets.filter((m) => m.collateral.address === market.collateral.address) : []
   const loans = [...new Map(sameCollateral.map((m) => [m.loan.address, m.loan])).values()]
   const samePair = market ? sameCollateral.filter((m) => m.loan.address === market.loan.address).sort((a, b) => b.liquidityUsd - a.liquidityUsd) : []
@@ -227,29 +231,28 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
           {networkSelect}
           {market ? (
             <div className="pair">
-              <label className="field">
-                <span>Collatéral</span>
-                <select
-                  value={market.collateral.address}
-                  onChange={(e) => setPicked(bestOf(markets.filter((m) => m.collateral.address === e.target.value))?.id)}
-                >
-                  {collaterals.map((c) => (
-                    <option key={c.token.address} value={c.token.address}>
-                      {c.token.symbol}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Dette</span>
-                <select value={market.loan.address} onChange={(e) => setPicked(bestOf(sameCollateral.filter((m) => m.loan.address === e.target.value))?.id)}>
-                  {loans.map((t) => (
-                    <option key={t.address} value={t.address}>
-                      {t.symbol}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <Picker
+                label="Collatéral"
+                value={market.collateral.address}
+                onChange={(a) => setPicked(bestOf(markets.filter((m) => m.collateral.address === a))?.id)}
+                columns={balances.size > 0 ? ['Solde', 'Déposé'] : ['Déposé']}
+                options={collaterals.map((c) => {
+                  const b = balances.get(c.token.address)
+                  return {
+                    value: c.token.address,
+                    label: ptShortSymbol(c.token.symbol),
+                    icon: c.token.symbol,
+                    keywords: c.token.symbol,
+                    cells: [...(balances.size > 0 ? [b ? fmtAmount(b, c.token.decimals) : <span className="na">—</span>] : []), usd(c.usd)],
+                  }
+                })}
+              />
+              <Picker
+                label="Dette"
+                value={market.loan.address}
+                onChange={(a) => setPicked(bestOf(sameCollateral.filter((m) => m.loan.address === a))?.id)}
+                options={loans.map((t) => ({ value: t.address, label: t.symbol, icon: t.symbol }))}
+              />
             </div>
           ) : (
             <div className="field" style={{ gridColumn: 'span 3' }}>
@@ -259,16 +262,20 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
           )}
         </div>
         {market && samePair.length > 1 && (
-          <label className="field">
-            <span>Marché Morpho ({samePair.length} pour cette paire)</span>
-            <select value={market.id} onChange={(e) => setPicked(e.target.value as Hex)}>
-              {samePair.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {marketLabel(m)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Picker
+            label={`Marché Morpho (${samePair.length} pour cette paire)`}
+            value={market.id}
+            onChange={(id) => setPicked(id as Hex)}
+            display={marketLabel(market)}
+            wide
+            columns={['Liquidité', 'Emprunt']}
+            options={samePair.map((m) => ({
+              value: m.id,
+              label: `LLTV ${fmtLltv(m.lltv)}`,
+              sub: m.listed ? undefined : 'non listé',
+              cells: [usd(m.liquidityUsd), fmtPct(m.borrowApy)],
+            }))}
+          />
         )}
         <label className="check small">
           <input type="checkbox" checked={unlisted} onChange={(e) => setUnlisted(e.target.checked)} /> Inclure les marchés non listés par Morpho (au moins{' '}

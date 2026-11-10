@@ -247,7 +247,13 @@ function MarketPosition({
     })
   return (
     <Card
-      title={market.label}
+      title={
+        <>
+          {collateral.reserve.token.symbol}
+          {s.debtBase > 0n && ` / ${debt.reserve.token.symbol}`}
+          <span className="card-sub">Aave · {market.label}</span>
+        </>
+      }
       aside={
         s.debtBase > 0n && (
           <div className="actions">

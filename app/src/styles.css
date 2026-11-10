@@ -105,7 +105,7 @@ input[type='checkbox'] { width: auto; min-height: 0; accent-color: var(--accent)
 .segmented button.on { background: var(--card); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); font-weight: 600; }
 .segmented button:disabled { color: var(--muted); cursor: not-allowed; }
 .tabs .segmented { max-width: 420px; }
-.scan-filters { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; gap: 12px; align-items: end; }
+.scan-filters { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto auto; gap: 12px; align-items: end; }
 .scan .btn { min-height: 32px; }
 
 /* tiles: 4 columns on desktop, 2 on mobile */
@@ -233,3 +233,55 @@ footer { text-align: center; }
   font: inherit; cursor: pointer; text-decoration: none;
 }
 .wallet-menu .menu > *:hover, .wallet-menu .menu > *:focus-visible { background: var(--bg); }
+
+/* Scanner: sortable headers, whole row opens the pair, short cards on mobile */
+.reserves th.sortable { padding: 0; }
+.reserves th.sortable button {
+  width: 100%; padding: 4px 8px; border: 0; background: none; color: inherit; font: inherit; text-align: inherit; cursor: pointer;
+}
+.reserves th.sortable button:hover, .reserves th[aria-sort] button { color: var(--text); }
+.reserves tr.clickable { cursor: pointer; }
+.reserves tr.clickable:hover td { background: var(--bg); }
+.scan-search { max-width: 360px; }
+@media (max-width: 640px) {
+  .scan-search { max-width: none; }
+  table.scan.cards tr { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 12px; }
+  table.scan.cards td { display: flex; flex-direction: column; text-align: left; padding: 0; gap: 0; }
+  table.scan.cards td.lead { grid-column: 1 / -1; display: block; }
+  table.scan.cards td.detail, table.scan.cards td.row-action { display: none; }
+}
+/* card title naming a position: the pair, then protocol and network under it */
+.card-sub { display: block; font-size: 13px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+
+/* Token icon (initial in a circle) and the searchable picker for tokens and markets */
+.tok-icon {
+  display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--bg); color: var(--muted); font-size: 11px; font-weight: 600;
+}
+.picker { position: relative; }
+.picker-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 8px 12px; text-align: left;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font: inherit; cursor: pointer;
+}
+.picker-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.picker-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-caret { color: var(--muted); font-size: 12px; }
+.picker-pop {
+  position: absolute; left: 0; top: calc(100% + 4px); z-index: 30; width: max(100%, 280px); max-width: calc(100vw - 32px);
+  display: flex; flex-direction: column; gap: 4px; padding: 8px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.12);
+}
+.picker-pop.wide { width: max(100%, 480px); }
+.picker-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; }
+.picker-row {
+  display: grid; align-items: center; gap: 12px; padding: 8px; border: 0; border-radius: 6px; background: none;
+  color: var(--text); font: inherit; text-align: left; cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.picker-row.head { color: var(--muted); font-size: 12px; padding-top: 0; padding-bottom: 0; cursor: default; }
+.picker-row.active { background: var(--bg); }
+.picker-row[aria-selected='true'] { font-weight: 600; }
+.picker-row[aria-disabled='true'] { color: var(--muted); cursor: not-allowed; }
+.picker-row .num { text-align: right; }
+.picker-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.picker-sub { display: block; font-weight: 400; }
+.picker-empty { padding: 8px; margin: 0; }

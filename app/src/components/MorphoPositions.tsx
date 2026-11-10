@@ -18,7 +18,7 @@ import { toBase } from '../lib/math'
 import { daysToMaturity, isExpired, needsRenewal, ptInfosQuery, type PtInfo } from '../lib/pendle'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfTone } from '../lib/tone'
-import { fmtLltv, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtPct, fmtUsd, fmtX } from '../lib/format'
+import { fmtLltv, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
 import { Card, Fold, Metric, Notice } from './ui'
 import { morphoMarketName, type MorphoTab } from './MorphoView'
 
@@ -183,7 +183,15 @@ function MorphoPosition({ onManage, ...row }: Row & { onManage: (m: MorphoMarket
   const ptTone = pt && (isExpired(pt) ? 'bad' : ptDays! < 14 ? 'warn' : undefined)
   return (
     <Card
-      title={`Morpho · ${net.label}`}
+      title={
+        <>
+          {ptShortSymbol(m.collateral.symbol)} / {m.loan.symbol}
+          <span className="card-sub">
+            Morpho · {net.label} · LLTV {fmtLltv(m.lltv)}
+            {!m.listed && ' · marché non listé'}
+          </span>
+        </>
+      }
       aside={
         <div className="actions">
           {pt && needsRenewal(pt) && u.debt > 0n && (
@@ -197,16 +205,12 @@ function MorphoPosition({ onManage, ...row }: Row & { onManage: (m: MorphoMarket
         </div>
       }
     >
-      <p className="muted small">
-        {morphoMarketName(m)}
-        {!m.listed && ' · marché non listé'}
-      </p>
       <div className="metrics">
         <Metric label="Valeur nette" value={fmtUsd(equity)} sub={`dette ${fmtUsd(debtUsd, true)}`} />
         {pt ? (
           <Metric label="Échéance du PT" value={fmtMaturity(pt.expiry)} tone={ptTone || undefined} sub={`${fmtDate(pt.expiry)} · levier ${fmtX(leverage)}`} />
         ) : (
-          <Metric label="Levier" value={fmtX(leverage)} sub={`LLTV ${fmtLltv(m.lltv)}`} />
+          <Metric label="Levier" value={fmtX(leverage)} />
         )}
         <Metric label="Health factor" value={fmtHf(hf)} tone={tone} sub={correlated ? 'paire corrélée' : undefined} />
         <Metric
