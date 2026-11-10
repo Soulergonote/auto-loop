@@ -16,7 +16,7 @@ import { buildReinvestBatch, sendBatch, swapCapital, useAtomicBatch, walletQuote
 import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
 import { fmtBps, fmtAmount, fmtDollars, fmtHf, fmtPct, fmtX } from '../lib/format'
-import { Card, Fold, QuoteCompare, LoopLayout, Notice, Segmented, Skel, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { Banners, Card, Fold, QuoteCompare, LoopLayout, Notice, Segmented, Skel, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 
 /** same choices and default as the open and close panels (0,01 %, Azerty's choice) */
 const SLIPPAGES = ['1', '10', '50', '100'] as const
@@ -438,6 +438,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
       summary={
         <Summary
           items={items}
+          needs="wallet"
           action={
             <button className="btn primary" disabled={!!busy || !!reason} onClick={oneClick ? runBatch : runStep}>
               {busy ?? label}
@@ -452,14 +453,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
       {head}
       <Card title="Réinvestir les rewards Merkl">
         {error && <Notice>Merkl indisponible : rewards illisibles. Réessayer plus tard.</Notice>}
-        {problems.map((p) => (
-          <Notice key={p} tone="bad">
-            {p}
-          </Notice>
-        ))}
-        {warnings.map((w) => (
-          <Notice key={w}>{w}</Notice>
-        ))}
+        <Banners problems={problems} warnings={warnings} />
         {!ready && !error ? (
           <Skel w={16} />
         ) : plan.length === 0 ? (

@@ -9,10 +9,10 @@ import { getQuote, quoteLabel } from '../lib/quotes'
 import { isExpired, ptInfosQuery, type PtInfo } from '../lib/pendle'
 import { swapLoss, swapLossProblem } from '../lib/economics'
 import { explainError } from '../lib/execute'
-import { fmtLltv, fmtBps, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtPct, fmtX, ptShortSymbol } from '../lib/format'
+import { fmtLltv, fmtBps, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtPct, fmtPrice, fmtX, ptShortSymbol } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
-import { Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { Banners, Card, Fold, LoopLayout, Metric, NA, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 import type { MorphoCtx } from './MorphoView'
 
 const SLIPPAGES = ['1', '10', '50', '100'] as const
@@ -115,6 +115,7 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
     problems.push(`Liquidité insuffisante sur le nouveau marché pour ${fmtAmount(debt, L.decimals)} ${L.symbol}.`)
   if (worstHf !== undefined && worstHf < 1) problems.push(`Health factor ${fmtHf(worstHf)} sur le nouveau marché : sous son LLTV, Morpho refuse l’emprunt.`)
   if (toState.isError) problems.push(`Lecture du nouveau marché impossible : ${explainError(toState.error)}`)
+  if (quote.isError) problems.push(`Cotation impossible : ${(quote.error as Error).message}`)
   const warnings: string[] = []
   const lossIssue =
     q &&
@@ -200,21 +201,36 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
         { label: 'Signer la transaction : tout en une fois, la dette ne fait que changer de marché' },
       ]
 
+  // the new collateral's USD price; the drop is against the loan token, as Morpho's oracle sees it
+  const targetPrice = T && toState.data ? morphoSides(T, toState.data.price).collateral.price : 0n
+  const drop = hf !== undefined && Number.isFinite(hf) ? dropToLiquidation(hf) : undefined
+  const liquidation =
+    T && targetPrice > 0n
+      ? {
+          label: `Liquidation si ${ptShortSymbol(T.collateral.symbol)} à`,
+          value: hf === undefined ? undefined : drop === undefined ? NA : fmtPrice(BigInt(Math.round(Number(targetPrice) * (1 - drop)))),
+          sub: drop !== undefined ? `baisse de ${fmtPct(drop, 1)} face à ${L.symbol}` : undefined,
+        }
+      : {
+          label: 'Liquidation si baisse de',
+          value: hf === undefined ? undefined : drop === undefined ? NA : fmtPct(drop, 1),
+          sub: T ? `de ${ptShortSymbol(T.collateral.symbol)} face à ${L.symbol}` : undefined,
+        }
+
   const summary = (
     <Summary
       items={[
         {
           label: 'Health factor',
           value: hf !== undefined ? fmtHf(hf) : undefined,
-          sub: worstHf !== undefined ? `pire cas ${fmtHf(worstHf)} · avant ${fmtHf(hfNow)}` : undefined,
+          sub:
+            worstHf !== undefined
+              ? `${hf !== undefined && fmtHf(worstHf) !== fmtHf(hf) ? `pire cas ${fmtHf(worstHf)} · ` : ''}avant ${fmtHf(hfNow)}`
+              : undefined,
           tone: hf !== undefined ? hfTone(hf, correlated) : undefined,
           key: true,
         },
-        {
-          label: 'Liquidation si baisse de',
-          value: hf !== undefined ? fmtPct(dropToLiquidation(hf), 1) : undefined,
-          sub: T ? `de ${ptShortSymbol(T.collateral.symbol)}, à l’oracle` : undefined,
-        },
+        liquidation,
         {
           label: 'APY net',
           value: apy2 !== undefined ? fmtPct(apy2) : undefined,
@@ -267,15 +283,7 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
           />
           <Metric label="Dette déplacée" value={`${fmtAmount(debt, L.decimals)} ${L.symbol}`} sub={lev2 !== undefined ? `levier ${fmtX(lev2)}` : undefined} />
         </div>
-        {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
-        {problems.map((p) => (
-          <Notice key={p} tone="bad">
-            {p}
-          </Notice>
-        ))}
-        {warnings.map((w) => (
-          <Notice key={w}>{w}</Notice>
-        ))}
+        <Banners problems={problems} warnings={warnings} />
         <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}`}>
           {ctx.common}
           <div className="field">

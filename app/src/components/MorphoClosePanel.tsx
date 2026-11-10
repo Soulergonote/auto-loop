@@ -13,7 +13,7 @@ import { explainError } from '../lib/execute'
 import { fmtBps, fmtAmount, fmtDate, fmtHf, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
-import { Card, Fold, LoopLayout, Metric, NA, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 import type { MorphoCtx } from './MorphoView'
 
 const SLIPPAGES = ['1', '10', '50', '100'] as const
@@ -74,6 +74,7 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
               { label: 'Health factor après', value: NA, key: true },
               { label: 'Rendu', value: NA },
             ]}
+            needs="wallet"
             action={
               <button className="btn primary" disabled>
                 Fermer la position
@@ -89,7 +90,7 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
         <Card title="Fermer ou réduire">
           <p className="muted">
             {account
-              ? `Aucune position ${ptShortSymbol(C.symbol)} / ${L.symbol} sur ce marché Morpho pour cette adresse. Pour en ouvrir une : onglet « Ouvrir / augmenter ».`
+              ? `Aucune position ${ptShortSymbol(C.symbol)} / ${L.symbol} sur ce marché Morpho pour cette adresse. Pour en ouvrir une : onglet « Ouvrir / augmenter » ; toutes les positions de l’adresse : onglet Positions.`
               : `Portefeuille non connecté : la position ${ptShortSymbol(C.symbol)} / ${L.symbol} n’est pas lisible.`}
           </p>
         </Card>
@@ -107,6 +108,7 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
   if (q && q.minOut < repay)
     problems.push(`Le minimum du devis (${fmtAmount(q.minOut, L.decimals)} ${L.symbol}) ne couvre pas la dette remboursée : augmenter le slippage ou recoter.`)
   if (!full && hfAfter < 1) problems.push('La réduction laisserait la position sous le LLTV.')
+  if (quote.isError) problems.push(`Cotation impossible : ${(quote.error as Error).message}`)
   const warnings: string[] = []
   const lossIssue = q && swapLossProblem(swapLoss(q.sellAmount, sides.collateral, q.buyAmount, sides.loan), C.symbol, L.symbol, q.simulated)
   if (lossIssue) (lossIssue.block ? problems : warnings).push(lossIssue.text)
@@ -229,27 +231,22 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
           {pt && ` ${ptExpired ? 'PT échu : racheté en totalité.' : `Échéance le ${fmtDate(pt.expiry)} (${Math.floor(daysToMaturity(pt))} j).`}`}
         </p>
         {sliderMax > 1 && (
-          <label className="field">
-            <span>
-              Levier visé <strong className="lev">{full ? 'fermeture' : fmtX(target)}</strong>
-            </span>
-            <input type="range" min={1} max={sliderMax} step={0.05} value={Math.min(target, sliderMax)} onChange={(e) => setTarget(Number(e.target.value))} />
-          </label>
+          <LeverageSlider
+            label="Levier visé"
+            value={Math.min(target, sliderMax)}
+            min={1}
+            max={sliderMax}
+            onChange={setTarget}
+            aside={full ? 'tout fermer' : undefined}
+            floor={`${fmtX(1)} : tout fermer`}
+          />
         )}
         <div className="metrics">
           <Metric label="Collatéral vendu" value={`${fmtAmount(toSell, C.decimals)} ${ptShortSymbol(C.symbol)}`} sub={q ? `via ${quoteLabel(q)}` : undefined} />
           <Metric label="Collatéral retiré" value={`${fmtAmount(withdraw, C.decimals)} ${ptShortSymbol(C.symbol)}`} sub={full ? 'tout' : 'autant que vendu'} />
           <Metric label="Flash loan" value="gratuit" sub="Morpho Blue" />
         </div>
-        {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
-        {problems.map((p) => (
-          <Notice key={p} tone="bad">
-            {p}
-          </Notice>
-        ))}
-        {warnings.map((w) => (
-          <Notice key={w}>{w}</Notice>
-        ))}
+        <Banners problems={problems} warnings={warnings} />
         <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}`}>
           {ctx.common}
           <div className="field">

@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useAccount, useSwitchChain } from 'wagmi'
 import { getAddress, isAddress, type Address, type Hash, type Hex } from 'viem'
 import { executorRouters, type AggregatorChoice, type MorphoNet } from '../config'
 import { morphoMarketsQuery, readMorphoState, morphoSides, type MorphoMarket, type MorphoState } from '../lib/morpho'
 import { ptInfosQuery, needsRenewal, type PtInfo } from '../lib/pendle'
-import { deployMorphoExecutor, verifyMorphoExecutor } from '../lib/deploy'
+import { verifyMorphoExecutor } from '../lib/deploy'
 import { revokeMorphoAuthorization } from '../lib/morphoExecute'
 import { useAtomicBatch } from '../lib/oneClick'
 import { explainError } from '../lib/execute'
@@ -52,10 +51,8 @@ function errText(e: unknown) {
   return explainError(e).split('\n')[0]
 }
 
-/** Banner while the network has no Morpho executor: deploy one from the wallet, or reuse one. */
+/** While the network has no Morpho executor: reuse one already deployed (the summary's button deploys a new one). */
 function MorphoDeployPanel({ net, onReady }: { net: MorphoNet; onReady: (a: Address) => void }) {
-  const { isConnected, chainId } = useAccount()
-  const { switchChain } = useSwitchChain()
   const routers = executorRouters(net.chain.id)
   const [step, setStep] = useState<string>()
   const [error, setError] = useState<string>()
@@ -72,18 +69,6 @@ function MorphoDeployPanel({ net, onReady }: { net: MorphoNet; onReady: (a: Addr
   }
   return (
     <>
-      <Notice>
-        <span>Contrat Auto-loop pour Morpho absent sur {net.label} : une transaction depuis le portefeuille le déploie.</span>
-        {!isConnected ? null : chainId !== net.chain.id ? (
-          <button className="btn" onClick={() => switchChain({ chainId: net.chain.id })}>
-            Passer sur {net.chain.name}
-          </button>
-        ) : (
-          <button className="btn" disabled={!!step} onClick={() => run(() => deployMorphoExecutor(net, setStep))}>
-            {step ?? `Déployer le contrat Morpho sur ${net.label}`}
-          </button>
-        )}
-      </Notice>
       {error && <Notice tone="bad">{error}</Notice>}
       <Fold title="Contrat" value="sans propriétaire, routeurs figés" plain>
         <p className="muted small">

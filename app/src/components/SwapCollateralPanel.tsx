@@ -17,7 +17,7 @@ import { isExpired } from '../lib/pendle'
 import { outcomeLines, readOutcome } from '../lib/outcome'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
-import { Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { Banners, Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 
 const SLIPPAGES = ['1', '10', '50', '100'] as const
 const PARTS = ['25', '50', '100'] as const
@@ -161,6 +161,7 @@ export function SwapCollateralPanel({
     problems.push(`Flash loan désactivé sur ${T!.token.symbol} et Morpho n’en détient pas assez : changement impossible pour l’instant.`)
   if (worst && worst.healthFactor < 1.01)
     problems.push(`Health factor du pire cas ${fmtHf(worst.healthFactor)} : la position serait liquidable. Choisir un autre collatéral.`)
+  if (quote.isError) problems.push(`Cotation impossible : ${(quote.error as Error).message}`)
   const warnings: string[] = []
   if (renew && T?.pt && C.pt && T.pt.sy.toLowerCase() !== C.pt.sy.toLowerCase())
     warnings.push(`${T.token.symbol} n’a pas le même actif sous-jacent que ${C.token.symbol} : le renouvellement passe par un swap entre les deux.`)
@@ -257,7 +258,9 @@ export function SwapCollateralPanel({
         {
           label: 'Health factor après',
           value: proj && fmtHf(proj.healthFactor),
-          sub: worst && `pire cas ${fmtHf(worst.healthFactor)} · avant ${fmtHf(user.healthFactor)}`,
+          sub:
+            worst &&
+            `${proj && fmtHf(worst.healthFactor) !== fmtHf(proj.healthFactor) ? `pire cas ${fmtHf(worst.healthFactor)} · ` : ''}avant ${fmtHf(user.healthFactor)}`,
           tone: proj && hfTone(proj.healthFactor, correlated),
           key: true,
         },
@@ -389,15 +392,7 @@ export function SwapCollateralPanel({
           </Notice>
         )}
         {all.error && <Notice>Lecture des réserves Aave impossible : {all.error.message.split('\n')[0]}</Notice>}
-        {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
-        {problems.map((x) => (
-          <Notice key={x} tone="bad">
-            {x}
-          </Notice>
-        ))}
-        {warnings.map((w) => (
-          <Notice key={w}>{w}</Notice>
-        ))}
+        <Banners problems={problems} warnings={warnings} />
 
         <Fold
           title="Réglages"

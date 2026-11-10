@@ -67,7 +67,7 @@ p { margin: 0; }
 .sum-item.warn .sum-value { color: var(--warn); }
 .sum-item.bad .sum-value { color: var(--bad); }
 .sum-action { display: flex; flex-direction: column; gap: 8px; }
-.sum-action .btn.primary { width: 100%; }
+.sum-action .btn.primary { width: 100%; white-space: normal; }
 
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
@@ -118,6 +118,8 @@ input[type='checkbox'] { width: auto; min-height: 0; accent-color: var(--accent)
 .metric.warn .metric-value, .warn-text { color: var(--warn); }
 .metric.bad .metric-value, .bad-text { color: var(--bad); }
 .lev { color: var(--text); font-size: 15px; }
+.lev-input { width: 72px; min-height: 32px; padding: 4px 8px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.lev-bounds { display: flex; justify-content: space-between; }
 
 /* banners: amber can change the decision without blocking, red blocks */
 .notice { border-radius: 10px; padding: 8px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
@@ -215,3 +217,19 @@ footer { text-align: center; }
 .outcome { font-size: 12px; color: var(--muted); }
 .outcome-title { font-weight: 600; color: var(--text); margin-bottom: 2px; }
 .outcome ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font-variant-numeric: tabular-nums; }
+
+/* Wallet menu in the header: network and address, then copy, explorer and disconnect */
+.wallet-menu { position: relative; }
+.wallet-menu > summary { list-style: none; display: inline-flex; gap: 8px; align-items: center; }
+.wallet-menu > summary::-webkit-details-marker { display: none; }
+.addr { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.wallet-menu .menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px;
+  display: flex; flex-direction: column; padding: 4px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.12);
+}
+.wallet-menu .menu > * {
+  text-align: left; padding: 8px 12px; border: 0; border-radius: 6px; background: none; color: var(--text);
+  font: inherit; cursor: pointer; text-decoration: none;
+}
+.wallet-menu .menu > *:hover, .wallet-menu .menu > *:focus-visible { background: var(--bg); }

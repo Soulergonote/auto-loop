@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import { AGGREGATORS, supportsChain, type AggregatorChoice, type AggregatorId, type Market } from '../config'
 import type { Quote } from '../lib/quotes'
-import { fmtAmount } from '../lib/format'
+import { fmtAmount, fmtX } from '../lib/format'
 import type { Tone } from '../lib/tone'
+import { useGateStep } from './gate'
 
 export type { Tone }
 
@@ -58,6 +59,90 @@ export function Metric({ label, value, sub, tone }: { label: ReactNode; value?: 
 /** Banner: amber = can change the decision without blocking, red = the action is blocked. */
 export function Notice({ tone = 'warn', children }: { tone?: 'warn' | 'bad'; children: ReactNode }) {
   return <div className={`notice ${tone}`}>{children}</div>
+}
+
+/**
+ * The banners of an action screen: the first blocking problem only (the list is built in the order balance, market
+ * liquidity, health factor, swap), and two warnings at most.
+ */
+export function Banners({ problems, warnings }: { problems: string[]; warnings: string[] }) {
+  return (
+    <>
+      {problems.length > 0 && <Notice tone="bad">{problems[0]}</Notice>}
+      {warnings.slice(0, 2).map((w) => (
+        <Notice key={w}>{w}</Notice>
+      ))}
+    </>
+  )
+}
+
+/** Leverage: a slider with a mark at each whole x, a field to type it, the bounds written beside. */
+export function LeverageSlider({
+  label = 'Levier',
+  value,
+  min,
+  max,
+  step = 0.05,
+  onChange,
+  aside,
+  floor,
+}: {
+  label?: string
+  value: number
+  min: number
+  max: number
+  step?: number
+  onChange: (x: number) => void
+  /** after the value: the maximum and where it comes from */
+  aside?: ReactNode
+  /** why the slider cannot go lower (the current leverage of the position) */
+  floor?: string
+}) {
+  const id = useId()
+  const [typed, setTyped] = useState<string>()
+  const marks = Array.from({ length: Math.floor(max) - Math.ceil(min) + 1 }, (_, i) => Math.ceil(min) + i)
+  const commit = (t: string) => {
+    const x = Number(t.replace(',', '.'))
+    if (Number.isFinite(x) && x > 0) onChange(Math.min(max, Math.max(min, Math.round(x / step) * step)))
+    setTyped(undefined)
+  }
+  return (
+    <div className="field">
+      <span>
+        <label htmlFor={`${id}-n`}>{label}</label>
+        <input
+          id={`${id}-n`}
+          className="lev-input"
+          inputMode="decimal"
+          aria-label={`${label} (x)`}
+          value={typed ?? String(Math.round(value * 100) / 100).replace('.', ',')}
+          onChange={(e) => setTyped(e.target.value)}
+          onBlur={(e) => commit(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && commit((e.target as HTMLInputElement).value)}
+        />
+        <span className="muted small">{aside}</span>
+      </span>
+      <input
+        type="range"
+        aria-label={label}
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        list={`${id}-m`}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      <datalist id={`${id}-m`}>
+        {marks.map((m) => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
+      <span className="lev-bounds muted small">
+        <span>{floor ?? fmtX(min)}</span>
+        <span>{fmtX(max)}</span>
+      </span>
+    </div>
+  )
 }
 
 /** Grey rectangle standing for a value being read. */
@@ -119,8 +204,32 @@ export type SummaryItem = {
   key?: boolean
 }
 
-/** Summary card: 3 or 4 key values and the screen's single main button, with the reason when it is disabled. */
-export function Summary({ items, action, reason, children }: { items: SummaryItem[]; action: ReactNode; reason?: string; children?: ReactNode }) {
+/**
+ * Summary card: 3 or 4 key values and the screen's single main button, with the reason when it is disabled. Until the
+ * wallet is connected, on the right network, with a contract there (`needs`), the button is that next step instead.
+ */
+export function Summary({
+  items,
+  action,
+  reason,
+  children,
+  needs = 'contract',
+}: {
+  items: SummaryItem[]
+  action: ReactNode
+  reason?: string
+  children?: ReactNode
+  needs?: 'contract' | 'wallet' | 'none'
+}) {
+  const gate = useGateStep(needs)
+  if (gate) {
+    action = (
+      <button className="btn primary" disabled={!gate.onClick} onClick={gate.onClick}>
+        {gate.label}
+      </button>
+    )
+    reason = gate.reason
+  }
   return (
     <aside className="card summary">
       <div className="sum-items">
@@ -134,7 +243,7 @@ export function Summary({ items, action, reason, children }: { items: SummaryIte
       </div>
       <div className="sum-action">
         {action}
-        {reason && <span className="muted small sum-reason">{reason}</span>}
+        {reason && <span className={`small sum-reason ${gate?.bad ? 'bad-text' : 'muted'}`}>{reason}</span>}
         {children}
       </div>
     </aside>

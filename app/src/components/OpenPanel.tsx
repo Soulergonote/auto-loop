@@ -30,10 +30,10 @@ import { encodeCall, executeOpen, explainError, openCall, type OpenPlan } from '
 import { executeOpenBatch, useAtomicBatch } from '../lib/oneClick'
 import { capitalKind, useWalletTokens } from '../lib/capital'
 import { outcomeLines, readOutcome } from '../lib/outcome'
-import { fmtBps, fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
+import { fmtBps, fmtAmount, fmtDate, fmtDays, fmtDollars, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
-import { Card, Fold, LoopLayout, QuoteCompare, Metric, NA, Notice, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { Banners, Card, Fold, LeverageSlider, LoopLayout, QuoteCompare, Metric, NA, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 
 /** slippage choices in bps; 1 (0,01 %) by default, Azerty's choice: a tighter swap reverts sooner when the price moves */
 const SLIPPAGES = ['1', '10', '50', '100'] as const
@@ -107,6 +107,8 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const position = user ? pairPosition(user, C.side, D.side) : NO_POSITION
   const hasPosition = position.collateralBase > 0n
   const currentLev = positionLeverage(position)
+  // « Augmenter » only once the pair itself carries debt; collateral alone (or other positions) is an opening
+  const augment = hasPosition && !!user && user.debtBalance > 0n
 
   const maxLev = maxLeverage(C.config.ltvBps)
   const sliderMax = Math.max(1.1, Math.min(Math.floor(maxLev * 0.95 * 20) / 20, 15))
@@ -210,13 +212,14 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   else if (initial === 0n && !hasPosition) problems.push('Capital à déposer manquant.')
   else if (hasPosition && debtAmount === 0n && initial === debouncedInitial && BigInt(Math.round(lev * 10_000)) === debouncedLevBps)
     problems.push('Le levier visé ne dépasse pas le levier actuel. Pour le réduire : onglet « Fermer / réduire ».')
+  // first cause first (charte v2): balance, then market state, liquidity, health factor, swap
+  if (user && initial && capBalance !== undefined && initial > capBalance) problems.push(`Solde ${K.symbol} insuffisant.`)
   if (!C.config.active || C.config.paused || C.config.frozen) problems.push(`${C.token.symbol} est gelé ou en pause sur Aave.`)
   if (!D.config.borrowingEnabled || D.config.paused || D.config.frozen) problems.push(`${D.token.symbol} ne peut pas être emprunté.`)
   if (!D.config.flashLoanEnabled) problems.push(`Flash loan désactivé sur ${D.token.symbol}.`)
   if (C.config.ltvBps === 0) problems.push(`${C.token.symbol} n’est pas accepté comme collatéral (LTV 0).`)
   if (C.config.isolated) problems.push(`${C.token.symbol} est en isolation mode : non supporté par le contrat v1.`)
   if (worst && worst.ltv > maxLtv) problems.push(`LTV projetée ${fmtPct(worst.ltv)} au-dessus du maximum ${fmtPct(maxLtv)}. Baisser le levier.`)
-  if (user && initial && capBalance !== undefined && initial > capBalance) problems.push(`Solde ${K.symbol} insuffisant.`)
   if (ptExpired) problems.push(`${C.token.symbol} est échu : il ne s’achète plus. Le fermer ou le renouveler.`)
   else if (pt && !pt.market) problems.push(`Aucun marché Pendle connu pour ${C.token.symbol} : achat impossible.`)
   if (exitBlocked)
@@ -239,7 +242,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
     warnings.push(`Échéance dans ${Math.floor(ptDays)} j : le rendement fixe ne court plus que jusqu’au ${fmtDate(pt.expiry)}.`)
   if (fixedApy !== undefined && D.borrowApy + (D.native?.apy ?? 0) > fixedApy)
     warnings.push(`L’emprunt ${D.token.symbol} (${fmtPct(D.borrowApy)}) coûte plus que l’APY fixe du PT (${fmtPct(fixedApy)}) : la boucle perd chaque jour.`)
-  if (proj && proj.healthFactor < hfThresholds(correlated).ok)
+  if (proj && !unreal && proj.healthFactor < hfThresholds(correlated).ok)
     warnings.push(
       `Health factor ${fmtHf(proj.healthFactor)} : une baisse de ${fmtPct(proj.dropToLiquidation, 1)} de ${C.token.symbol} face à ${D.token.symbol} suffit à liquider la position.`,
     )
@@ -251,6 +254,15 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   if (cq?.simulated)
     warnings.push(`Devis du capital simulé au prix de l’oracle${cq.fallbackReason ? ` (${cq.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
   if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
+
+  // a quote that fails blocks the transaction: it is a problem like the others, in the single red banner
+  // right after a missing balance, the first cause when both happen
+  problems.splice(
+    problems.findIndex((p) => p.startsWith('Solde ')) + 1,
+    0,
+    ...(quote.isError ? [`Cotation impossible : ${(quote.error as Error).message}`] : []),
+    ...(kind === 'swap' && capitalQuote.isError ? [`Cotation ${K.symbol} → ${C.token.symbol} impossible : ${(capitalQuote.error as Error).message}`] : []),
+  )
 
   const needsApprove = !!user && !!initial && capAllowance < initial
   const needsDelegation = !user || user.borrowAllowance < debtAmount
@@ -325,6 +337,10 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           yields.map((y) => ({ apy: y.apy * toCapital, days: daysLeft(y.campaign) })),
         )
       : undefined
+  // what the capital earns over the planned time, costs paid (horizonYield is annualised)
+  const horizonGain = horizonYield !== undefined && Number.isFinite(horizonYield) ? ((Number(capitalBase) / 1e8) * horizonYield * horizon) / 365 : undefined
+  // leverage once the swap is done, shown beside the slider when it differs from the chosen one
+  const effectiveLev = !unreal && loopLev !== undefined && Number.isFinite(loopLev) && Math.abs(loopLev - lev) >= 0.05 ? loopLev : undefined
   // a rate far from its own average does not last: the APY above would not either
   if (isRateSpike(D.borrowApy, avgD?.borrow[30]))
     warnings.push(`Emprunt ${D.token.symbol} à ${fmtPct(D.borrowApy)}, contre ${fmtPct(avgD!.borrow[30]!)} en moyenne sur 30 j : taux en pic.`)
@@ -420,7 +436,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       const outcome = market.executorVersion === 2 ? await readOutcome(market.chain.id, hash, p.executor, p.user) : undefined
       const expectedSupplied = (kind === 'swap' ? (freshCapital?.buyAmount ?? 0n) : kind === 'collateral' ? p.initialCollateral : 0n) + fresh.buyAmount
       const details = outcome && outcomeLines(outcome, [C.token, D.token, K], { supplied: expectedSupplied })
-      setResult({ ok: true, text: hasPosition ? 'Position augmentée.' : 'Position ouverte.', hash, details })
+      setResult({ ok: true, text: augment ? 'Position augmentée.' : 'Position ouverte.', hash, details })
       onDone()
       void wallet.refetch()
     } catch (e) {
@@ -472,7 +488,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
         {
           label: 'Health factor',
           value: proj && fmtHf(proj.healthFactor),
-          sub: worst && `pire cas ${fmtHf(worst.healthFactor)}`,
+          sub: worst && proj && fmtHf(worst.healthFactor) !== fmtHf(proj.healthFactor) ? `pire cas ${fmtHf(worst.healthFactor)}` : undefined,
           tone: proj && hfTone(proj.healthFactor, correlated),
           key: true,
         },
@@ -499,7 +515,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       ]}
       action={
         <button className="btn primary" disabled={!canSign} onClick={onOpen} title={disabledReason}>
-          {busy ?? (stale ? 'Cotation…' : hasPosition ? 'Augmenter la position' : 'Ouvrir la position')}
+          {busy ?? (stale ? 'Cotation…' : augment ? 'Augmenter la position' : 'Ouvrir la position')}
         </button>
       }
       reason={busy ? undefined : disabledReason}
@@ -511,11 +527,12 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   return (
     <LoopLayout summary={summary}>
       {head}
-      <Card title={hasPosition ? 'Augmenter la position' : 'Ouvrir une position'}>
+      <Card title={augment ? 'Augmenter la position' : 'Ouvrir une position'}>
         {hasPosition && user && (
           <p className="muted small">
-            Position actuelle : levier {fmtX(currentLev)}, health factor {fmtHf(user.healthFactor)}. Le levier choisi s’applique à toute la position ; le
-            capital ajouté peut être 0.
+            {augment
+              ? `Position actuelle : levier ${fmtX(currentLev)}, health factor ${fmtHf(user.healthFactor)}. Le levier choisi s’applique à toute la position ; le capital ajouté peut être 0.`
+              : `Le compte Aave a déjà des positions sur ${market.label} (levier ${fmtX(currentLev)}, health factor ${fmtHf(user.healthFactor)}) : le levier choisi s’applique à tout le compte.`}
           </p>
         )}
         <div className="grid2">
@@ -549,15 +566,18 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
             </div>
             {initial !== undefined && <span className="muted small">≈ {fmtUsd(toBase(initial, capSide))}</span>}
           </div>
-          <label className="field">
-            <span>
-              Levier <strong className="lev">{fmtX(lev)}</strong>
-              <span className="muted small">
-                max {fmtX(maxLev)} (LTV {fmtPct(maxLtv, 0)})
-              </span>
-            </span>
-            <input type="range" min={sliderMin} max={sliderMax} step={0.05} value={lev} onChange={(e) => setLeverage(Number(e.target.value))} />
-          </label>
+          <LeverageSlider
+            value={lev}
+            min={sliderMin}
+            max={sliderMax}
+            onChange={setLeverage}
+            aside={
+              <>
+                {effectiveLev !== undefined && `effectif ${fmtX(effectiveLev)} · `}max {fmtX(maxLev)} (LTV {fmtPct(maxLtv, 0)})
+              </>
+            }
+            floor={sliderMin > 1.1 ? `${fmtX(sliderMin)} : levier actuel` : undefined}
+          />
         </div>
 
         <div className="metrics">
@@ -606,40 +626,30 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
           ) : (
             <>
               <Metric
-                label="Levier effectif"
-                value={unreal || (loopLev !== undefined && !Number.isFinite(loopLev)) ? NA : loopLev !== undefined ? fmtX(loopLev) : undefined}
-                sub={hasPosition ? 'toute la position' : 'après le swap'}
+                label="Rentable après"
+                value={
+                  unreal || (costs && breakEven === undefined)
+                    ? NA
+                    : breakEven === undefined
+                      ? undefined
+                      : Number.isFinite(breakEven)
+                        ? fmtDays(Math.max(1, Math.ceil(breakEven)))
+                        : 'jamais'
+                }
+                sub="coûts d’entrée et de sortie payés"
+                tone={breakEven !== undefined && !unreal ? (!Number.isFinite(breakEven) ? 'bad' : breakEven > horizon ? 'warn' : undefined) : undefined}
               />
               <Metric
-                label={`APY sur ${fmtDays(horizon)}`}
-                value={unreal || (costs && horizonYield === undefined) ? NA : horizonYield !== undefined ? fmtPct(horizonYield) : undefined}
-                sub={
-                  unreal || breakEven === undefined
-                    ? 'coûts compris'
-                    : Number.isFinite(breakEven)
-                      ? `rentable après ${Math.ceil(breakEven)} j`
-                      : 'jamais rentable'
-                }
+                label={`Gain sur ${fmtDays(horizon)}`}
+                value={unreal || (costs && horizonGain === undefined) ? NA : horizonGain !== undefined ? fmtDollars(horizonGain) : undefined}
+                sub={horizonYield !== undefined && !unreal ? `${fmtPct(horizonYield)} par an, coûts compris` : 'coûts compris'}
                 tone={apyTone(horizonYield)}
               />
             </>
           )}
         </div>
 
-        {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
-        {kind === 'swap' && capitalQuote.isError && (
-          <Notice tone="bad">
-            Cotation {K.symbol} → {C.token.symbol} impossible : {(capitalQuote.error as Error).message}
-          </Notice>
-        )}
-        {problems.map((p) => (
-          <Notice key={p} tone="bad">
-            {p}
-          </Notice>
-        ))}
-        {warnings.map((w) => (
-          <Notice key={w}>{w}</Notice>
-        ))}
+        <Banners problems={problems} warnings={warnings} />
 
         <Fold title="Réglages" value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${pt ? '' : ` · ${fmtDays(horizon)}`} · ${emodeLabel}`}>
           {common}

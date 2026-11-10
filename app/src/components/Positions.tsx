@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { getAddress, isAddress, type Address } from 'viem'
 import { MARKETS, getMarket, type Market } from '../config'
@@ -27,11 +27,14 @@ export function Positions({
   onManage,
   onManageMorpho,
   onScan,
+  onEmpty,
 }: {
   account?: Address
   onManage: (p: Pick) => void
   onManageMorpho: (m: MorphoMarket, tab?: MorphoTab, leverage?: number) => void
   onScan: () => void
+  /** called once the connected wallet is read on every network and holds nothing (arrival on the app) */
+  onEmpty?: () => void
 }) {
   const [typed, setTyped] = useState('')
   const [morpho, setMorpho] = useState<MorphoTotals>()
@@ -86,6 +89,10 @@ export function Positions({
   const read = markets.length - pending
   const done = !!user && (pending === 0 || count > 0)
   const avgApy = done && equity > 0n ? weighted / Number(equity) : undefined
+  const empty = !!user && !typed.trim() && pending === 0 && count === 0 && !!morpho && !morpho.pending && failed.length === 0 && claim.length === 0
+  useEffect(() => {
+    if (empty) onEmpty?.()
+  }, [empty, onEmpty])
 
   return (
     <>

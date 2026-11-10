@@ -16,7 +16,7 @@ import { fmtBps, fmtAmount, fmtDate, fmtHf, fmtPct, fmtUsd, fmtX } from '../lib/
 import { outcomeLines, readOutcome } from '../lib/outcome'
 import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
-import { Card, Fold, LoopLayout, QuoteCompare, Metric, NA, Notice, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { Banners, Card, Fold, LeverageSlider, LoopLayout, QuoteCompare, Metric, NA, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 
 /** slippage choices in bps; 1 (0,01 %) by default, Azerty's choice: a tighter swap reverts sooner when the price moves */
 const SLIPPAGES = ['1', '10', '50', '100'] as const
@@ -43,6 +43,7 @@ const idleSummary = (reason: string, children?: ReactNode) => (
       { label: 'Health factor après', value: NA, key: true },
       { label: 'Rendu', value: NA },
     ]}
+    needs="wallet"
     action={
       <button className="btn primary" disabled>
         Fermer la position
@@ -93,7 +94,8 @@ export function ClosePanel({ reserves, user, account, aggregator, onDone, common
         {head}
         <Card title="Fermer ou réduire">
           <p className="muted">
-            Aucune position {C.token.symbol} / {D.token.symbol} sur Aave v3 pour cette adresse. Pour en ouvrir une : onglet « Ouvrir / augmenter ».
+            Aucune position {C.token.symbol} / {D.token.symbol} sur Aave v3 pour cette adresse. Pour en ouvrir une : onglet « Ouvrir / augmenter » ; toutes les
+            positions de l’adresse : onglet Positions.
           </p>
         </Card>
       </LoopLayout>
@@ -240,6 +242,7 @@ function ClosePanelInner(p: {
   else if (pt && market.executor && !market.executorPendle)
     problems.push('Ce contrat n’autorise pas le routeur Pendle : déployer le nouveau contrat (bandeau en haut).')
 
+  if (quote.isError) problems.push(`Cotation impossible : ${(quote.error as Error).message}`)
   const warnings: string[] = []
   const lossIssue = q && swapLossProblem(swapLoss(toSell, C.side, q.buyAmount, D.side), C.token.symbol, D.token.symbol, q.simulated, 0.1) // leaving stays possible at a cost, not at any cost
   if (lossIssue) (lossIssue.block ? problems : warnings).push(lossIssue.text)
@@ -418,22 +421,17 @@ function ClosePanelInner(p: {
           <Metric label="Health factor" value={fmtHf(user.healthFactor)} tone={hfTone(user.healthFactor, correlated)} />
         </div>
 
-        <label className="field">
-          <span>
-            Levier visé <strong className="lev">{lev <= 1 ? 'tout fermer' : fmtX(lev)}</strong>
-          </span>
-          <input type="range" min={1} max={sliderMax} step={0.05} value={lev} onChange={(e) => p.setTarget(Number(e.target.value))} />
-        </label>
+        <LeverageSlider
+          label="Levier visé"
+          value={lev}
+          min={1}
+          max={sliderMax}
+          onChange={p.setTarget}
+          aside={lev <= 1 ? 'tout fermer' : undefined}
+          floor={`${fmtX(1)} : tout fermer`}
+        />
 
-        {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
-        {problems.map((x) => (
-          <Notice key={x} tone="bad">
-            {x}
-          </Notice>
-        ))}
-        {warnings.map((w) => (
-          <Notice key={w}>{w}</Notice>
-        ))}
+        <Banners problems={problems} warnings={warnings} />
 
         <Fold
           title="Réglages"

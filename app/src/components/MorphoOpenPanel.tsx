@@ -19,11 +19,11 @@ import { daysToMaturity, isExpired } from '../lib/pendle'
 import { roundSignificant, toBase } from '../lib/math'
 import { GAS_UNITS_PT, HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../lib/economics'
 import { explainError } from '../lib/execute'
-import { fmtLltv, fmtBps, fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
+import { fmtLltv, fmtBps, fmtAmount, fmtDate, fmtDays, fmtDollars, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
 import { RiskPanel } from './RiskPanel'
-import { Card, Fold, LoopLayout, Metric, NA, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 import type { MorphoCtx } from './MorphoView'
 
 /** slippage choices in bps, as on Aave: 0,01 % by default */
@@ -63,6 +63,8 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
   const sliderMax = Math.max(1.1, Math.min(Math.floor(leverageAtMorphoHf(M.lltv, SLIDER_MIN_HF) * 20) / 20, MAX_SLIDER))
   const sliderMin = hasPosition && Number.isFinite(currentLev) ? Math.min(sliderMax, Math.max(1.1, Math.ceil(currentLev * 20) / 20)) : 1.1
   const lev = Math.max(sliderMin, Math.min(leverage, sliderMax))
+  // « Augmenter » only once the market carries debt for this address
+  const augment = hasPosition && debt0 > 0n
 
   const initial = useMemo(() => {
     try {
@@ -133,6 +135,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
   else if (hasPosition && debtAmount === 0n && initial === debouncedInitial && BigInt(Math.round(lev * 10_000)) === debouncedLevBps && !capitalIsLoan)
     problems.push('Le levier visé ne dépasse pas le levier actuel. Pour le réduire : onglet « Fermer / réduire ».')
   if (user && initial && capBalance !== undefined && initial > capBalance) problems.push(`Solde ${K.symbol} insuffisant.`)
+  if (quote.isError) problems.push(`Cotation impossible : ${(quote.error as Error).message}`)
   if (debtAmount > state.liquidity)
     problems.push(
       `Liquidité du marché insuffisante : ${fmtAmount(state.liquidity, L.decimals)} ${L.symbol} disponibles pour ${fmtAmount(debtAmount, L.decimals)} empruntés.`,
@@ -155,7 +158,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
   if (fixedApy !== undefined && netBorrow > fixedApy)
     warnings.push(`L’emprunt ${L.symbol} (${fmtPct(netBorrow)}) coûte plus que l’APY fixe du PT (${fmtPct(fixedApy)}) : la boucle perd chaque jour.`)
   if (!pt && ctx.collateralApy === 0) warnings.push(`Aucun rendement connu pour ${C.symbol} : l’APY ne compte que le coût de l’emprunt.`)
-  if (hf !== undefined && hf < hfThresholds(correlated).ok)
+  if (hf !== undefined && !unreal && hf < hfThresholds(correlated).ok)
     warnings.push(
       `Health factor ${fmtHf(hf)} : une baisse de ${fmtPct(dropToLiquidation(hf), 1)} de ${C.symbol} face à ${L.symbol} à l’oracle suffit à liquider la position.`,
     )
@@ -181,6 +184,8 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
       ? horizonApy({ equityBase: capitalBase, ratesApy: apy, rewardsApy: 0, costsBase: costs.total, days: horizon })
       : undefined
   const breakEven = costs && apy !== undefined ? breakEvenDays(capitalBase, apy, costs.total) : undefined
+  const horizonGain = horizonYield !== undefined && Number.isFinite(horizonYield) ? ((Number(capitalBase) / 1e8) * horizonYield * horizon) / 365 : undefined
+  const effectiveLev = !unreal && loopLev !== undefined && Number.isFinite(loopLev) && Math.abs(loopLev - lev) >= 0.05 ? loopLev : undefined
   if (costs && horizonYield !== undefined && horizonYield < 0 && apy !== undefined && apy > 0)
     warnings.push(`Les coûts (${fmtUsd(costs.total)}) dépassent le rendement sur ${fmtDays(horizon)} avec ce capital. Augmenter le capital ou la durée.`)
 
@@ -241,7 +246,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
         setBusy,
       )
       const outcome = await readMorphoOutcome(net.chain.id, hash, p.executor, p.user)
-      setResult({ ok: true, text: hasPosition ? 'Position augmentée.' : 'Position ouverte.', hash, details: outcome && morphoOutcomeLines(outcome, C, L) })
+      setResult({ ok: true, text: augment ? 'Position augmentée.' : 'Position ouverte.', hash, details: outcome && morphoOutcomeLines(outcome, C, L) })
       ctx.onDone()
     } catch (e) {
       setResult({ ok: false, text: explainError(e) })
@@ -268,21 +273,32 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
         { label: 'Signer la transaction : flash loan, swap, dépôt et emprunt en une fois' },
       ]
 
+  // the price is the collateral's USD one; the drop is against the loan token, as Morpho's oracle sees it
+  const drop = hf !== undefined && Number.isFinite(hf) && !unreal ? dropToLiquidation(hf) : undefined
+  const liquidation =
+    sides.collateral.price > 0n
+      ? {
+          label: `Liquidation si ${ptShortSymbol(C.symbol)} à`,
+          value: hf === undefined ? undefined : drop === undefined ? NA : fmtPrice(BigInt(Math.round(Number(sides.collateral.price) * (1 - drop)))),
+          sub: drop !== undefined ? `baisse de ${fmtPct(drop, 1)} face à ${L.symbol}` : undefined,
+        }
+      : {
+          label: 'Liquidation si baisse de',
+          value: hf === undefined ? undefined : drop === undefined ? NA : fmtPct(drop, 1),
+          sub: `de ${ptShortSymbol(C.symbol)} face à ${L.symbol}`,
+        }
+
   const summary = (
     <Summary
       items={[
         {
           label: 'Health factor',
           value: hf !== undefined ? fmtHf(hf) : undefined,
-          sub: worstHf !== undefined ? `pire cas ${fmtHf(worstHf)}` : undefined,
+          sub: worstHf !== undefined && hf !== undefined && fmtHf(worstHf) !== fmtHf(hf) ? `pire cas ${fmtHf(worstHf)}` : undefined,
           tone: hf !== undefined ? hfTone(hf, correlated) : undefined,
           key: true,
         },
-        {
-          label: 'Liquidation si baisse de',
-          value: hf !== undefined ? (Number.isFinite(hf) && !unreal ? fmtPct(dropToLiquidation(hf), 1) : NA) : undefined,
-          sub: `de ${ptShortSymbol(C.symbol)} face à ${L.symbol}, à l’oracle`,
-        },
+        liquidation,
         {
           label: 'APY net',
           value: unreal || (q && apy === undefined) ? NA : apy !== undefined ? fmtPct(apy) : undefined,
@@ -302,7 +318,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
       ]}
       action={
         <button className="btn primary" disabled={!canSign} onClick={onOpen} title={disabledReason}>
-          {busy ?? (stale ? 'Cotation…' : hasPosition ? 'Augmenter la position' : 'Ouvrir la position')}
+          {busy ?? (stale ? 'Cotation…' : augment ? 'Augmenter la position' : 'Ouvrir la position')}
         </button>
       }
       reason={busy ? undefined : disabledReason}
@@ -314,11 +330,12 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
   return (
     <LoopLayout summary={summary}>
       {ctx.head}
-      <Card title={hasPosition ? 'Augmenter la position' : 'Ouvrir une position'}>
+      <Card title={augment ? 'Augmenter la position' : 'Ouvrir une position'}>
         {hasPosition && (
           <p className="muted small">
             Position actuelle : {fmtAmount(coll0, C.decimals)} {ptShortSymbol(C.symbol)}, dette {fmtAmount(debt0, L.decimals)} {L.symbol}, levier{' '}
-            {fmtX(currentLev)}, health factor {fmtHf(morphoHf(coll0, debt0, state.price, M.params.lltv))}. Le levier choisi s’applique à toute la position ; le
+            {fmtX(currentLev)}
+            {augment && `, health factor ${fmtHf(morphoHf(coll0, debt0, state.price, M.params.lltv))}`}. Le levier choisi s’applique à toute la position ; le
             capital ajouté peut être 0.
           </p>
         )}
@@ -348,15 +365,18 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
             </div>
             {initial !== undefined && <span className="muted small">≈ {fmtUsd(toBase(initial, capSide))}</span>}
           </div>
-          <label className="field">
-            <span>
-              Levier <strong className="lev">{fmtX(lev)}</strong>
-              <span className="muted small">
-                max {fmtX(maxLev)} (LLTV {fmtLltv(M.lltv)})
-              </span>
-            </span>
-            <input type="range" min={sliderMin} max={sliderMax} step={0.05} value={lev} onChange={(e) => setLeverage(Number(e.target.value))} />
-          </label>
+          <LeverageSlider
+            value={lev}
+            min={sliderMin}
+            max={sliderMax}
+            onChange={setLeverage}
+            aside={
+              <>
+                {effectiveLev !== undefined && `effectif ${fmtX(effectiveLev)} · `}max {fmtX(maxLev)} (LLTV {fmtLltv(M.lltv)})
+              </>
+            }
+            floor={sliderMin > 1.1 ? `${fmtX(sliderMin)} : levier actuel` : undefined}
+          />
         </div>
 
         <div className="metrics">
@@ -390,35 +410,30 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
           ) : (
             <>
               <Metric
-                label="Levier effectif"
-                value={unreal || (loopLev !== undefined && !Number.isFinite(loopLev)) ? NA : loopLev !== undefined ? fmtX(loopLev) : undefined}
-                sub={hasPosition ? 'toute la position' : 'après le swap'}
+                label="Rentable après"
+                value={
+                  unreal || (costs && breakEven === undefined)
+                    ? NA
+                    : breakEven === undefined
+                      ? undefined
+                      : Number.isFinite(breakEven)
+                        ? fmtDays(Math.max(1, Math.ceil(breakEven)))
+                        : 'jamais'
+                }
+                sub="coûts d’entrée et de sortie payés"
+                tone={breakEven !== undefined && !unreal ? (!Number.isFinite(breakEven) ? 'bad' : breakEven > horizon ? 'warn' : undefined) : undefined}
               />
               <Metric
-                label={`APY sur ${fmtDays(horizon)}`}
-                value={unreal || (costs && horizonYield === undefined) ? NA : horizonYield !== undefined ? fmtPct(horizonYield) : undefined}
-                sub={
-                  unreal || breakEven === undefined
-                    ? 'coûts compris'
-                    : Number.isFinite(breakEven)
-                      ? `rentable après ${Math.ceil(breakEven)} j`
-                      : 'jamais rentable'
-                }
+                label={`Gain sur ${fmtDays(horizon)}`}
+                value={unreal || (costs && horizonGain === undefined) ? NA : horizonGain !== undefined ? fmtDollars(horizonGain) : undefined}
+                sub={horizonYield !== undefined && !unreal ? `${fmtPct(horizonYield)} par an, coûts compris` : 'coûts compris'}
                 tone={apyTone(horizonYield)}
               />
             </>
           )}
         </div>
 
-        {quote.isError && <Notice tone="bad">Cotation impossible : {(quote.error as Error).message}</Notice>}
-        {problems.map((p) => (
-          <Notice key={p} tone="bad">
-            {p}
-          </Notice>
-        ))}
-        {warnings.map((w) => (
-          <Notice key={w}>{w}</Notice>
-        ))}
+        <Banners problems={problems} warnings={warnings} />
 
         <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}${pt ? '' : ` · ${fmtDays(horizon)}`}`}>
           {ctx.common}

@@ -143,12 +143,14 @@ const anvil = async (method, params) =>
     },
     [U, !!process.env.BATCH, CHAIN_HEX],
   )
-  await page.goto(process.env.APP_URL || 'http://localhost:5173/')
-  await page.getByText('Connecter le portefeuille').click()
+  // the app opens on the Scanner or Positions: the Boucle screen has its own address
+  await page.goto(process.env.APP_URL || 'http://localhost:5173/#boucle')
+  await page.getByText('Connecter le portefeuille').first().click()
   await page.waitForSelector('.summary', { timeout: 30000 })
   if (mode === 'deploy') {
-    await page.locator('button', { hasText: 'Déployer le contrat' }).click()
-    await page.waitForSelector('text=/Contrat Auto-loop (pour Morpho )?absent/', { state: 'detached', timeout: 60000 }).catch(() => {})
+    // the summary's single button deploys the missing contract, then turns into the screen's own action
+    await page.locator('.summary button', { hasText: 'Déployer le contrat' }).click({ timeout: 60000 })
+    await page.waitForSelector('p:has-text("Contrat Auto-loop vérifié")', { timeout: 180000 }).catch(() => console.log('no verified line'))
     await page.screenshot({ path: `${outPrefix}-apres.png`, fullPage: true })
     console.log('verified line:', await page.locator('p:has-text("Contrat Auto-loop vérifié")').allTextContents())
     console.log('notices:', (await page.locator('.notice').allTextContents()).join(' | '))
@@ -203,6 +205,11 @@ const anvil = async (method, params) =>
     await page.locator('summary', { hasText: 'Réglages' }).click()
     await page.getByRole('radio', { name: process.env.AGG }).click()
   }
+  // SLIP=0,5 : another slippage than the default (a frozen fork drifts from the live quotes)
+  if (process.env.SLIP) {
+    if (!process.env.AGG) await page.locator('summary', { hasText: 'Réglages' }).click()
+    await page.getByRole('radio', { name: process.env.SLIP }).click()
+  }
   if (mode === 'reduce') {
     await page.waitForTimeout(3000)
     await page.locator('input[type=range]').first().fill('2')
@@ -214,12 +221,12 @@ const anvil = async (method, params) =>
     await sel.selectOption({ label: process.env.CAPITAL })
   }
   if (mode === 'open') {
-    await page.locator('input[inputmode=decimal]').fill(process.env.AMOUNT || '1')
+    await page.getByLabel('Montant du capital').fill(process.env.AMOUNT || '1')
     await page.locator('input[type=range]').fill(process.env.LEV || '3')
   }
   if (mode === 'increase') {
     await page.waitForSelector('h2:has-text("Augmenter la position")', { timeout: 30000 })
-    await page.locator('input[inputmode=decimal]').fill(process.env.AMOUNT || '0')
+    await page.getByLabel('Montant du capital').fill(process.env.AMOUNT || '0')
     await page.locator('input[type=range]').fill('4')
   }
   // WAIT=<ms>: longer when quotes go through Pendle on a fork (each simulation reads many slots upstream)
@@ -294,7 +301,7 @@ async function reinvest(page, browser) {
     await btn.click()
     if (/Augmenter la position/.test(text)) {
       await page.waitForTimeout(8000)
-      console.log('open tab capital:', await page.locator('input[inputmode=decimal]').inputValue())
+      console.log('open tab capital:', await page.getByLabel('Montant du capital').inputValue())
       console.log('open tab leverage:', await page.locator('input[type=range]').first().inputValue())
       console.log('open tab notices:', (await page.locator('.notice').allTextContents()).join(' | '), '/ button:', await btn.textContent())
       await page.screenshot({ path: `${outPrefix}-augmenter.png`, fullPage: true })
@@ -359,7 +366,7 @@ async function roll2(page, browser) {
       .locator('select[aria-label="Token du capital"]')
       .inputValue()
       .catch(() => '?'),
-    await page.locator('input[inputmode=decimal]').inputValue(),
+    await page.getByLabel('Montant du capital').inputValue(),
   )
   if (!(await btn.isEnabled())) return browser.close()
   await btn.click()

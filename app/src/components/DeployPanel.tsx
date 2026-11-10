@@ -48,28 +48,29 @@ export function DeployPanel({ market, onReady, upgrade }: { market: Market; onRe
       return a
     })
 
-  if (routers.length === 0) return <Notice>Aucun agrégateur ne cote sur {market.label} : le contrat ne peut pas y être déployé.</Notice>
+  // without a contract, the summary's button deploys it (charte v2, rule 2): only the paste option stays here
+  if (routers.length === 0) return null
 
   return (
     <>
-      <Notice>
-        <span>
-          {upgrade === 'pendle'
-            ? `Le contrat Auto-loop de ${market.label} n’autorise pas le routeur Pendle : il reste utilisable pour les autres paires. Une transaction déploie un contrat qui gère aussi les PT.`
-            : upgrade
-              ? `Contrat Auto-loop v1 sur ${market.label} : il reste utilisable. La v2 ferme les positions sans prime de flash loan quand Morpho a la liquidité ; une transaction la déploie.`
-              : `Contrat Auto-loop absent sur ${market.label} : une transaction depuis le portefeuille le déploie.`}
-        </span>
-        {!isConnected ? null : chainId !== market.chain.id ? (
-          <button className="btn" onClick={() => switchChain({ chainId: market.chain.id })}>
-            Passer sur {market.chain.name}
-          </button>
-        ) : (
-          <button className="btn" disabled={busy} onClick={deploy}>
-            {step ?? `Déployer le contrat${upgrade === 'pendle' ? ' avec Pendle' : upgrade ? ' v2' : ''} sur ${market.label}`}
-          </button>
-        )}
-      </Notice>
+      {upgrade && (
+        <Notice>
+          <span>
+            {upgrade === 'pendle'
+              ? `Le contrat Auto-loop de ${market.label} n’autorise pas le routeur Pendle : il reste utilisable pour les autres paires. Une transaction déploie un contrat qui gère aussi les PT.`
+              : `Contrat Auto-loop v1 sur ${market.label} : il reste utilisable. La v2 ferme les positions sans prime de flash loan quand Morpho a la liquidité ; une transaction la déploie.`}
+          </span>
+          {!isConnected ? null : chainId !== market.chain.id ? (
+            <button className="btn" onClick={() => switchChain({ chainId: market.chain.id })}>
+              Passer sur {market.chain.name}
+            </button>
+          ) : (
+            <button className="btn" disabled={busy} onClick={deploy}>
+              {step ?? `Déployer le contrat${upgrade === 'pendle' ? ' avec Pendle' : ' v2'} sur ${market.label}`}
+            </button>
+          )}
+        </Notice>
+      )}
       {error && <Notice tone="bad">{error}</Notice>}
       <Fold title="Contrat" value="sans propriétaire, routeurs figés" plain>
         <p className="muted small">

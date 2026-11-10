@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
 import { formatUnits, type Address } from 'viem'
 import {
@@ -14,6 +14,7 @@ import {
   isMorphoId,
   savedExecutors,
   storeExecutors,
+  executorRouters,
   supportsChain,
   wrappedNative,
   type AggregatorChoice,
@@ -31,7 +32,8 @@ import { OpenPanel } from './components/OpenPanel'
 import { ClosePanel } from './components/ClosePanel'
 import { SwapCollateralPanel } from './components/SwapCollateralPanel'
 import { DeployPanel } from './components/DeployPanel'
-import { useExecutorCheck, useMorphoExecutorCheck } from './lib/deploy'
+import { deployExecutor, deployMorphoExecutor, useExecutorCheck, useMorphoExecutorCheck } from './lib/deploy'
+import { GateProvider, type Gate } from './components/gate'
 import { MorphoView, type MorphoSeed, type MorphoTab } from './components/MorphoView'
 import type { MorphoMarket } from './lib/morpho'
 import { Scanner, type Pick } from './components/Scanner'
@@ -40,14 +42,35 @@ import { toBase } from './lib/math'
 import { Positions } from './components/Positions'
 
 type View = 'loop' | 'scan' | 'positions'
+/** each screen has its own address, so a link or a reload lands on it */
+const HASHES: Record<View, string> = { loop: 'boucle', scan: 'scanner', positions: 'positions' }
+function viewFromHash(): View | undefined {
+  const h = window.location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]
+  return (Object.keys(HASHES) as View[]).find((v) => HASHES[v] === h)
+}
 /** How the Boucle screen opens a pair: eMode and leverage, the tab, and for « Ouvrir » a capital amount and token. */
 type Seed = { emode: number; leverage: number; tab?: Pick['tab']; amount?: string; capital?: Address }
 
 function WalletButton({ market }: { market: { chain: Market['chain'] } }) {
-  const { address, chainId, isConnected } = useAccount()
+  const { address, chainId, chain, isConnected } = useAccount()
   const { connect, connectors, isPending } = useConnect()
   const { disconnect } = useDisconnect()
   const { switchChain } = useSwitchChain()
+  const menu = useRef<HTMLDetailsElement>(null)
+  const [copied, setCopied] = useState(false)
+  // the menu closes on a click elsewhere or Escape, like any dropdown
+  useEffect(() => {
+    const close = (e: Event) => {
+      const d = menu.current
+      if (d?.open && (e.type === 'keydown' ? (e as KeyboardEvent).key === 'Escape' : !d.contains(e.target as Node))) d.open = false
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', close)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', close)
+    }
+  }, [])
 
   if (!isConnected) {
     const injected = connectors[0]
@@ -57,17 +80,45 @@ function WalletButton({ market }: { market: { chain: Market['chain'] } }) {
       </button>
     )
   }
-  if (chainId !== market.chain.id) {
-    return (
-      <button className="btn" onClick={() => switchChain({ chainId: market.chain.id })}>
-        Passer sur {market.chain.name}
-      </button>
-    )
+  const wrong = chainId !== market.chain.id
+  const explorer = (chain ?? market.chain).blockExplorers?.default.url
+  const pick = (run: () => void) => () => {
+    run()
+    if (menu.current) menu.current.open = false
   }
   return (
-    <button className="btn" onClick={() => disconnect()} title="Déconnecter">
-      {fmtAddress(address!)}
-    </button>
+    <details className="wallet-menu" ref={menu}>
+      <summary className="btn">
+        <span className={wrong ? 'warn-text' : 'muted'}>{chain?.name ?? 'Réseau inconnu'}</span>
+        <span className="addr">{fmtAddress(address!)}</span>
+      </summary>
+      <div className="menu" role="menu">
+        {wrong && (
+          <button role="menuitem" onClick={pick(() => switchChain({ chainId: market.chain.id }))}>
+            Passer sur {market.chain.name}
+          </button>
+        )}
+        <button
+          role="menuitem"
+          onClick={() => {
+            void navigator.clipboard?.writeText(address!).then(() => {
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1_500)
+            })
+          }}
+        >
+          {copied ? 'Adresse copiée' : 'Copier l’adresse'}
+        </button>
+        {explorer && (
+          <a role="menuitem" href={`${explorer}/address/${address}`} target="_blank" rel="noreferrer" onClick={pick(() => {})}>
+            Voir sur l’explorateur
+          </a>
+        )}
+        <button role="menuitem" onClick={pick(() => disconnect())}>
+          Déconnecter
+        </button>
+      </div>
+    </details>
   )
 }
 
@@ -113,7 +164,7 @@ function defaultPair(tokens: Token[]) {
 }
 
 export function App() {
-  const { address } = useAccount()
+  const { address, status } = useAccount()
   const [marketId, setMarketId] = useState(savedMarketId)
   const [localExecutors, setLocalExecutors] = useState(savedExecutors)
   const declared = useMemo(() => getMarket(marketId, localExecutors), [marketId, localExecutors])
@@ -140,6 +191,27 @@ export function App() {
   const declaredMorpho = useMemo(() => getMorphoNet(marketId, localExecutors), [marketId, localExecutors])
   const morphoCheck = useMorphoExecutorCheck(morpho ? declaredMorpho : { ...declaredMorpho, executor: undefined })
   const morphoNet = useMemo(() => (morphoCheck.data ? declaredMorpho : { ...declaredMorpho, executor: undefined }), [declaredMorpho, morphoCheck.data])
+  // what the summary's single button walks through before the screen's own action (charte v2, rule 2)
+  const gate = useMemo<Gate | undefined>(() => {
+    if (DEMO) return undefined
+    const statusOf = (executor: Address | undefined, c: { isPending: boolean; isError: boolean }): Gate['executor'] =>
+      !executor ? 'missing' : c.isError ? 'refused' : c.isPending ? 'checking' : 'ok'
+    if (morpho)
+      return {
+        chain: declaredMorpho.chain,
+        label: declaredMorpho.label,
+        executor: executorRouters(declaredMorpho.chain.id).length === 0 ? 'none' : statusOf(declaredMorpho.executor, morphoCheck),
+        deploy: (onStep) => deployMorphoExecutor(declaredMorpho, onStep),
+        onDeployed: (a) => setLocalExecutor(declaredMorpho.id, a),
+      }
+    return {
+      chain: declared.chain,
+      label: declared.label,
+      executor: executorRouters(declared.chain.id).length === 0 ? 'none' : statusOf(declared.executor, check),
+      deploy: (onStep) => deployExecutor(declared, onStep),
+      onDeployed: (a) => setLocalExecutor(declared.id, a),
+    }
+  }, [morpho, declared, declaredMorpho, check.isPending, check.isError, morphoCheck.isPending, morphoCheck.isError, localExecutors])
   const [morphoSeed, setMorphoSeed] = useState<MorphoSeed>()
   function openMorpho(m: MorphoMarket, tab?: MorphoTab, leverage?: number) {
     const net = MORPHO_NETWORKS.find((n) => n.chain.id === m.chainId)
@@ -162,7 +234,44 @@ export function App() {
   // keep the choice when it quotes on this chain, otherwise compare all those that do
   const aggregator: AggregatorChoice =
     preferredAggregator === 'best' || supportsChain(preferredAggregator, (morpho ? morphoNet : market).chain.id) ? preferredAggregator : 'best'
-  const [view, setView] = useState<View>('loop')
+  // arrival without an address in the link: Positions when a wallet reconnects, the Scanner otherwise
+  const [view, setViewState] = useState<View | undefined>(() => (DEMO ? 'loop' : viewFromHash()))
+  // set while Positions was chosen for the visitor: an empty list then moves on to the Scanner
+  const [arrival, setArrival] = useState(false)
+  const reconnecting = useRef(false)
+  useEffect(() => {
+    if (view) return
+    // the wallet reconnects after the first render: wait for its outcome (or 1.5 s) before choosing
+    if (status === 'reconnecting' || status === 'connecting') {
+      reconnecting.current = true
+      return
+    }
+    const choose = () => {
+      const v: View = status === 'connected' ? 'positions' : 'scan'
+      setViewState(v)
+      setArrival(v === 'positions')
+      window.history.replaceState(null, '', `#${HASHES[v]}`)
+    }
+    if (reconnecting.current || status === 'connected') return choose()
+    const t = setTimeout(choose, 1_500)
+    return () => clearTimeout(t)
+  }, [view, status])
+  function setView(v: View) {
+    setArrival(false)
+    setViewState(v)
+    if (viewFromHash() !== v) window.location.hash = HASHES[v]
+  }
+  useEffect(() => {
+    const onHash = () => {
+      const v = viewFromHash()
+      if (v && !DEMO) {
+        setArrival(false)
+        setViewState(v)
+      }
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
   const [picked, setPicked] = useState<{
     market: string
     collateral: Address
@@ -357,81 +466,99 @@ export function App() {
       </nav>
 
       {view === 'scan' && !DEMO && <Scanner onPick={openPick} onPickMorpho={openMorpho} />}
-      {view === 'positions' && !DEMO && <Positions account={address} onManage={openPick} onManageMorpho={openMorpho} onScan={() => setView('scan')} />}
-      {view === 'loop' && morpho && !DEMO && (
-        <MorphoView
-          key={morphoNet.id}
-          net={morphoNet}
-          networkSelect={networkSelect}
+      {view === 'positions' && !DEMO && (
+        <Positions
           account={address}
-          aggregator={aggregator}
-          common={morphoCommon}
-          notes={morphoNotes}
-          seed={morphoSeed?.market.chainId === morphoNet.chain.id ? morphoSeed : undefined}
-          onExecutor={(a) => setLocalExecutor(morphoNet.id, a)}
+          onManage={openPick}
+          onManageMorpho={openMorpho}
+          onScan={() => setView('scan')}
+          onEmpty={
+            arrival
+              ? () => {
+                  setArrival(false)
+                  setViewState('scan')
+                  window.history.replaceState(null, '', `#${HASHES.scan}`)
+                }
+              : undefined
+          }
         />
       )}
-      {view === 'loop' &&
-        !morpho &&
-        (pair ? (
-          <PairView
-            key={`${market.id}-${seed?.nonce ?? ''}`}
-            market={market}
-            collateral={pair.collateral}
-            debt={pair.debt}
-            nativeToken={wrappedNative(tokens, market.chain)?.address}
-            tokens={tokens}
-            onPair={setPair}
+      <GateProvider value={gate}>
+        {view === 'loop' && morpho && !DEMO && (
+          <MorphoView
+            key={morphoNet.id}
+            net={morphoNet}
+            networkSelect={networkSelect}
             account={address}
             aggregator={aggregator}
-            selectors={selectors}
-            common={common}
-            notes={notes}
-            seed={seed}
-            onExecutor={(a) => setLocalExecutor(market.id, a)}
+            common={morphoCommon}
+            notes={morphoNotes}
+            seed={morphoSeed?.market.chainId === morphoNet.chain.id ? morphoSeed : undefined}
+            onExecutor={(a) => setLocalExecutor(morphoNet.id, a)}
           />
-        ) : (
-          <LoopLayout
-            summary={
-              <Summary
-                items={[
-                  { label: 'Health factor', key: true },
-                  { label: 'APY net', key: true },
-                ]}
-                action={
-                  <button className="btn primary" disabled>
-                    Ouvrir la position
-                  </button>
-                }
-              />
-            }
-          >
-            {notes}
-            <Card title="Marché">
-              {selectors}
-              {reserveTokens.error ? (
-                <Notice>
-                  <span>
-                    Lecture d’Aave sur {market.label} impossible : {reserveTokens.error.message.split('\n')[0]} Le RPC public du réseau ne répond pas ou est
-                    bloqué.
-                  </span>
-                  <button className="btn" onClick={reserveTokens.refetch}>
-                    Réessayer
-                  </button>
-                </Notice>
-              ) : (
-                slow && (
+        )}
+        {view === 'loop' &&
+          !morpho &&
+          (pair ? (
+            <PairView
+              key={`${market.id}-${seed?.nonce ?? ''}`}
+              market={market}
+              collateral={pair.collateral}
+              debt={pair.debt}
+              nativeToken={wrappedNative(tokens, market.chain)?.address}
+              tokens={tokens}
+              onPair={setPair}
+              account={address}
+              aggregator={aggregator}
+              selectors={selectors}
+              common={common}
+              notes={notes}
+              seed={seed}
+              onExecutor={(a) => setLocalExecutor(market.id, a)}
+            />
+          ) : (
+            <LoopLayout
+              summary={
+                <Summary
+                  items={[
+                    { label: 'Health factor', key: true },
+                    { label: 'APY net', key: true },
+                  ]}
+                  action={
+                    <button className="btn primary" disabled>
+                      Ouvrir la position
+                    </button>
+                  }
+                />
+              }
+            >
+              {notes}
+              <Card title="Marché">
+                {selectors}
+                {reserveTokens.error ? (
                   <Notice>
-                    <span>Le RPC public de {market.label} répond lentement.</span>
+                    <span>
+                      Lecture d’Aave sur {market.label} impossible : {reserveTokens.error.message.split('\n')[0]} Le RPC public du réseau ne répond pas ou est
+                      bloqué.
+                    </span>
                     <button className="btn" onClick={reserveTokens.refetch}>
                       Réessayer
                     </button>
                   </Notice>
-                )
-              )}
-            </Card>
-          </LoopLayout>
-        ))}
+                ) : (
+                  slow && (
+                    <Notice>
+                      <span>Le RPC public de {market.label} répond lentement.</span>
+                      <button className="btn" onClick={reserveTokens.refetch}>
+                        Réessayer
+                      </button>
+                    </Notice>
+                  )
+                )}
+              </Card>
+            </LoopLayout>
+          ))}
+      </GateProvider>
 
       <footer className="muted small">
         Contrat non audité. Vérifier chaque transaction dans le portefeuille ; le contrat n’agit que pour l’adresse qui signe.

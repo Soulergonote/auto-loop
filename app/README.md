@@ -125,6 +125,8 @@ Seul agrégateur actif pour l’instant. Chaque appel (`/prices` et `/transactio
 
 ## Test de bout en bout sur fork de Base
 
+Depuis le 10/11/2026 l'app s'ouvre sur le Scanner (ou sur Positions quand un portefeuille se reconnecte) et chaque écran a son adresse (`#boucle`, `#scanner`, `#positions`) : `run.cjs` ouvre `#boucle`. Le contrat manquant se déploie par le bouton du résumé, qui enchaîne connexion, réseau, déploiement puis l'action de l'écran. Testé le 10/11/2026 sur fork : déploiement par ce bouton, ouverture 3x de 1 WETH, réduction à 2x et fermeture totale (`AGG=Velora SLIP=0,5`, le fork figé s'écarte des devis au slippage par défaut de 0,01 %).
+
 Testé le 01/11/2026 avec le contrat sans owner : déploiement par le bouton de l'app (`NO_DEPLOY=1 bash e2e/fork.sh`, puis `node e2e/run.cjs deploy d`), puis ouverture 3x et fermeture totale avec ce contrat (`EXECUTOR=0x… node e2e/run.cjs open o`). Une adresse qui n'est pas le contrat (ex. WETH) est refusée.
 
 Testé le 18/10/2026 : anvil sur fork de Base, contrat déployé sur le fork avec seulement le routeur Velora en liste blanche, interface dans Chromium avec un portefeuille de test (compte anvil 1), vraies lectures Aave v3 et vrais devis Velora.
