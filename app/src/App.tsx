@@ -150,7 +150,6 @@ function TokenSelect({ tokens, value, onChange, exclude, label, balances }: Toke
           return {
             value: t.address,
             label: t.symbol,
-            icon: t.symbol,
             disabled: t.address === exclude.address,
             sub: t.address === exclude.address ? 'déjà de l’autre côté de la paire' : undefined,
             cells: withBalances ? [b ? fmtAmount(b, t.decimals) : <span className="na">—</span>] : undefined,
@@ -384,7 +383,7 @@ export function App() {
         <optgroup label="Morpho Blue">
           {MORPHO_NETWORKS.map((n) => (
             <option key={n.id} value={n.id}>
-              Morpho · {n.label}
+              {n.label}
             </option>
           ))}
         </optgroup>

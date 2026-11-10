@@ -259,11 +259,7 @@ footer { text-align: center; }
 /* card title naming a position: the pair, then protocol and network under it */
 .card-sub { display: block; font-size: 13px; font-weight: 400; color: var(--muted); margin-top: 2px; }
 
-/* Token icon (initial in a circle) and the searchable picker for tokens and markets */
-.tok-icon {
-  display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%;
-  border: 1px solid var(--border); background: var(--bg); color: var(--muted); font-size: 12px; font-weight: 600;
-}
+/* Searchable picker for tokens and markets */
 .picker { position: relative; }
 .picker-btn {
   display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 8px 12px; text-align: left;

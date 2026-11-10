@@ -215,7 +215,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
             <optgroup label="Morpho Blue">
               {SCANNABLE_MORPHO.map((n) => (
                 <option key={n.id} value={n.id}>
-                  Morpho · {n.label}
+                  {n.label}
                 </option>
               ))}
             </optgroup>

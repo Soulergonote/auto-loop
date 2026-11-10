@@ -241,7 +241,6 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
                   return {
                     value: c.token.address,
                     label: ptShortSymbol(c.token.symbol),
-                    icon: c.token.symbol,
                     keywords: c.token.symbol,
                     cells: [...(balances.size > 0 ? [b ? fmtAmount(b, c.token.decimals) : <span className="na">—</span>] : []), usd(c.usd)],
                   }
@@ -251,7 +250,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
                 label="Dette"
                 value={market.loan.address}
                 onChange={(a) => setPicked(bestOf(sameCollateral.filter((m) => m.loan.address === a))?.id)}
-                options={loans.map((t) => ({ value: t.address, label: t.symbol, icon: t.symbol }))}
+                options={loans.map((t) => ({ value: t.address, label: t.symbol }))}
               />
             </div>
           ) : (

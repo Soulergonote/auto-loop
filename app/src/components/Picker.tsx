@@ -1,24 +1,8 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 
-/** Round token mark: the symbol's first letter in a circle (charte v2: no external images). PT- prefixes are skipped. */
-export function TokenIcon({ symbol }: { symbol: string }) {
-  const letter =
-    symbol
-      .replace(/^PT-/i, '')
-      .match(/[a-z0-9]/i)?.[0]
-      ?.toUpperCase() ?? '?'
-  return (
-    <span className="tok-icon" aria-hidden="true">
-      {letter}
-    </span>
-  )
-}
-
 export type PickerOption = {
   value: string
   label: string
-  /** shows a token icon for this symbol */
-  icon?: string
   /** extra columns on the right (balance, LLTV, liquidity…) */
   cells?: ReactNode[]
   /** a second line under the label */
@@ -29,7 +13,7 @@ export type PickerOption = {
 }
 
 /**
- * Choice in a long list (tokens, markets): a button that opens a panel with a search field, icons and extra columns.
+ * Choice in a long list (tokens, markets): a button that opens a panel with a search field and extra columns.
  * Arrow keys move, Enter picks, Escape or a click elsewhere closes.
  */
 export function Picker({
@@ -102,7 +86,6 @@ export function Picker({
     <div className="field picker" ref={root} onKeyDown={open ? onKey : undefined}>
       <span id={`${id}-l`}>{label}</span>
       <button type="button" className="picker-btn" aria-haspopup="listbox" aria-expanded={open} aria-labelledby={`${id}-l`} onClick={() => setOpen(!open)}>
-        {current?.icon && <TokenIcon symbol={current.icon} />}
         <span className="picker-value">{display ?? current?.label ?? '—'}</span>
         <span className="picker-caret" aria-hidden="true">
           ▾
@@ -147,7 +130,6 @@ export function Picker({
                 onClick={() => pick(o)}
               >
                 <span className="picker-label">
-                  {o.icon && <TokenIcon symbol={o.icon} />}
                   <span>
                     {o.label}
                     {o.sub && <span className="muted small picker-sub">{o.sub}</span>}
