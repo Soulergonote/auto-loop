@@ -162,7 +162,20 @@ function TokenSelect({ tokens, value, onChange, exclude, label, balances }: Toke
 
 const MARKET_KEY = 'auto-loop.market'
 
+/** The page address: #boucle/<network>/<collateral>/<debt>, #scanner, #positions. */
+function hashParts(): string[] {
+  try {
+    return window.location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent)
+  } catch {
+    return []
+  }
+}
+const isNetworkId = (id?: string) => !!id && (MARKETS.some((m) => m.id === id && !m.soon) || MORPHO_NETWORKS.some((n) => n.id === id))
+
 function savedMarketId(): string {
+  // a link to a pair opens its network, whatever was chosen last in this browser
+  const [view, id] = hashParts()
+  if (view === HASHES.loop && isNetworkId(id)) return id
   try {
     return localStorage.getItem(MARKET_KEY) ?? DEFAULT_MARKET_ID
   } catch {
@@ -296,6 +309,25 @@ export function App() {
     seed?: Seed & { nonce: number }
   }>()
 
+  // a pair named in the link is picked once its network's tokens are read
+  const linked = useRef<{ market: string; collateral: string; debt: string } | undefined>(
+    (() => {
+      const [view, id, c, d] = hashParts()
+      return view === HASHES.loop && isNetworkId(id) && c && d ? { market: id, collateral: c.toLowerCase(), debt: d.toLowerCase() } : undefined
+    })(),
+  )
+  useEffect(() => {
+    const l = linked.current
+    if (!l || !tokens) return
+    if (l.market === market.id) {
+      const bySymbol = (sym: string) => tokens.find((t) => t.symbol.toLowerCase() === sym)
+      const collateral = bySymbol(l.collateral)
+      const debt = bySymbol(l.debt)
+      if (collateral && debt && collateral !== debt) setPicked({ market: market.id, collateral: collateral.address, debt: debt.address })
+    }
+    linked.current = undefined
+  }, [tokens, market.id])
+
   const pair = useMemo(() => {
     if (!tokens || tokens.length < 2) return undefined
     if (picked?.market === market.id) {
@@ -305,6 +337,14 @@ export function App() {
     }
     return defaultPair(tokens)
   }, [tokens, picked, market.id])
+
+  // the address follows the screen: network and pair of the Boucle, so a reload or a shared link reopens them
+  useEffect(() => {
+    if (view !== 'loop' || DEMO || (linked.current && !morpho)) return
+    const parts = [HASHES.loop, marketId, ...(!morpho && pair ? [pair.collateral.symbol, pair.debt.symbol] : [])]
+    const target = `#${parts.map(encodeURIComponent).join('/')}`
+    if (window.location.hash !== target) window.history.replaceState(null, '', target)
+  }, [view, marketId, morpho, pair])
 
   function chooseMarket(id: string) {
     setMarketId(id)
@@ -400,7 +440,7 @@ export function App() {
           <>
             Contrat Auto-loop vérifié :{' '}
             <a href={`${market.chain.blockExplorers?.default.url}/address/${market.executor}`} target="_blank" rel="noreferrer" title={market.executor}>
-              {fmtAddress(market.executor)}
+              <span className="addr">{fmtAddress(market.executor)}</span>
             </a>
             {market.executorVersion === 1 && ' (v1)'}
             {market.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
@@ -412,13 +452,13 @@ export function App() {
 
   const notes = (
     <>
-      {DEMO && <p className="muted small">Mode démo : prix et paramètres de marché fictifs, rien n’est lu sur la chaîne.</p>}
+      {DEMO && <p className="muted small">Mode démo : prix et paramètres de marché fictifs, rien n’est lu on-chain.</p>}
       {QUOTE_MODE === 'mock' && <p className="muted small">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</p>}
       {!DEMO && declared.executor && check.isPending && <p className="muted small">Vérification du contrat Auto-loop sur {market.label}…</p>}
       {!DEMO && declared.executor && check.isError && (
         <Notice tone="bad">
           <span>
-            Contrat {fmtAddress(declared.executor)} refusé : {check.error.message}. Aucune transaction ne sera proposée avec lui.
+            Contrat <span className="addr">{fmtAddress(declared.executor)}</span> refusé : {check.error.message}. Aucune transaction ne sera proposée avec lui.
           </span>
           {declared.executorSource === 'wallet' && (
             <button className="btn" onClick={() => setLocalExecutor(market.id)}>
@@ -448,7 +488,7 @@ export function App() {
               rel="noreferrer"
               title={morphoNet.executor}
             >
-              {fmtAddress(morphoNet.executor)}
+              <span className="addr">{fmtAddress(morphoNet.executor)}</span>
             </a>
             {morphoNet.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
           </>
@@ -463,7 +503,8 @@ export function App() {
       {declaredMorpho.executor && morphoCheck.isError && (
         <Notice tone="bad">
           <span>
-            Contrat {fmtAddress(declaredMorpho.executor)} refusé : {morphoCheck.error.message}. Aucune transaction ne sera proposée avec lui.
+            Contrat <span className="addr">{fmtAddress(declaredMorpho.executor)}</span> refusé : {morphoCheck.error.message}. Aucune transaction ne sera
+            proposée avec lui.
           </span>
           {declaredMorpho.executorSource === 'wallet' && (
             <button className="btn" onClick={() => setLocalExecutor(declaredMorpho.id)}>
@@ -478,7 +519,10 @@ export function App() {
   return (
     <div className="page">
       <header className="top">
-        <h1>Auto-loop</h1>
+        <h1>
+          <img className="app-icon" src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" />
+          Auto-loop
+        </h1>
         <WalletButton market={morpho ? morphoNet : market} />
       </header>
       <nav className="nav">
@@ -673,21 +717,23 @@ function PairView({
               <thead>
                 <tr>
                   <th>Actif</th>
-                  <th>Prix oracle</th>
-                  <th>LTV / seuil liq.</th>
-                  <th>APY dépôt</th>
-                  <th>APY emprunt</th>
+                  <th className="num">Prix oracle</th>
+                  <th className="num">LTV / seuil liq.</th>
+                  <th className="num">APY dépôt</th>
+                  <th className="num">APY emprunt</th>
                 </tr>
               </thead>
               <tbody>
                 {[r.collateral, r.debt].map((x) => (
                   <tr key={x.token.address}>
                     <td className="lead">{x.token.symbol}</td>
-                    <td data-label="Prix oracle">{fmtPrice(x.price)}</td>
-                    <td data-label="LTV / seuil liq.">
+                    <td className="num" data-label="Prix oracle">
+                      {fmtPrice(x.price)}
+                    </td>
+                    <td className="num" data-label="LTV / seuil liq.">
                       {fmtPct(x.config.ltvBps / 10_000, 0)} / {fmtPct(x.config.liquidationThresholdBps / 10_000, 0)}
                     </td>
-                    <td data-label="APY dépôt">
+                    <td className="num" data-label="APY dépôt">
                       <div>
                         {fmtPct(x.supplyApy)}
                         {x.native && (
@@ -700,7 +746,7 @@ function PairView({
                         <Averages values={averages.data?.get(x.token.address.toLowerCase())?.supply} pending={averages.isPending} />
                       </div>
                     </td>
-                    <td data-label="APY emprunt">
+                    <td className="num" data-label="APY emprunt">
                       <div>
                         {fmtPct(x.borrowApy)}
                         {x.native && (

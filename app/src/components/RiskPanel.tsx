@@ -111,7 +111,7 @@ export function RiskPanel({
             </>
           )}
           <tr>
-            <th colSpan={DROPS.length + 1}>Health factor avec le temps, aux taux actuels, sans réclamer les rewards</th>
+            <th colSpan={DROPS.length + 1}>Health factor avec le temps, aux taux actuels, sans réclamer les récompenses</th>
           </tr>
           <tr>
             <td colSpan={2} className={hfClass(hfAfterDays(healthFactor, supplyApy, debtGrowth, 30))}>

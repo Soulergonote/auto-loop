@@ -81,10 +81,10 @@ export function DeployPanel({ market, onReady, upgrade }: { market: Market; onRe
           {routers.map((r, i) => (
             <span key={r.router}>
               {i > 0 && ', '}
-              {r.label} ({fmtAddress(r.router)})
+              {r.label} (<span className="addr">{fmtAddress(r.router)}</span>)
             </span>
           ))}
-          . Pool Aave : {fmtAddress(market.pool)}.
+          . Pool Aave : <span className="addr">{fmtAddress(market.pool)}</span>.
         </p>
         <div className="grid2">
           <label className="field">

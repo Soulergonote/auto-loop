@@ -96,7 +96,7 @@ export function Positions({
 
   return (
     <>
-      <Card title="Positions">
+      <Card>
         <label className="field">
           <span>Adresse {account && !typed ? '(portefeuille connecté)' : '(lecture seule)'}</span>
           <input placeholder={account ?? '0x…'} value={typed} onChange={(e) => setTyped(e.target.value)} spellCheck={false} />
@@ -169,7 +169,7 @@ export function Positions({
 
       {claim.length > 0 && user && (
         <Card
-          title="Rewards Merkl"
+          title="Récompenses à réclamer"
           aside={
             <a href={`https://app.merkl.xyz/users/${user}`} target="_blank" rel="noreferrer">
               Réclamer sur Merkl
@@ -181,9 +181,9 @@ export function Positions({
               <tr>
                 <th>Réseau</th>
                 <th>Token</th>
-                <th>À réclamer</th>
-                <th>En cours</th>
-                <th>Valeur</th>
+                <th className="num">À réclamer</th>
+                <th className="num">En cours</th>
+                <th className="num">Valeur</th>
               </tr>
             </thead>
             <tbody>
@@ -194,11 +194,22 @@ export function Positions({
                     <td data-label="Token">
                       {b.symbol}
                       {/* two tokens with one symbol (two WMON on Monad): the address tells them apart */}
-                      {c.balances.some((o) => o !== b && o.symbol === b.symbol) && <span className="muted small"> {fmtAddress(b.address)}</span>}
+                      {c.balances.some((o) => o !== b && o.symbol === b.symbol) && (
+                        <span className="muted small">
+                          {' '}
+                          <span className="addr">{fmtAddress(b.address)}</span>
+                        </span>
+                      )}
                     </td>
-                    <td data-label="À réclamer">{fmtNum(b.claimable)}</td>
-                    <td data-label="En cours">{fmtNum(b.pending)}</td>
-                    <td data-label="Valeur">{b.usd > 0 ? fmtDollars(b.usd) : '—'}</td>
+                    <td className="num" data-label="À réclamer">
+                      {fmtNum(b.claimable)}
+                    </td>
+                    <td className="num" data-label="En cours">
+                      {fmtNum(b.pending)}
+                    </td>
+                    <td className="num" data-label="Valeur">
+                      {b.usd > 0 ? fmtDollars(b.usd) : '—'}
+                    </td>
                   </tr>
                 )),
               )}
@@ -228,6 +239,14 @@ function MarketPosition({
   const emode = snapshot.emodes.find((c) => c.id === eModeCategory)
   const collateral = biggest(holdings, 'suppliedBase')
   const debt = biggest(holdings, 'borrowedBase')
+  // the title names the pair: the biggest deposit that is not also the debt asset, when there is one
+  const titleCollateral =
+    collateral === debt
+      ? (biggest(
+          holdings.filter((h) => h !== debt && h.suppliedBase > 0n),
+          'suppliedBase',
+        ) ?? collateral)
+      : collateral
   const excluded = s.campaigns.filter((c) => c.reasons.length > 0)
   const paying = s.campaigns.filter((c) => c.apy > 0)
   const tone = s.debtBase > 0n ? hfTone(healthFactor, correlated) : undefined
@@ -249,7 +268,7 @@ function MarketPosition({
     <Card
       title={
         <>
-          {collateral.reserve.token.symbol}
+          {titleCollateral.reserve.token.symbol}
           {s.debtBase > 0n && ` / ${debt.reserve.token.symbol}`}
           <span className="card-sub">Aave · {market.label}</span>
         </>
@@ -321,18 +340,22 @@ function MarketPosition({
           <thead>
             <tr>
               <th>Actif</th>
-              <th>Déposé</th>
-              <th>Emprunté</th>
-              <th>APY</th>
+              <th className="num">Déposé</th>
+              <th className="num">Emprunté</th>
+              <th className="num">APY</th>
             </tr>
           </thead>
           <tbody>
             {holdings.map((h) => (
               <tr key={h.reserve.token.address}>
                 <td className="lead">{h.reserve.token.symbol}</td>
-                <td data-label="Déposé">{h.supplied > 0n ? `${fmtAmount(h.supplied, h.reserve.config.decimals)} (${fmtUsd(h.suppliedBase, true)})` : '—'}</td>
-                <td data-label="Emprunté">{h.borrowed > 0n ? `${fmtAmount(h.borrowed, h.reserve.config.decimals)} (${fmtUsd(h.borrowedBase, true)})` : '—'}</td>
-                <td data-label="APY">
+                <td className="num" data-label="Déposé">
+                  {h.supplied > 0n ? `${fmtAmount(h.supplied, h.reserve.config.decimals)} (${fmtUsd(h.suppliedBase, true)})` : '—'}
+                </td>
+                <td className="num" data-label="Emprunté">
+                  {h.borrowed > 0n ? `${fmtAmount(h.borrowed, h.reserve.config.decimals)} (${fmtUsd(h.borrowedBase, true)})` : '—'}
+                </td>
+                <td className="num" data-label="APY">
                   {h.supplied > 0n && `dépôt ${fmtPct(h.reserve.supplyApy)}`}
                   {h.supplied > 0n && h.borrowed > 0n && ' · '}
                   {h.borrowed > 0n && `emprunt ${fmtPct(h.reserve.borrowApy)}`}
@@ -354,8 +377,8 @@ function MarketPosition({
             <thead>
               <tr>
                 <th>Campagne</th>
-                <th>APR affiché</th>
-                <th>Sur la position</th>
+                <th className="num">APR affiché</th>
+                <th className="num">Sur la position</th>
                 <th>Fin</th>
               </tr>
             </thead>
@@ -363,8 +386,12 @@ function MarketPosition({
               {paying.map((c) => (
                 <tr key={c.campaign.name + c.campaign.token}>
                   <td className="lead">{c.campaign.name}</td>
-                  <td data-label="APR affiché">{fmtPct(c.campaign.apr)}</td>
-                  <td data-label="Sur la position">{fmtPct(c.apy)}</td>
+                  <td className="num" data-label="APR affiché">
+                    {fmtPct(c.campaign.apr)}
+                  </td>
+                  <td className="num" data-label="Sur la position">
+                    {fmtPct(c.apy)}
+                  </td>
                   <td data-label="Fin" className={daysLeft(c.campaign) < 7 ? 'warn' : undefined}>
                     {c.campaign.endsAt ? fmtDate(c.campaign.endsAt) : 'non indiquée'}
                   </td>

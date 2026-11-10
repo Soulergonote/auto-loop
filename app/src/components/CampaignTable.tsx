@@ -26,8 +26,8 @@ export function CampaignTable({ campaigns, yields, excluded, borrowed }: Props) 
       <thead>
         <tr>
           <th>Bonus Merkl</th>
-          <th>APR affiché</th>
-          <th>Sur la position</th>
+          <th className="num">APR affiché</th>
+          <th className="num">Sur la position</th>
           <th>Fin</th>
           <th>Conditions</th>
         </tr>
@@ -48,8 +48,10 @@ export function CampaignTable({ campaigns, yields, excluded, borrowed }: Props) 
                   c.name
                 )}
               </td>
-              <td data-label="APR affiché">{fmtPct(c.apr)}</td>
-              <td data-label="Sur la position" className={out ? 'bad' : undefined}>
+              <td className="num" data-label="APR affiché">
+                {fmtPct(c.apr)}
+              </td>
+              <td data-label="Sur la position" className={out ? 'num bad' : 'num'}>
                 {out ? 'non compté' : y ? fmtPct(y.apy) : '…'}
               </td>
               <td data-label="Fin" className={left < 7 ? 'warn' : undefined}>

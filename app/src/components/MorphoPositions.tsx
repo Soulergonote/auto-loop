@@ -236,30 +236,32 @@ function MorphoPosition({ onManage, ...row }: Row & { onManage: (m: MorphoMarket
           plus long ou fermer.
         </Notice>
       )}
-      {u.authorized && <Notice tone="bad">L’exécuteur Auto-loop reste autorisé sur ce compte Morpho : retirer l’autorisation depuis l’écran Boucle.</Notice>}
+      {u.authorized && <Notice tone="bad">Le contrat Auto-loop reste autorisé sur ce compte Morpho : retirer l’autorisation depuis l’écran Boucle.</Notice>}
       <Fold title="Actifs" value={`${m.collateral.symbol} déposé · ${m.loan.symbol} emprunté`}>
         <table className="reserves cards">
           <thead>
             <tr>
               <th>Actif</th>
-              <th>Montant</th>
-              <th>APY</th>
+              <th className="num">Montant</th>
+              <th className="num">APY</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td className="lead">{m.collateral.symbol}</td>
-              <td data-label="Montant">
+              <td className="num" data-label="Montant">
                 {fmtAmount(u.collateral, m.collateral.decimals)} ({fmtUsd(collUsd, true)})
               </td>
-              <td data-label="APY">{collateralApy ? `${fmtPct(collateralApy)} ${pt ? 'fixe' : 'token'}` : '—'}</td>
+              <td className="num" data-label="APY">
+                {collateralApy ? `${fmtPct(collateralApy)} ${pt ? 'fixe' : 'token'}` : '—'}
+              </td>
             </tr>
             <tr>
               <td className="lead">{m.loan.symbol}</td>
-              <td data-label="Montant">
+              <td className="num" data-label="Montant">
                 {fmtAmount(u.debt, m.loan.decimals)} ({fmtUsd(debtUsd, true)})
               </td>
-              <td data-label="APY">
+              <td className="num" data-label="APY">
                 emprunt {fmtPct(borrowApy)}
                 {m.borrowRewardsApr > 0 && <span className="muted"> − {fmtPct(m.borrowRewardsApr)} rewards</span>}
               </td>

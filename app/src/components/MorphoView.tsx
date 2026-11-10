@@ -76,11 +76,11 @@ function MorphoDeployPanel({ net, onReady }: { net: MorphoNet; onReady: (a: Addr
         <p className="muted small">
           Seul le gas est payé. Le contrat n’a ni propriétaire ni fonction d’administration et ne garde aucun fonds : collatéral et dette restent sur le compte
           Morpho de l’adresse qui signe. Il n’agit sur ce compte que pendant la transaction signée : l’autorisation Morpho est donnée puis retirée dans la même
-          transaction. Morpho Blue : {fmtAddress(net.morpho)}. Routeurs autorisés :{' '}
+          transaction. Morpho Blue : <span className="addr">{fmtAddress(net.morpho)}</span>. Routeurs autorisés :{' '}
           {routers.map((r, i) => (
             <span key={r.router}>
               {i > 0 && ', '}
-              {r.label} ({fmtAddress(r.router)})
+              {r.label} (<span className="addr">{fmtAddress(r.router)}</span>)
             </span>
           ))}
           .
@@ -310,7 +310,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
               </dd>
               <dt>Emprunt</dt>
               <dd>
-                {fmtPct(borrowApy)} {s?.borrowApy !== undefined ? '(taux de l’IRM lu sur la chaîne)' : '(API Morpho)'}
+                {fmtPct(borrowApy)} {s?.borrowApy !== undefined ? '(taux de l’IRM lu on-chain)' : '(API Morpho)'}
                 {market.borrowRewardsApr > 0 && <span className="reward"> − {fmtPct(market.borrowRewardsApr)} récompenses</span>}
               </dd>
               <dt>Liquidité</dt>
@@ -320,7 +320,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
               <dt>Oracle</dt>
               <dd>
                 <a href={`${net.chain.blockExplorers?.default.url}/address/${market.params.oracle}`} target="_blank" rel="noreferrer">
-                  {fmtAddress(market.params.oracle)}
+                  <span className="addr">{fmtAddress(market.params.oracle)}</span>
                 </a>{' '}
                 {market.oracleType ?? ''}
               </dd>

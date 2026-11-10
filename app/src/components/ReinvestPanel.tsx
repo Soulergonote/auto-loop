@@ -278,7 +278,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
       const hash = await sendBatch(chainId, account, calls, setBusy)
       setResult({
         ok: true,
-        text: `${plan.length} reward${plan.length > 1 ? 's' : ''} réinvesti${plan.length > 1 ? 's' : ''} : ${fmtAmount(cap + deposited, C.token.decimals)} ${C.token.symbol} ajoutés.`,
+        text: `${plan.length} récompense${plan.length > 1 ? 's' : ''} réinvestie${plan.length > 1 ? 's' : ''} : ${fmtAmount(cap + deposited, C.token.decimals)} ${C.token.symbol} ajoutés.`,
         hash,
       })
       refetch()
@@ -412,7 +412,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
   const added = oneClick ? (batchCapital !== undefined ? batchCapital + deposited : undefined) : estimate + deposited
   const items = [
     {
-      label: 'Rewards à réclamer',
+      label: 'Récompenses à réclamer',
       value: ready ? fmtDollars(totalUsd) : undefined,
       sub: ready ? `${plan.length} token${plan.length > 1 ? 's' : ''}` : undefined,
       key: true,
@@ -451,13 +451,13 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
       }
     >
       {head}
-      <Card title="Réinvestir les rewards Merkl">
-        {error && <Notice>Merkl indisponible : rewards illisibles. Réessayer plus tard.</Notice>}
+      <Card title="Réinvestir les récompenses Merkl">
+        {error && <Notice>Merkl indisponible : récompenses illisibles. Réessayer plus tard.</Notice>}
         <Banners problems={problems} warnings={warnings} />
         {!ready && !error ? (
           <Skel w={16} />
         ) : plan.length === 0 ? (
-          <p className="muted">Aucun reward réclamable sur {market.chain.name}. Merkl met à jour les montants toutes les 8 h environ.</p>
+          <p className="muted">Aucune récompense à réclamer sur {market.chain.name}. Merkl met à jour les montants toutes les 8 h environ.</p>
         ) : (
           <table className="reserves cards">
             <thead>

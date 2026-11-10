@@ -199,7 +199,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
   const hf = hfText.replace('.', ',')
 
   return (
-    <Card title="Scanner">
+    <Card>
       <div className="scan-filters">
         <label className="field">
           <span>Réseau</span>
@@ -364,7 +364,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
       <Fold title="Méthode" value={`levier à un health factor de ${hf}, meilleur eMode, Merkl si éligible, Morpho listé`}>
         <p className="muted small">
           Le levier de chaque paire donne un health factor de {hf}, plafonné comme le curseur de la boucle, dans la configuration eMode qui rapporte le plus.
-          Les rewards Merkl ne comptent que si la position y a droit à ce health factor. Les taux sont variables : l’APY change avec l’utilisation du marché.
+          Les bonus Merkl ne comptent que si la position y a droit à ce health factor. Les taux sont variables : l’APY change avec l’utilisation du marché.
         </p>
         <p className="muted small">
           « Rendement du token » est le rendement propre des tokens à rendement (wstETH, sUSDe…) : la hausse de leur taux de change depuis le dernier relevé de
@@ -378,8 +378,8 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
         </p>
         <p className="muted small">
           Morpho Blue : chaque marché listé par Morpho (un collatéral, un actif emprunté, une LLTV), au levier qui donne ce health factor, plafonné au levier
-          d’un health factor de 1,02 comme le curseur. Taux de l’API Morpho, relus on-chain à l’ouverture ; « Bonus Merkl » y est la part des rewards d’emprunt
-          que l’API compte. Les marchés avec un avertissement rouge de l’API sont écartés.
+          d’un health factor de 1,02 comme le curseur. Taux de l’API Morpho, relus on-chain à l’ouverture ; « Bonus Merkl » y est la part des récompenses
+          d’emprunt que l’API compte. Les marchés avec un avertissement rouge de l’API sont écartés.
         </p>
       </Fold>
     </Card>
