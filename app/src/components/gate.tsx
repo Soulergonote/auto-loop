@@ -2,6 +2,7 @@ import { createContext, useContext, useState } from 'react'
 import type { Address, Chain } from 'viem'
 import { useAccount, useConnect, useSwitchChain } from 'wagmi'
 import { explainError } from '../lib/execute'
+import { chooseWallet, useWallets } from './wallets'
 
 /**
  * What an action screen needs before its own button: a connected wallet, on the right network, with a verified
@@ -26,18 +27,20 @@ export type GateStep = { label: string; onClick?: () => void; reason?: string; b
 export function useGateStep(needs: 'contract' | 'wallet' | 'none' = 'contract'): GateStep | undefined {
   const g = useContext(GateContext)
   const { isConnected, chainId } = useAccount()
-  const { connect, connectors, isPending } = useConnect()
+  const { connect, isPending } = useConnect()
+  const wallets = useWallets()
   const { switchChain, isPending: switching } = useSwitchChain()
   const [step, setStep] = useState<string>()
   const [error, setError] = useState<string>()
   if (!g || needs === 'none') return undefined
 
   if (!isConnected) {
-    const injected = connectors[0]
+    // one wallet: connect it; several: let the header menu ask which one
+    const only = wallets.length === 1 ? wallets[0] : undefined
     return {
       label: isPending ? 'Connexion…' : 'Connecter le portefeuille',
-      onClick: injected && !isPending ? () => connect({ connector: injected }) : undefined,
-      reason: injected ? undefined : 'Aucun portefeuille détecté dans ce navigateur',
+      onClick: isPending || !wallets.length ? undefined : only ? () => connect({ connector: only }) : chooseWallet,
+      reason: wallets.length ? undefined : 'Aucun portefeuille détecté dans ce navigateur',
     }
   }
   if (chainId !== g.chain.id)

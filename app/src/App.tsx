@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
+import { CHOOSE_WALLET, useWallets } from './components/wallets'
 import { formatUnits, type Address } from 'viem'
 import {
   DEFAULT_COLLATERAL_SYMBOLS,
@@ -55,7 +56,8 @@ type Seed = { emode: number; leverage: number; tab?: Pick['tab']; amount?: strin
 
 function WalletButton({ market }: { market: { chain: Market['chain'] } }) {
   const { address, chainId, chain, isConnected } = useAccount()
-  const { connect, connectors, isPending } = useConnect()
+  const { connect, isPending } = useConnect()
+  const wallets = useWallets()
   const { disconnect } = useDisconnect()
   const { switchChain } = useSwitchChain()
   const menu = useRef<HTMLDetailsElement>(null)
@@ -66,20 +68,51 @@ function WalletButton({ market }: { market: { chain: Market['chain'] } }) {
       const d = menu.current
       if (d?.open && (e.type === 'keydown' ? (e as KeyboardEvent).key === 'Escape' : !d.contains(e.target as Node))) d.open = false
     }
+    const open = () => {
+      if (!menu.current) return
+      menu.current.open = true
+      menu.current.querySelector<HTMLElement>('[role=menuitem]')?.focus()
+    }
     document.addEventListener('mousedown', close)
     document.addEventListener('keydown', close)
+    window.addEventListener(CHOOSE_WALLET, open)
     return () => {
       document.removeEventListener('mousedown', close)
       document.removeEventListener('keydown', close)
+      window.removeEventListener(CHOOSE_WALLET, open)
     }
   }, [])
 
   if (!isConnected) {
-    const injected = connectors[0]
+    const label = isPending ? 'Connexion…' : 'Connecter le portefeuille'
+    if (wallets.length < 2)
+      return (
+        <button className="btn" disabled={!wallets.length || isPending} onClick={() => wallets[0] && connect({ connector: wallets[0] })}>
+          {label}
+        </button>
+      )
+    // several browser wallets: the user picks which one
     return (
-      <button className="btn" disabled={!injected || isPending} onClick={() => injected && connect({ connector: injected })}>
-        {isPending ? 'Connexion…' : 'Connecter le portefeuille'}
-      </button>
+      <details className="wallet-menu" ref={menu}>
+        <summary className="btn">{label}</summary>
+        <div className="menu" role="menu">
+          {wallets.map((w) => (
+            <button
+              key={w.uid}
+              role="menuitem"
+              className="wallet-choice"
+              disabled={isPending}
+              onClick={() => {
+                if (menu.current) menu.current.open = false
+                connect({ connector: w })
+              }}
+            >
+              {w.icon && <img src={w.icon} alt="" width={20} height={20} />}
+              {w.name}
+            </button>
+          ))}
+        </div>
+      </details>
     )
   }
   const wrong = chainId !== market.chain.id
