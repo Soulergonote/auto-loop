@@ -73,7 +73,11 @@ p { margin: 0; }
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.market-row { display: grid; grid-template-columns: 1fr 1fr auto 1fr; gap: 8px; align-items: end; }
+.market-row { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: end; }
+.market-row.two { grid-template-columns: 1fr 1fr; }
+/* protocol, network and (Ethereum) Aave market, above the pair */
+.place-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: end; margin-bottom: 12px; }
+.place-row > label.field { min-width: 200px; flex: 1; max-width: 280px; }
 .market-row .pair { display: contents; }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .field > span { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
@@ -110,7 +114,7 @@ input[type='checkbox'] { width: auto; min-height: 0; accent-color: var(--accent)
 .segmented button.on { background: var(--card); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); font-weight: 600; }
 .segmented button:disabled { color: var(--muted); cursor: not-allowed; }
 .tabs .segmented { max-width: 420px; }
-.scan-filters { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto auto; gap: 12px; align-items: end; }
+.scan-filters { display: grid; grid-template-columns: auto minmax(180px, 1fr) auto auto; gap: 12px; align-items: end; }
 .scan .btn { min-height: 32px; }
 
 /* tiles: 4 columns on desktop, 2 on mobile */
@@ -190,7 +194,8 @@ footer { text-align: center; }
 
 @media (max-width: 640px) {
   .page { padding-bottom: 120px; }
-  .grid2, .market-row, .scan-filters { grid-template-columns: 1fr; }
+  .grid2, .market-row, .market-row.two, .scan-filters { grid-template-columns: 1fr; }
+  .place-row > label.field { max-width: none; }
   .market-row .pair { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: end; }
   .metrics { grid-template-columns: 1fr 1fr; }
   input, select, .btn { min-height: 44px; }

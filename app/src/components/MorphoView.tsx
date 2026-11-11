@@ -228,8 +228,8 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
         </Card>
       )}
       <Card title="Marché">
-        <div className="market-row">
-          {networkSelect}
+        {networkSelect}
+        <div className="market-row two">
           {market ? (
             <div className="pair">
               <Picker
@@ -255,7 +255,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
               />
             </div>
           ) : (
-            <div className="field" style={{ gridColumn: 'span 3' }}>
+            <div className="field" style={{ gridColumn: '1 / -1' }}>
               <span>Marché</span>
               <Skel w={12} />
             </div>

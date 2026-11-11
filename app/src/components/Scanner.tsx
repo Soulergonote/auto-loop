@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import type { Address } from 'viem'
-import { MARKETS, MORPHO_NETWORKS, aggregatorsFor, getMarket, type Market } from '../config'
+import { MARKETS, MORPHO_NETWORKS, aggregatorsFor, getMarket, networkName, type Market } from '../config'
 import { merklQuery } from '../lib/merkl'
 import { snapshotQuery } from '../lib/snapshot'
 import { scanMarket, type ScanFlag } from '../lib/scan'
@@ -37,6 +37,14 @@ const FLAG_TAG: Record<ScanFlag | MorphoScanFlag, { text: string; tone?: 'good' 
 /** Markets the app can loop on: an aggregator quotes there. */
 const SCANNABLE = MARKETS.filter((m) => !m.soon && aggregatorsFor(m.chain.id).length > 0)
 const SCANNABLE_MORPHO = MORPHO_NETWORKS.filter((n) => aggregatorsFor(n.chain.id).length > 0)
+/** Networks the protocol filter leaves, one per chain (Ethereum Core and Prime are one network). */
+function networksOf(protocol: Protocol): { chainId: number; label: string }[] {
+  const all = [
+    ...(protocol === 'morpho' ? [] : SCANNABLE.map((m) => ({ chainId: m.chain.id, label: networkName(m.label) }))),
+    ...(protocol === 'aave' ? [] : SCANNABLE_MORPHO.map((n) => ({ chainId: n.chain.id, label: n.label }))),
+  ]
+  return all.filter((n, i) => all.findIndex((x) => x.chainId === n.chainId) === i)
+}
 
 /** One line of the table, Aave pair or Morpho market. */
 type Line = {
@@ -70,7 +78,7 @@ const flagTags = (flags: (ScanFlag | MorphoScanFlag)[]) =>
  * yield (rates + token yield + eligible Merkl on Aave).
  */
 export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; onPickMorpho: (m: MorphoMarket, tab?: MorphoTab, leverage?: number) => void }) {
-  const [scope, setScope] = useState('all')
+  const [scope, setScope] = useState<number | 'all'>('all')
   const [hfText, setHf] = useState<(typeof HFS)[number]>('1.1')
   const [filter, setFilter] = useState<Filter>('correlated')
   const [showNegative, setShowNegative] = useState(false)
@@ -78,8 +86,14 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
   const [protocol, setProtocol] = useState<Protocol>('all')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'apy', desc: true })
-  const markets: Market[] = useMemo(() => (scope === 'all' ? SCANNABLE : SCANNABLE.filter((m) => m.id === scope)).map((m) => getMarket(m.id)), [scope])
-  const morphoNets = scope === 'all' ? SCANNABLE_MORPHO : SCANNABLE_MORPHO.filter((n) => n.id === scope)
+  // network and protocol are separate filters; only what they leave is read
+  const networks = networksOf(protocol)
+  const chain = networks.some((n) => n.chainId === scope) ? scope : 'all'
+  const markets: Market[] = useMemo(
+    () => (protocol === 'morpho' ? [] : SCANNABLE.filter((m) => chain === 'all' || m.chain.id === chain)).map((m) => getMarket(m.id)),
+    [protocol, chain],
+  )
+  const morphoNets = protocol === 'aave' ? [] : SCANNABLE_MORPHO.filter((n) => chain === 'all' || n.chain.id === chain)
   const snapshots = useQueries({ queries: markets.map((m) => snapshotQuery(m)) })
   const morphoLists = useQueries({ queries: morphoNets.map((n) => morphoMarketsQuery(n.chain.id, false)) })
   // a PT's yield is its Pendle implied APY: read for the PT collaterals of each network's listed markets
@@ -102,7 +116,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
         out.push({
           key: `${r.marketId}-${r.collateral.token.address}-${r.debt.token.address}`,
           pair: `${r.collateral.token.symbol} / ${r.debt.token.symbol}`,
-          place: label(r.marketId),
+          place: `Aave · ${label(r.marketId)}`,
           protocol: 'aave',
           tags: [
             r.collateral.pt && <span key="pt">{ptTag(r.collateral.pt.expiry)}</span>,
@@ -201,30 +215,6 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
   return (
     <Card>
       <div className="scan-filters">
-        <label className="field">
-          <span>Réseau</span>
-          <select value={scope} onChange={(e) => setScope(e.target.value)}>
-            <option value="all">Tous les réseaux</option>
-            <optgroup label="Aave v3">
-              {SCANNABLE.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Morpho Blue">
-              {SCANNABLE_MORPHO.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.label}
-                </option>
-              ))}
-            </optgroup>
-          </select>
-        </label>
-        <div className="field">
-          <span>Health factor visé</span>
-          <Segmented value={hfText} onChange={setHf} options={HFS.map((h) => ({ value: h, label: h.replace('.', ',') }))} />
-        </div>
         <div className="field">
           <span>Protocole</span>
           <Segmented
@@ -236,6 +226,21 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
               { value: 'morpho' as Protocol, label: 'Morpho' },
             ]}
           />
+        </div>
+        <label className="field">
+          <span>Réseau</span>
+          <select value={chain} onChange={(e) => setScope(e.target.value === 'all' ? 'all' : Number(e.target.value))}>
+            <option value="all">Tous les réseaux</option>
+            {networks.map((n) => (
+              <option key={n.chainId} value={n.chainId}>
+                {n.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="field">
+          <span>Health factor visé</span>
+          <Segmented value={hfText} onChange={setHf} options={HFS.map((h) => ({ value: h, label: h.replace('.', ',') }))} />
         </div>
         <div className="field">
           <span>Type de paire</span>
@@ -305,7 +310,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
               <tr key={r.key} className="clickable" onClick={r.open}>
                 <td className="lead">
                   {r.pair}
-                  {scope === 'all' && <span className="muted"> · {r.place}</span>}
+                  {(chain === 'all' || protocol === 'all') && <span className="muted"> · {r.place}</span>}
                   <div className="tags">{r.tags}</div>
                 </td>
                 <td data-label="Levier" className="num">

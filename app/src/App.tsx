@@ -13,6 +13,8 @@ import {
   getMarket,
   getMorphoNet,
   isMorphoId,
+  marketInstance,
+  networkName,
   savedExecutors,
   storeExecutors,
   executorRouters,
@@ -54,6 +56,18 @@ function viewFromHash(): View | undefined {
 }
 /** How the Boucle screen opens a pair: eMode and leverage, the tab, and for « Ouvrir » a capital amount and token. */
 type Seed = { emode: number; leverage: number; tab?: Pick['tab']; amount?: string; capital?: Address }
+
+type Protocol = 'aave' | 'morpho'
+const AAVE_MARKETS = MARKETS.filter((m) => !m.soon)
+/** Networks of each protocol, one entry per chain; an Aave network leads to its first market. */
+const PLACES: Record<Protocol, { id: string; chainId: number; label: string }[]> = {
+  aave: AAVE_MARKETS.filter((m, i) => AAVE_MARKETS.findIndex((x) => x.chain.id === m.chain.id) === i).map((m) => ({
+    id: m.id,
+    chainId: m.chain.id,
+    label: networkName(m.label),
+  })),
+  morpho: MORPHO_NETWORKS.map((n) => ({ id: n.id, chainId: n.chain.id, label: n.label })),
+}
 
 function WalletButton({ market }: { market: { chain: Market['chain'] } }) {
   const { address, chainId, chain, isConnected } = useAccount()
@@ -403,64 +417,82 @@ export function App() {
       seed: seed && { ...seed, nonce: Date.now() },
     })
 
-  const networkSelect = (
-    <label className="field">
-      <span>Réseau</span>
-      <select value={morpho ? morphoNet.id : market.id} onChange={(e) => chooseMarket(e.target.value)}>
-        <optgroup label="Aave v3">
-          {MARKETS.filter((m) => !m.soon).map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
+  // protocol and network are chosen apart; a network with several Aave markets (Ethereum Core / Prime) adds a third choice
+  const protocol: Protocol = morpho ? 'morpho' : 'aave'
+  const placeChain = (morpho ? morphoNet : market).chain.id
+  const places = PLACES[protocol]
+  const instances = morpho ? [] : AAVE_MARKETS.filter((m) => m.chain.id === placeChain)
+  const choosePlace = (p: Protocol, chainId: number) => chooseMarket((PLACES[p].find((x) => x.chainId === chainId) ?? PLACES[p][0]).id)
+  const placeSelect = (
+    <div className="place-row">
+      <div className="field">
+        <span>Protocole</span>
+        <Segmented
+          value={protocol}
+          onChange={(p) => choosePlace(p, placeChain)}
+          options={[
+            { value: 'aave' as Protocol, label: 'Aave v3' },
+            { value: 'morpho' as Protocol, label: 'Morpho Blue' },
+          ]}
+        />
+      </div>
+      <label className="field">
+        <span>Réseau</span>
+        <select value={placeChain} onChange={(e) => choosePlace(protocol, Number(e.target.value))}>
+          {places.map((x) => (
+            <option key={x.chainId} value={x.chainId}>
+              {x.label}
             </option>
           ))}
-        </optgroup>
-        <optgroup label="Morpho Blue">
-          {MORPHO_NETWORKS.map((n) => (
-            <option key={n.id} value={n.id}>
-              {n.label}
-            </option>
-          ))}
-        </optgroup>
-      </select>
-    </label>
-  )
-  const selectors = (
-    <div className="market-row">
-      {networkSelect}
-      {tokens && pair ? (
-        <div className="pair">
-          <TokenSelect
-            tokens={tokens}
-            label="Collatéral"
-            value={pair.collateral}
-            onChange={(t) => setPair(t, pair.debt)}
-            exclude={pair.debt}
-            balances={balances}
-          />
-          <button
-            className="btn swap"
-            title="Inverser collatéral et dette"
-            aria-label="Inverser collatéral et dette"
-            onClick={() => setPair(pair.debt, pair.collateral)}
-          >
-            ⇄
-          </button>
-          <TokenSelect
-            tokens={tokens}
-            label="Dette"
-            value={pair.debt}
-            onChange={(t) => setPair(pair.collateral, t)}
-            exclude={pair.collateral}
-            balances={balances}
-          />
-        </div>
-      ) : (
-        <div className="field" style={{ gridColumn: 'span 3' }}>
-          <span>Paire</span>
-          <Skel w={12} />
+        </select>
+      </label>
+      {instances.length > 1 && (
+        <div className="field">
+          <span>Marché Aave</span>
+          <Segmented value={market.id} onChange={chooseMarket} options={instances.map((m) => ({ value: m.id, label: marketInstance(m.label) ?? m.label }))} />
         </div>
       )}
     </div>
+  )
+  const selectors = (
+    <>
+      {placeSelect}
+      <div className="market-row">
+        {tokens && pair ? (
+          <div className="pair">
+            <TokenSelect
+              tokens={tokens}
+              label="Collatéral"
+              value={pair.collateral}
+              onChange={(t) => setPair(t, pair.debt)}
+              exclude={pair.debt}
+              balances={balances}
+            />
+            <button
+              className="btn swap"
+              title="Inverser collatéral et dette"
+              aria-label="Inverser collatéral et dette"
+              onClick={() => setPair(pair.debt, pair.collateral)}
+            >
+              ⇄
+            </button>
+            <TokenSelect
+              tokens={tokens}
+              label="Dette"
+              value={pair.debt}
+              onChange={(t) => setPair(pair.collateral, t)}
+              exclude={pair.collateral}
+              balances={balances}
+            />
+          </div>
+        ) : (
+          <div className="field" style={{ gridColumn: '1 / -1' }}>
+            <span>Paire</span>
+            <Skel w={12} />
+          </div>
+        )}
+      </div>
+    </>
   )
 
   // settings shared by both panels, shown in their collapsed "Réglages" block
@@ -595,7 +627,7 @@ export function App() {
           <MorphoView
             key={morphoNet.id}
             net={morphoNet}
-            networkSelect={networkSelect}
+            networkSelect={placeSelect}
             account={address}
             aggregator={aggregator}
             common={morphoCommon}

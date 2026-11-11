@@ -10,6 +10,10 @@ export type Token = { symbol: string; name: string; address: Address; decimals: 
  * `soon`: listed for visibility but not selectable, with the reason shown.
  */
 export type MarketDef = { id: string; label: string; chain: Chain; pool: Address; soon?: string }
+/** The network alone, without the Aave market instance: « Ethereum (Prime) » → « Ethereum ». */
+export const networkName = (label: string) => label.replace(/\s*\(.*\)$/, '')
+/** The Aave market instance when a network has several: « Ethereum (Prime) » → « Prime ». */
+export const marketInstance = (label: string) => label.match(/\((.*)\)$/)?.[1]
 
 export const MARKETS: MarketDef[] = [
   { id: 'ethereum', label: 'Ethereum (Core)', chain: mainnet, pool: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2' },
