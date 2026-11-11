@@ -1,5 +1,5 @@
 import { getAddress, isAddress, keccak256, slice, toBytes, type Address, type Chain } from 'viem'
-import { arbitrum, arc, avalanche, base, bsc, linea, mainnet, mantle, monad, optimism, plasma, polygon, sonic } from 'viem/chains'
+import { arbitrum, arc, avalanche, base, bsc, hyperEvm, linea, mainnet, mantle, megaeth, monad, optimism, plasma, polygon, sonic, unichain } from 'viem/chains'
 
 export type Token = { symbol: string; name: string; address: Address; decimals: number }
 
@@ -29,6 +29,8 @@ export const MARKETS: MarketDef[] = [
   { id: 'linea', label: 'Linea', chain: linea, pool: '0xc47b8C00b0f69a36fa203Ffeac0334874574a8Ac' },
   { id: 'sonic', label: 'Sonic', chain: sonic, pool: '0x5362dBb1e601abF3a4c14c22ffEdA64042E5eAA3' },
   { id: 'monad', label: 'Monad', chain: monad, pool: '0x69a5F9AD4f96ebf0a0C792dD42a01cC5C0102fef' },
+  // MegaETH: Pool from @bgd-labs/aave-address-book 4.44.22 (AaveV3MegaEth), KyberSwap only; added 2026-11-11
+  { id: 'megaeth', label: 'MegaETH', chain: megaeth, pool: '0x7e324AbC5De01d112AfC03a584966ff199741C28' },
 ]
 
 export const DEFAULT_MARKET_ID = 'base'
@@ -83,8 +85,9 @@ export const AGGREGATORS: Record<AggregatorId, Aggregator> = {
     router: '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5',
     needsKey: false,
     available: true,
-    // Mantle answers 404 (checked 2026-11-01); Arc quotes since 2026-11-10 (router checked in its route answer)
-    chains: [1, 10, 56, 137, 143, 146, 5042, 8453, 9745, 42161, 43114, 59144],
+    // Mantle answers 404 (checked 2026-11-01); Arc quotes since 2026-11-10; Unichain, HyperEVM, MegaETH 2026-11-11
+    // (router checked in each route answer). Also quotes on Berachain, Ronin, Etherlink: no Aave v3 nor Morpho API there.
+    chains: [1, 10, 56, 130, 137, 143, 146, 999, 4326, 5042, 8453, 9745, 42161, 43114, 59144],
   },
 }
 
@@ -93,9 +96,12 @@ export const KYBER_CHAIN_SLUGS: Record<number, string> = {
   1: 'ethereum',
   10: 'optimism',
   56: 'bsc',
+  130: 'unichain',
   137: 'polygon',
   143: 'monad',
   146: 'sonic',
+  999: 'hyperevm',
+  4326: 'megaeth',
   5042: 'arc',
   8453: 'base',
   9745: 'plasma',
@@ -171,6 +177,10 @@ export const MORPHO_BLUE: Record<number, Address> = {
   146: '0xd6c916eB7542D0Ad3f18AEd0FCBD50C582cfa95f',
   // Arc: from Morpho's own address list (morpho-org/sdks, morpho-ts addresses.ts), 2026-11-10
   5042: '0x34CD04070dD72b14E241112F6d83812Df5Af7fCD',
+  // 2026-11-11: same in morpho-ts addresses.ts and the Morpho API (morphoBlues), owner() read on chain. Monad (143) stays out:
+  // Aave v2 executors already deployed there have no Morpho lender, and their closes would pick it (see MORPHO_NETWORKS).
+  130: '0x8f5ae9CddB9f68de460C77730b018Ae7E04a140A',
+  999: '0x68e37dE8d93d3496ae143F2E900490f6280C57cD',
 }
 
 /**
@@ -187,6 +197,11 @@ export const MORPHO_NETWORKS: MorphoNetDef[] = [
   { id: 'morpho-polygon', label: 'Polygon', chain: polygon, morpho: MORPHO_BLUE[137] },
   // Arc (Circle): gas paid in USDC, KyberSwap only, no Pendle; added 2026-11-10 at Azerty's request
   { id: 'morpho-arc', label: 'Arc', chain: arc, morpho: MORPHO_BLUE[5042] },
+  // 2026-11-11: chains where KyberSwap quotes and the Morpho API lists markets (BNB, Linea, Sonic, Etherlink, MegaETH: API refuses)
+  { id: 'morpho-unichain', label: 'Unichain', chain: unichain, morpho: MORPHO_BLUE[130] },
+  { id: 'morpho-hyperevm', label: 'HyperEVM', chain: hyperEvm, morpho: MORPHO_BLUE[999] },
+  // Monad: Morpho API + morpho-ts addresses.ts agree; RPC unreachable from the dev box, not read on chain
+  { id: 'morpho-monad', label: 'Monad', chain: monad, morpho: '0xD5D960E8C380B724a48AC59E2DfF1b2CB4a1eAee' },
 ]
 export const isMorphoId = (id: string) => id.startsWith('morpho-')
 
@@ -386,6 +401,8 @@ const PUBLICNODE: Record<number, string> = {
   [mantle.id]: 'https://mantle-rpc.publicnode.com',
   [linea.id]: 'https://linea-rpc.publicnode.com',
   [sonic.id]: 'https://sonic-rpc.publicnode.com',
+  [unichain.id]: 'https://unichain-rpc.publicnode.com',
+  [hyperEvm.id]: 'https://hyperliquid-rpc.publicnode.com',
 }
 
 export function rpcUrls(chain: Chain): string[] {

@@ -1,6 +1,6 @@
 # Auto-loop : interface
 
-Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 ou Morpho Blue (voir plus bas) en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Plasma, Linea, Sonic et Monad, via le contrat `LeverageExecutorV2` (`../contracts` ; un contrat v1 déjà déployé reste reconnu et utilisé). On choisit la paire collatéral / dette et le levier ; le swap passe par Velora ou KyberSwap selon la chaîne (0x et 1inch sont codés mais pas proposés) ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
+Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 ou Morpho Blue (voir plus bas) en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Plasma, Linea, Sonic, Monad et MegaETH, via le contrat `LeverageExecutorV2` (`../contracts` ; un contrat v1 déjà déployé reste reconnu et utilisé). On choisit la paire collatéral / dette et le levier ; le swap passe par Velora ou KyberSwap selon la chaîne (0x et 1inch sont codés mais pas proposés) ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
 
 Stack : Vite + React + TypeScript, wagmi 2 / viem 2.
 
@@ -32,7 +32,7 @@ Les règles d’interface (agencement, couleurs, typographie, composants, ton, f
 
 ## Marchés
 
-Liste dans `src/config.ts` (`MARKETS`), adresses des pools tirées de `@bgd-labs/aave-address-book`. Les actifs de chaque marché sont lus sur la chaîne (`getReservesList`), donc un nouvel actif listé par Aave apparaît sans changer le code. Chaque agrégateur n'est proposé que sur ses chaînes (`chains` dans `AGGREGATORS`) : Velora ne couvre ni Mantle, ni Plasma, ni Linea, ni Monad, KyberSwap prend alors le relais. KyberSwap est appelé sans clé (en-tête `x-client-id: auto-loop`) ; un devis qui contient des frais (`extraFee`) est refusé.
+Liste dans `src/config.ts` (`MARKETS`), adresses des pools tirées de `@bgd-labs/aave-address-book`. Les actifs de chaque marché sont lus sur la chaîne (`getReservesList`), donc un nouvel actif listé par Aave apparaît sans changer le code. Chaque agrégateur n'est proposé que sur ses chaînes (`chains` dans `AGGREGATORS`) : Velora ne couvre ni Mantle, ni Plasma, ni Linea, ni Monad, ni MegaETH, ni HyperEVM, KyberSwap prend alors le relais. MegaETH (ajouté le 11/11/2026) : pool de l'address book Aave, RPC injoignable depuis l'environnement de dev, donc non relu sur la chaîne avant mise en ligne. KyberSwap est appelé sans clé (en-tête `x-client-id: auto-loop`) ; un devis qui contient des frais (`extraFee`) est refusé.
 
 ## Rewards Merkl
 
@@ -65,7 +65,7 @@ Testé le 08/11/2026 : ouverture x5 (USDC → reUSDe par KyberSwap → PT par Pe
 
 ## Morpho Blue
 
-Réseaux : Ethereum, Base, Arbitrum, Optimism, Polygon et Arc, dans le même sélecteur « Réseau » (groupe « Morpho Blue »). Contrat : `LeverageExecutorMorpho` (`../contracts`), un par réseau, déployé depuis le portefeuille avec le bouton « Déployer le contrat Morpho » (routeurs : agrégateurs du réseau et Pendle) ou collé puis vérifié comme les autres (code on-chain identique au déploiement simulé, `src/lib/deploy.ts`). Adresse retenue dans le navigateur sous l'id `morpho-<réseau>`.
+Réseaux : Ethereum, Base, Arbitrum, Optimism, Polygon, Arc, Unichain, HyperEVM et Monad (ces trois ajoutés le 11/11/2026 : réseaux où KyberSwap cote et où l'API Morpho liste des marchés ; BNB, Linea, Sonic, Etherlink et MegaETH ont Morpho mais l'API les refuse), dans le même sélecteur « Réseau » (groupe « Morpho Blue »). Contrat : `LeverageExecutorMorpho` (`../contracts`), un par réseau, déployé depuis le portefeuille avec le bouton « Déployer le contrat Morpho » (routeurs : agrégateurs du réseau et Pendle) ou collé puis vérifié comme les autres (code on-chain identique au déploiement simulé, `src/lib/deploy.ts`). Adresse retenue dans le navigateur sous l'id `morpho-<réseau>`.
 
 **Marchés** (`src/lib/morpho.ts`) : liste de l'API Morpho (`blue-api.morpho.org/graphql`, CORS ouvert, sans clé), marchés listés par Morpho par défaut, case « Inclure les marchés non listés » pour ceux qui ont au moins 10 000 $ déposés. L'API ne fait que lister et classer : avant d'afficher une position ou de faire signer, l'app relit le marché sur Morpho (`idToMarketParams` doit redonner exactement l'oracle, l'IRM et la LLTV annoncés, l'id est recalculé), le prix de l'oracle du marché, le taux de l'IRM (`borrowRateView`) et la position (dette en parts arrondie au-dessus comme Morpho, intérêts courus compris). Bandeaux : marché non listé, oracle « Unknown », alertes rouges de l'API. Rendement du collatéral : APY implicite Pendle pour un PT, rendement de l'API sinon ; rewards d'emprunt comptés par l'API.
 
