@@ -3,6 +3,7 @@
  * factor, ranked by yield on equity. Rates come from the Morpho API (the open screen re-reads them on-chain), a PT's
  * yield from its Pendle market. Pure functions, tested without a chain.
  */
+import { morphoBorrowApyAfter } from './irm'
 import { leverageAtMorphoHf, morphoNetApy, type MorphoMarket } from './morpho'
 import { isExpired, type PtInfo } from './pendle'
 import { isCorrelated, isUsdStable, MAX_SCAN_LEVERAGE, MIN_SCAN_LEVERAGE } from './scan'
@@ -20,6 +21,10 @@ export type MorphoScanRow = {
   nativeApy: number
   /** borrow APY net of the borrow-side rewards the API counts */
   borrowApy: number
+  /** with an amount: the net APY before this loop's own borrow */
+  apyBefore?: number
+  /** gross borrow APY used (after this loop's borrow, with an amount) */
+  grossBorrowApy: number
   /** unlevered collateral yield (PT implied APY or the token's own) */
   collateralYield: number
   apy: number
@@ -38,6 +43,8 @@ export type MorphoScanOptions = {
   /** capacity under which a market is flagged as nearly full, USD */
   lowCapacityUsd?: number
   nowSec?: number
+  /** capital to loop, USD: the borrow rate is then the one right after this loop's borrow (AdaptiveCurveIRM, irm.ts) */
+  equityUsd?: number
 }
 
 const priced = (t: MorphoMarket['collateral'], usd: number) => ({ token: t, price: BigInt(Math.round(usd * 1e8)) })
@@ -54,7 +61,10 @@ export function scanMorpho(markets: MorphoMarket[], opts: MorphoScanOptions): Mo
     if (!(leverage >= MIN_SCAN_LEVERAGE)) continue
     const healthFactor = (m.lltv * leverage) / (leverage - 1)
     const collateralApy = pt ? (pt.impliedApy ?? 0) : (m.collateralYield?.apy ?? 0)
-    const borrowApy = m.borrowApy - m.borrowRewardsApr
+    const E = opts.equityUsd ?? 0
+    const after = E > 0 ? morphoBorrowApyAfter(m.borrowApy, m.borrowUsd + m.liquidityUsd, m.borrowUsd, (leverage - 1) * E) : undefined
+    const grossBorrowApy = after ?? m.borrowApy
+    const borrowApy = grossBorrowApy - m.borrowRewardsApr
     const apy = morphoNetApy(leverage, collateralApy, borrowApy)
     const C = priced(m.collateral, m.collateralUsd)
     const L = priced(m.loan, m.loanUsd)
@@ -71,6 +81,8 @@ export function scanMorpho(markets: MorphoMarket[], opts: MorphoScanOptions): Mo
       healthFactor,
       nativeApy: collateralApy * leverage,
       borrowApy,
+      apyBefore: E > 0 ? morphoNetApy(leverage, collateralApy, m.borrowApy - m.borrowRewardsApr) : undefined,
+      grossBorrowApy,
       collateralYield: collateralApy,
       apy,
       capacityUsd,

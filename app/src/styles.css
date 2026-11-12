@@ -267,9 +267,13 @@ footer { text-align: center; }
 .reserves th.sortable button:hover, .reserves th[aria-sort] button { color: var(--text); }
 .reserves tr.clickable { cursor: pointer; }
 .reserves tr.clickable:hover td { background: var(--bg); }
-.scan-search { max-width: 360px; }
+.scan-inputs { display: flex; gap: 12px; flex-wrap: wrap; }
+.scan-search { max-width: 360px; flex: 1 1 240px; }
+.scan-amount { max-width: 220px; flex: 0 1 220px; }
+tr.dim > td { opacity: 0.55; }
+.scan td.num .small { white-space: nowrap; }
 @media (max-width: 640px) {
-  .scan-search { max-width: none; }
+  .scan-search, .scan-amount { max-width: none; flex: 1 1 100%; }
   table.scan.cards tr { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 12px; }
   table.scan.cards td { display: flex; flex-direction: column; text-align: left; padding: 0; gap: 0; }
   table.scan.cards tr.scan-detail { display: block; }

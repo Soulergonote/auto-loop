@@ -5,7 +5,8 @@
 import { readContract, readContracts } from '@wagmi/core'
 import { zeroAddress, type Address } from 'viem'
 import { wagmiConfig } from '../wagmi'
-import { erc20Abi, oracleAbi, poolAbi, providerAbi } from '../abi'
+import { erc20Abi, oracleAbi, poolAbi, providerAbi, rateStrategyAbi } from '../abi'
+import { aaveModelMatches, type AaveIrm } from './irm'
 import type { Market, Token } from '../config'
 import { decodeReserveConfig, rayAprToApy } from './aave'
 import { toBase } from './math'
@@ -19,6 +20,8 @@ export type SnapReserve = Reserve & {
   cashBase: bigint
   totalSupplyBase: bigint
   totalDebtBase: bigint
+  /** rate curve, when readable and it gives back today's rate (rates after the user's own loop, irm.ts) */
+  irm?: AaveIrm
 }
 
 export type Snapshot = { market: Market; reserves: SnapReserve[]; emodes: EModeCategory[]; premiumBps: bigint }
@@ -69,6 +72,7 @@ export async function loadSnapshot(market: Market): Promise<Snapshot> {
           variableDebtTokenAddress: Address
           currentLiquidityRate: bigint
           currentVariableBorrowRate: bigint
+          interestRateStrategyAddress: Address
         }
       | undefined
     if (!rd || rd.aTokenAddress === zeroAddress) return []
@@ -79,7 +83,7 @@ export async function loadSnapshot(market: Market): Promise<Snapshot> {
     return [{ token, rd, config, price }]
   })
 
-  const [amounts, native, pts] = await Promise.all([
+  const [amounts, native, pts, curves] = await Promise.all([
     readContracts(wagmiConfig, {
       contracts: base.flatMap(({ token, rd }) => [
         { chainId, address: token.address, abi: erc20Abi, functionName: 'balanceOf', args: [rd.aTokenAddress] } as const,
@@ -99,12 +103,33 @@ export async function loadSnapshot(market: Market): Promise<Snapshot> {
       chainId,
       base.map((b) => b.token.address),
     ).catch(() => new Map()),
+    // rate curves (Aave v3.2+ strategy); a failed read only leaves the rates after the user's loop out
+    readContracts(wagmiConfig, {
+      contracts: base.map(
+        ({ token, rd }) =>
+          ({ chainId, address: rd.interestRateStrategyAddress, abi: rateStrategyAbi, functionName: 'getInterestRateDataBps', args: [token.address] }) as const,
+      ),
+      allowFailure: true,
+    }).catch(() => []),
   ])
 
   const reserves: SnapReserve[] = base.map(({ token, rd, config, price }, i) => {
     const side = { price, decimals: config.decimals }
     const amount = (k: number) => toBase((amounts[3 * i + k].result as bigint | undefined) ?? 0n, side)
     const pt = pts.get(token.address.toLowerCase())
+    const curve = curves[i]?.result as
+      | { optimalUsageRatio: number; baseVariableBorrowRate: number; variableRateSlope1: number; variableRateSlope2: number }
+      | undefined
+    const irm: AaveIrm | undefined = curve && {
+      optimal: curve.optimalUsageRatio / 1e4,
+      base: curve.baseVariableBorrowRate / 1e4,
+      slope1: curve.variableRateSlope1 / 1e4,
+      slope2: curve.variableRateSlope2 / 1e4,
+      reserveFactor: Number((rd.configuration >> 64n) & 0xffffn) / 1e4,
+    }
+    const cashBase = amount(0)
+    const totalDebtBase = amount(2)
+    const borrowApy = rayAprToApy(rd.currentVariableBorrowRate)
     return {
       token,
       native: pt ? ptYield(pt) : native.get(token.address.toLowerCase()),
@@ -114,14 +139,15 @@ export async function loadSnapshot(market: Market): Promise<Snapshot> {
       aToken: rd.aTokenAddress,
       variableDebtToken: rd.variableDebtTokenAddress,
       supplyApy: rayAprToApy(rd.currentLiquidityRate),
-      borrowApy: rayAprToApy(rd.currentVariableBorrowRate),
+      borrowApy,
       supplyRewardApr: 0,
       borrowRewardApr: 0,
       price,
       side,
-      cashBase: amount(0),
+      cashBase,
       totalSupplyBase: amount(1),
-      totalDebtBase: amount(2),
+      totalDebtBase,
+      irm: irm && irm.optimal > 0 && irm.optimal < 1 && aaveModelMatches(irm, Number(cashBase), Number(totalDebtBase), borrowApy) ? irm : undefined,
     }
   })
 

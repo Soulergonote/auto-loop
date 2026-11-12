@@ -5,6 +5,7 @@
  * Pure functions over a market snapshot, so they can be tested without a chain.
  */
 import { maxLeverage, netApy } from './math'
+import { aaveRatesAfter } from './irm'
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, type Campaign } from './merkl'
 import { loopNativeApy } from './nativeYield'
 import { eligibleEModes, type EModeCategory } from './useMarket'
@@ -76,6 +77,8 @@ export type ScanRow = {
   /** unlevered legs: collateral supply APY + its own yield, borrow APY − the debt token's own yield (apy = collateralYield × L − borrowCost × (L − 1) + rewardsApy) */
   collateralYield: number
   borrowCost: number
+  /** with an amount (opts.equityBase): the net APY before the loop's own effect on the rates */
+  apyBefore?: number
   /** campaigns counted in rewardsApy */
   campaigns: Campaign[]
   /** earliest known end among them, unix seconds */
@@ -93,6 +96,11 @@ export type ScanOptions = {
   /** equity under which a pair is flagged as nearly full, base units */
   minCapacityBase?: bigint
   nowMs?: number
+  /**
+   * capital to loop, base units: rates are then the ones right after this loop (more borrowed on the debt asset,
+   * more supplied of the collateral) when the reserve's rate curve is known (irm.ts); Merkl APRs are not diluted
+   */
+  equityBase?: bigint
 }
 
 /** A PT is only looped while it can still be bought: before maturity, through a known Pendle market. */
@@ -145,7 +153,14 @@ export function scanMarket(snapshot: Snapshot, campaigns: Campaign[] | undefined
         const leverage = leverageAtHf(C.config.liquidationThresholdBps, C.config.ltvBps, opts.targetHf)
         if (!(leverage >= MIN_SCAN_LEVERAGE)) continue
         const healthFactor = hfAtLeverage(C.config.liquidationThresholdBps, leverage)
-        const ratesApy = netApy(leverage, C.supplyApy, D.borrowApy)
+        // the rates right after this loop, with an amount: more debt on D, more supply of C
+        const E = opts.equityBase !== undefined ? Number(opts.equityBase) : 0
+        const dAfter = E > 0 && D.irm ? aaveRatesAfter(D.irm, Number(D.cashBase), Number(D.totalDebtBase), 0, (leverage - 1) * E) : undefined
+        const cAfter = E > 0 && C0.irm ? aaveRatesAfter(C0.irm, Number(C0.cashBase), Number(C0.totalDebtBase), leverage * E, 0) : undefined
+        const supplyApy = cAfter?.supplyApy ?? C.supplyApy
+        const borrowApy = dAfter?.borrowApy ?? D.borrowApy
+        const ratesApy = netApy(leverage, supplyApy, borrowApy)
+        const ratesBefore = netApy(leverage, C.supplyApy, D.borrowApy)
         const nativeApy = loopNativeApy(leverage, C0.native, D.native)
         const { pair } = eligibleForPosition(campaignsForPair(campaigns, C, D), { healthFactor, debtToken: D.variableDebtToken })
         const yields = campaignYields(pair, leverage, C, D).filter((y) => y.apy > 0)
@@ -168,8 +183,9 @@ export function scanMarket(snapshot: Snapshot, campaigns: Campaign[] | undefined
           nativeApy,
           rewardsApy,
           apy: ratesApy + nativeApy + rewardsApy,
-          collateralYield: C.supplyApy + (C0.native?.apy ?? 0),
-          borrowCost: D.borrowApy - (D.native?.apy ?? 0),
+          apyBefore: E > 0 ? ratesBefore + nativeApy + rewardsApy : undefined,
+          collateralYield: supplyApy + (C0.native?.apy ?? 0),
+          borrowCost: borrowApy - (D.native?.apy ?? 0),
           campaigns: yields.map((y) => y.campaign),
           rewardsEnd: ends.length ? Math.min(...ends) : undefined,
           capacityBase,

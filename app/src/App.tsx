@@ -435,7 +435,12 @@ export function App() {
   }
   function openPick(p: Pick) {
     chooseMarket(p.marketId)
-    setPicked({ market: p.marketId, collateral: p.collateral, debt: p.debt, seed: { emode: p.emode, leverage: p.leverage, tab: p.tab, nonce: Date.now() } })
+    setPicked({
+      market: p.marketId,
+      collateral: p.collateral,
+      debt: p.debt,
+      seed: { emode: p.emode, leverage: p.leverage, tab: p.tab, amount: p.amount, nonce: Date.now() },
+    })
     setView('loop')
     window.scrollTo({ top: 0 })
   }

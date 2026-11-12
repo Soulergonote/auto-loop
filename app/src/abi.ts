@@ -173,3 +173,9 @@ export const morphoOracleAbi = parseAbi(['function price() view returns (uint256
 export const morphoIrmAbi = parseAbi([
   `function borrowRateView(${marketParams} marketParams, (uint128 totalSupplyAssets, uint128 totalSupplyShares, uint128 totalBorrowAssets, uint128 totalBorrowShares, uint128 lastUpdate, uint128 fee) market) view returns (uint256)`,
 ])
+
+/** Aave v3.2+ DefaultReserveInterestRateStrategyV2: rate curve of a reserve, in bps */
+export const rateStrategyAbi = parseAbi([
+  'struct InterestRateDataRay { uint16 optimalUsageRatio; uint32 baseVariableBorrowRate; uint32 variableRateSlope1; uint32 variableRateSlope2; }',
+  'function getInterestRateDataBps(address reserve) view returns (InterestRateDataRay)',
+])

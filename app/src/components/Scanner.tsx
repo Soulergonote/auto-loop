@@ -6,22 +6,40 @@ import { merklQuery } from '../lib/merkl'
 import { snapshotQuery } from '../lib/snapshot'
 import { scanMarket, type ScanFlag } from '../lib/scan'
 import { groupLines, spreadOf } from '../lib/scanGroups'
+import { estimatedRoundTripUsd, gainPerYearUsd, parseAmountUsd, paybackDays } from '../lib/sizing'
+import type { PairKind } from '../lib/slippage'
+import { useDebounced } from '../lib/useDebounced'
 import { SCAN_HFS, loadScanner, saveScanner, scannerQuery, type ScannerPrefs } from '../lib/prefs'
 import { morphoMarketsQuery, type MorphoMarket } from '../lib/morpho'
 import { scanMorpho, type MorphoScanFlag } from '../lib/morphoScan'
 import { ptInfosQuery } from '../lib/pendle'
-import { fmtAddress, fmtLltv, fmtDate, fmtDollars, fmtMaturity, fmtPct, fmtX, ptShortSymbol } from '../lib/format'
+import { fmtAddress, fmtDays, fmtLltv, fmtDate, fmtDollars, fmtMaturity, fmtPct, fmtX, ptShortSymbol } from '../lib/format'
 import { Card, Fold, Notice, Segmented, Skel, Tag, useSlow } from './ui'
 import type { MorphoTab } from './MorphoView'
 
 /** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (positions' Merkl rewards) or « Renouveler » (a PT near maturity). */
-export type Pick = { marketId: string; collateral: Address; debt: Address; emode: number; leverage: number; tab?: 'reinvest' | 'renew' }
+export type Pick = {
+  marketId: string
+  collateral: Address
+  debt: Address
+  emode: number
+  leverage: number
+  tab?: 'reinvest' | 'renew'
+  /** capital to fill in, collateral units as typed text (from the Scanner's amount) */
+  amount?: string
+}
+
+/** USD → collateral amount to prefill, 6 significant digits; oracle price in 8 decimals */
+const tokensFor = (usd: number, price: bigint) => {
+  const n = usd / (Number(price) / 1e8)
+  return Number.isFinite(n) && n > 0 ? String(Number(n.toPrecision(6))) : undefined
+}
 
 const HFS = SCAN_HFS
 type Filter = ScannerPrefs['filter']
 type Protocol = ScannerPrefs['protocol']
 /** sortable columns; numbers sort high first on the first click, the pair A to Z */
-type SortKey = 'pair' | 'leverage' | 'apy' | 'spread' | 'rewardsApy' | 'capacityUsd'
+type SortKey = 'pair' | 'leverage' | 'apy' | 'spread' | 'rewardsApy' | 'capacityUsd' | 'gainUsd'
 const ROWS = 20
 /** Pairs where less than this (USD) can still be looped are hidden (borrow cap or cash used up). */
 const MIN_CAPACITY_USD = 1_000
@@ -68,6 +86,12 @@ type Line = {
   nativeApy: number
   rewardsApy: number
   capacityUsd: number
+  /** with an amount: APY before the loop's own effect on the rates, gain a year, estimated days to pay the costs */
+  apyBefore?: number
+  gainUsd: number
+  paybackDays?: number
+  /** the amount fits under the capacity (always true without an amount) */
+  fits: boolean
   rewardsEnd?: number
   stable: boolean
   correlated: boolean
@@ -135,6 +159,9 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
     if (window.location.hash.startsWith('#scanner') && window.location.hash !== target) window.history.replaceState(null, '', target)
   }, [protocol, scope, hfText, filter, showNegative])
   const [search, setSearch] = useState('')
+  // capital to loop, USD: rates right after the loop, gain a year, pairs too small greyed
+  const [amountText, setAmountText] = useState('')
+  const amountUsd = useDebounced(parseAmountUsd(amountText), 400)
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'apy', desc: true })
   // network and protocol are separate filters; only what they leave is read
   const networks = networksOf(protocol)
@@ -155,6 +182,17 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
   const targetHf = Number(hfText)
   const label = (id: string) => MARKETS.find((m) => m.id === id)?.label ?? id
 
+  /** the amount's figures for a scanned row */
+  const sized = (r: { apy: number; apyBefore?: number; leverage: number }, capacityUsd: number, kind: PairKind) => {
+    if (amountUsd === undefined) return { gainUsd: 0, fits: true }
+    return {
+      apyBefore: r.apyBefore,
+      gainUsd: gainPerYearUsd(r.apy, amountUsd),
+      paybackDays: paybackDays(estimatedRoundTripUsd(kind, r.leverage, amountUsd), r.apy, amountUsd),
+      fits: capacityUsd >= amountUsd,
+    }
+  }
+
   // recomputed when a snapshot, a Morpho list or a campaign list arrives (the query arrays are new objects at every render)
   const version = [...snapshots, ...merkl, ...morphoLists, ...morphoPts].map((q) => q.dataUpdatedAt).join()
   const rows = useMemo(() => {
@@ -162,7 +200,8 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
     for (const q of snapshots) {
       if (!q.data) continue
       const campaigns = merkl[chainIds.indexOf(q.data.market.chain.id)]?.data
-      for (const r of scanMarket(q.data, campaigns, { targetHf, minCapacityBase: LOW_CAPACITY }))
+      const equityBase = amountUsd !== undefined ? BigInt(Math.round(amountUsd)) * 10n ** 8n : undefined
+      for (const r of scanMarket(q.data, campaigns, { targetHf, minCapacityBase: LOW_CAPACITY, equityBase }))
         out.push({
           key: `${r.marketId}-${r.collateral.token.address}-${r.debt.token.address}`,
           group: `${r.marketId}-${r.collateral.token.address}-${r.debt.token.address}`,
@@ -187,24 +226,32 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           nativeApy: r.nativeApy,
           rewardsApy: r.rewardsApy,
           capacityUsd: Number(r.capacityBase) / 1e8,
+          ...sized(r, Number(r.capacityBase) / 1e8, r.collateral.pt ? 'pt' : r.stable ? 'stable' : r.correlated ? 'correlated' : 'other'),
           rewardsEnd: r.rewardsEnd,
           stable: r.stable,
           correlated: r.correlated,
           nativeUnknown: r.flags.includes('nativeUnknown'),
           open: () =>
-            onPick({ marketId: r.marketId, collateral: r.collateral.token.address, debt: r.debt.token.address, emode: r.emode?.id ?? 0, leverage: r.leverage }),
+            onPick({
+              marketId: r.marketId,
+              collateral: r.collateral.token.address,
+              debt: r.debt.token.address,
+              emode: r.emode?.id ?? 0,
+              leverage: r.leverage,
+              amount: amountUsd !== undefined ? tokensFor(amountUsd, r.collateral.price) : undefined,
+            }),
         })
     }
     morphoNets.forEach((n, i) => {
       const list = morphoLists[i].data
       if (!list) return
-      for (const r of scanMorpho(list, { targetHf, pts: morphoPts[i].data, lowCapacityUsd: LOW_CAPACITY_USD }))
+      for (const r of scanMorpho(list, { targetHf, pts: morphoPts[i].data, lowCapacityUsd: LOW_CAPACITY_USD, equityUsd: amountUsd }))
         out.push({
           key: `morpho-${n.chain.id}-${r.market.id}`,
           group: `morpho-${n.chain.id}-${r.market.collateral.address}-${r.market.loan.address}`,
           collateralYield: r.collateralYield,
-          borrowCost: r.market.borrowApy,
-          spread: r.collateralYield - r.market.borrowApy,
+          borrowCost: r.grossBorrowApy,
+          spread: r.collateralYield - r.grossBorrowApy,
           note: `oracle ${r.market.oracleType ? `${r.market.oracleType} ` : ''}${fmtAddress(r.market.params.oracle)}`,
           pair: `${ptShortSymbol(r.market.collateral.symbol)} / ${r.market.loan.symbol}`,
           place: `Morpho · ${n.label}`,
@@ -224,6 +271,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           nativeApy: r.nativeApy,
           rewardsApy: r.market.borrowRewardsApr * (r.leverage - 1),
           capacityUsd: r.capacityUsd,
+          ...sized(r, r.capacityUsd, r.pt ? 'pt' : r.stable ? 'stable' : r.correlated ? 'correlated' : 'other'),
           stable: r.stable,
           correlated: r.correlated,
           nativeUnknown: r.flags.includes('nativeUnknown'),
@@ -231,7 +279,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
         })
     })
     return out.sort((a, b) => b.apy - a.apy)
-  }, [version, targetHf])
+  }, [version, targetHf, amountUsd])
 
   const words = search
     .trim()
@@ -250,6 +298,8 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
   const groups = groupLines(shown).sort((x, y) => {
     const a = x.head
     const b = y.head
+    // with an amount, pairs it does not fit in go last whatever the sort
+    if (a.fits !== b.fits) return a.fits ? -1 : 1
     const d = sort.key === 'pair' ? a.pair.localeCompare(b.pair) : a[sort.key] - b[sort.key]
     return sort.desc ? -d : d
   })
@@ -317,14 +367,25 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           />
         </div>
       </div>
-      <input
-        type="search"
-        className="scan-search"
-        aria-label="Rechercher un token"
-        placeholder="Rechercher un token (wstETH, USDC…)"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
+      <div className="scan-inputs">
+        <input
+          type="search"
+          className="scan-search"
+          aria-label="Rechercher un token"
+          placeholder="Rechercher un token (wstETH, USDC…)"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <input
+          type="text"
+          inputMode="decimal"
+          className="scan-amount"
+          aria-label="Montant à boucler en dollars"
+          placeholder="Montant en $ (ex. 25k)"
+          value={amountText}
+          onChange={(e) => setAmountText(e.target.value)}
+        />
+      </div>
       <label className="check">
         <input type="checkbox" checked={showNegative} onChange={(e) => setShowNegative(e.target.checked)} /> Afficher les APY négatifs
       </label>
@@ -363,6 +424,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
               {head('apy', 'APY net')}
               {head('spread', 'Écart')}
               {head('rewardsApy', 'Bonus Merkl')}
+              {amountUsd !== undefined && head('gainUsd', 'Gain / an')}
               {head('capacityUsd', 'Capacité')}
               <th></th>
             </tr>
@@ -372,7 +434,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
               const open = opened === r.group
               return (
                 <Fragment key={r.group}>
-                  <tr className="clickable" onClick={r.open}>
+                  <tr className={`clickable ${r.fits ? '' : 'dim'}`} onClick={r.open}>
                     <td className="lead">
                       {r.pair}
                       {(chain === 'all' || protocol === 'all') && <span className="muted"> · {r.place}</span>}
@@ -401,6 +463,11 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                     </td>
                     <td data-label="APY net" className={`num ${r.apy < 0 ? 'bad' : 'good'}`}>
                       <strong>{fmtPct(r.apy)}</strong>
+                      {r.apyBefore !== undefined && Math.abs(r.apyBefore - r.apy) >= 0.001 && (
+                        <div className="muted small" title="APY avant l’effet de cet emprunt sur les taux">
+                          avant : {fmtPct(r.apyBefore)}
+                        </div>
+                      )}
                     </td>
                     <td data-label="Écart" className={`num detail ${r.spread < 0 ? 'bad' : ''}`}>
                       {fmtPct(r.spread)}
@@ -409,8 +476,15 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                       {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : <span className="na">—</span>}
                       {r.rewardsEnd !== undefined && <div className="muted small">jusqu’au {fmtDate(r.rewardsEnd)}</div>}
                     </td>
-                    <td data-label="Capacité" className="num">
+                    {amountUsd !== undefined && (
+                      <td data-label="Gain / an" className={`num ${r.gainUsd < 0 ? 'bad' : ''}`}>
+                        {fmtDollars(r.gainUsd, true)}
+                        {r.paybackDays !== undefined && <div className="muted small">rentable en {fmtDays(Math.max(1, Math.ceil(r.paybackDays)))}</div>}
+                      </td>
+                    )}
+                    <td data-label="Capacité" className={`num ${r.fits ? '' : 'warn'}`}>
                       {fmtDollars(r.capacityUsd, true)}
+                      {!r.fits && <div className="small">trop petit pour ce montant</div>}
                     </td>
                     <td className="row-action">
                       <button
@@ -426,7 +500,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                   </tr>
                   {open && (
                     <tr className="scan-detail">
-                      <td colSpan={7}>
+                      <td colSpan={amountUsd !== undefined ? 8 : 7}>
                         <ApyBreakdown line={r} />
                         {variants.length > 0 && (
                           <table className="reserves variants">
@@ -485,7 +559,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
               visible.length < 5 &&
               Array.from({ length: 5 - visible.length }, (_, i) => (
                 <tr key={`skel-${i}`}>
-                  <td className="lead" colSpan={7}>
+                  <td className="lead" colSpan={amountUsd !== undefined ? 8 : 7}>
                     <Skel w={16} />
                   </td>
                 </tr>
@@ -517,6 +591,13 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           Aave) ; le coût de l’emprunt retranche celui d’une dette qui en a un. Sans source, l’étiquette « rendement du token non compté » le signale. Pour un
           PT Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe de son marché Pendle, valable jusqu’à l’échéance. « Détail » montre l’APY
           net jambe par jambe ; « + N marchés » regroupe les autres marchés Morpho de la même paire sur le même réseau (autre LLTV ou autre oracle).
+        </p>
+        <p className="muted small">
+          Avec un montant : l’APY est celui juste après cette boucle, la dette ajoutée faisant monter le taux d’emprunt (courbe de taux de la réserve Aave,
+          AdaptiveCurveIRM de Morpho dont le taux cible dérive ensuite avec le temps) et le collatéral ajouté baisser son taux de dépôt ; « avant » rappelle
+          l’APY sans cet effet. « Gain / an » = APY × montant ; « rentable en N j » paie une estimation des deux swaps (entrée et sortie de l’emprunt) au
+          slippage par défaut de la paire, sans devis ; une paire dont la capacité est sous le montant passe en fin de liste, grisée. Les APR Merkl ne sont pas
+          dilués par le montant.
         </p>
         <p className="muted small">
           Non compté : le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes Merkl à public restreint. La capacité est le capital encore «
