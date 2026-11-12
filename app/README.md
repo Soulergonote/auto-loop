@@ -93,6 +93,10 @@ Test sur fork d'Ethereum : `anvil --fork-url https://ethereum-rpc.publicnode.com
 
 Pour ne pas ouvrir une boucle sur un pic de taux, la Boucle montre la moyenne sur 7 et 30 jours des taux de dépôt et d'emprunt de la paire (bloc « Taux Aave »), l'APY net de la boucle à ces taux moyens (bloc « Risques ») et un bandeau ambre quand le taux d'emprunt dépasse 1,5 fois sa moyenne sur 30 jours et d'au moins un point (idem pour un rendement de dépôt en pic). Source : les événements `ReserveDataUpdated` du pool, qui portent les index de la réserve à chaque action. Le dernier événement avant la date de début donne l'index d'alors, `getReserveNormalizedIncome` / `getReserveNormalizedVariableDebt` celui d'aujourd'hui ; leur rapport, annualisé, est l'APY moyen (`src/lib/rateHistory.ts`). Il faut un RPC qui garde les logs de la période : PublicNode ne garde qu'environ un jour sur Ethereum, Arbitrum, Optimism, BNB et Linea, le RPC public suivant de la chaîne prend alors le relais ; sans historique lisible, la moyenne ne s'affiche pas.
 
+## Gain réel et historique d’une position
+
+Chaque carte de l’écran Positions (Aave et Morpho) a un repli « Gain réel » : ce que la position a vraiment gagné depuis son premier mouvement, en dollars et dans l’actif emprunté, le rendement réalisé annualisé (méthode de Dietz modifiée, pondérée par la durée de chaque apport) et la liste des transactions avec leur lien vers l’explorateur. Gain = valeur nette actuelle − apport net, l’apport net étant dépôts + remboursements − retraits − emprunts, chacun au prix de son jour. Sources, sans clé : l’API d’Aave (`userTransactionHistory`), l’API de Morpho (`marketTransactions`), les prix du jour de DefiLlama (`coins.llama.fi/batchHistorical`, à 6 h près ; à défaut, le prix oracle actuel, signalé). L’API d’Aave ne voit pas les aTokens que le contrat retire du compte à la fermeture ou au changement de collatéral : les reçus de ces transactions sont relus pour les ajouter (`src/lib/history.ts`). Un historique incomplet (plus de 1 000 mouvements, reçu illisible) n’affiche pas de gain. Le gas n’est pas compté. Vérifié le 12/11/2026 sur de vraies adresses de Base (Aave et Morpho) : l’historique Morpho retrouve exactement le collatéral et la dette empruntée de la position.
+
 ## Réclamer et réinvestir les rewards Merkl
 
 Onglet « Réinvestir » de la Boucle (et bouton « Réinvestir » d'une position quand Merkl doit des rewards sur son réseau). Chaque étape est une transaction signée depuis le portefeuille, sans contrat nouveau ni autorisation durable (`src/lib/reinvest.ts`, `src/components/ReinvestPanel.tsx`) :
@@ -189,6 +193,7 @@ Limite propre au fork : le fork est figé au bloc du `fork.sh`, alors que Velora
 | `src/lib/useMarket.ts` | Lectures on-chain : réserves, prix oracle, prime, position de l’utilisateur. |
 | `src/components/` | Écrans Ouvrir et Fermer. |
 | `src/lib/morpho.ts`, `src/lib/morphoExecute.ts`, `src/lib/morphoScan.ts` | Morpho Blue : marchés (API vérifiée on-chain), calculs, autorisation, appels du contrat, lignes du Scanner. |
+| `src/lib/history.ts`, `src/components/PositionHistory.tsx` | Historique et gain réel d’une position. |
 | `src/components/Morpho*.tsx` | Écrans Morpho (marché, Ouvrir, Fermer, Changer de marché, positions). |
 
 ## Pas encore testé

@@ -21,6 +21,8 @@ import { apyTone, hfTone } from '../lib/tone'
 import { fmtLltv, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
 import { Card, Fold, Metric, Notice } from './ui'
 import { morphoMarketName, type MorphoTab } from './MorphoView'
+import { PositionHistory } from './PositionHistory'
+import { morphoHistory } from '../lib/history'
 
 const CHAIN_IDS = MORPHO_NETWORKS.map((n) => n.chain.id)
 /** Collateral under a cent's worth is leftover dust, not a position. */
@@ -150,7 +152,7 @@ export function MorphoPositions({
         </Card>
       )}
       {rows.map((r) => (
-        <MorphoPosition key={r.market.chainId + r.market.id} {...r} onManage={onManage} />
+        <MorphoPosition key={r.market.chainId + r.market.id} {...r} user={user} onManage={onManage} />
       ))}
     </>
   )
@@ -181,7 +183,7 @@ function figures({ market: m, state, pt }: Row) {
 /** Totals of the Morpho positions, added to the Positions screen's own: net value (USD, 1e8), APY x value, lowest health factor. */
 export type MorphoTotals = { equity: bigint; weightedApy: number; lowest?: { hf: number; correlated: boolean; label: string }; count: number; pending: boolean }
 
-function MorphoPosition({ onManage, ...row }: Row & { onManage: (m: MorphoMarket, tab?: MorphoTab, leverage?: number) => void }) {
+function MorphoPosition({ onManage, user, ...row }: Row & { user: Address; onManage: (m: MorphoMarket, tab?: MorphoTab, leverage?: number) => void }) {
   const { market: m, state, pt } = row
   const u = state.user!
   const net = MORPHO_NETWORKS.find((n) => n.chain.id === m.chainId)!
@@ -189,6 +191,13 @@ function MorphoPosition({ onManage, ...row }: Row & { onManage: (m: MorphoMarket
   const tone = u.debt > 0n ? hfTone(hf, correlated) : undefined
   const ptDays = pt ? daysToMaturity(pt) : undefined
   const ptTone = pt && (isExpired(pt) ? 'bad' : ptDays! < 14 ? 'warn' : undefined)
+  // today's USD price of each side, from the market's oracle (the flows without a price of their day fall back on it)
+  const sides = morphoSides(m, state.price)
+  const unitUsd = (side: typeof sides.collateral, decimals: number) => Number(toBase(10n ** BigInt(decimals), side)) / 1e8
+  const nowPrices = new Map([
+    [m.collateral.address.toLowerCase(), unitUsd(sides.collateral, m.collateral.decimals)],
+    [m.loan.address.toLowerCase(), unitUsd(sides.loan, m.loan.decimals)],
+  ])
   return (
     <Card
       title={
@@ -277,6 +286,14 @@ function MorphoPosition({ onManage, ...row }: Row & { onManage: (m: MorphoMarket
           </tbody>
         </table>
       </Fold>
+      <PositionHistory
+        chain={net.chain}
+        queryKey={['morpho', m.chainId, m.id, user]}
+        load={(signal) => morphoHistory(m.chainId, m.id, user, m.collateral, m.loan, signal)}
+        equityUsd={Number(equity) / 1e8}
+        now={nowPrices}
+        reference={u.debt > 0n ? { address: m.loan.address, symbol: m.loan.symbol } : undefined}
+      />
     </Card>
   )
 }

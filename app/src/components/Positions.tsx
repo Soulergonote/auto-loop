@@ -12,6 +12,8 @@ import { daysToMaturity, isExpired, needsRenewal } from '../lib/pendle'
 import { Card, Fold, Metric, Notice, useSlow } from './ui'
 import type { Pick } from './Scanner'
 import { MorphoPositions, type MorphoTotals } from './MorphoPositions'
+import { PositionHistory } from './PositionHistory'
+import { aaveHistory } from '../lib/history'
 import type { MorphoTab } from './MorphoView'
 import type { MorphoMarket } from '../lib/morpho'
 
@@ -159,6 +161,7 @@ export function Positions({
         <MarketPosition
           key={x.market.id}
           {...x}
+          user={user!}
           onManage={onManage}
           // rewards are claimed by the connected wallet only, not for an address typed in read-only
           canReinvest={!!account && user === account && claim.some((c) => c.chain.id === x.market.chain.id && c.balances.some((b) => b.claimable > 0))}
@@ -234,7 +237,8 @@ function MarketPosition({
   correlated,
   onManage,
   canReinvest,
-}: Open & { onManage: (p: Pick) => void; canReinvest: boolean }) {
+  user,
+}: Open & { onManage: (p: Pick) => void; canReinvest: boolean; user: Address }) {
   const { holdings, healthFactor, eModeCategory } = position
   const emode = snapshot.emodes.find((c) => c.id === eModeCategory)
   const collateral = biggest(holdings, 'suppliedBase')
@@ -256,6 +260,11 @@ function MarketPosition({
       leverage: s.leverage,
       tab,
     })
+  // history: aTokens of the market (to find the ones a contract moved) and today's oracle prices
+  const aTokens = new Map(
+    snapshot.reserves.map((r) => [r.aToken.toLowerCase(), { token: r.token.address, symbol: r.token.symbol, decimals: r.config.decimals }]),
+  )
+  const nowPrices = new Map(snapshot.reserves.map((r) => [r.token.address.toLowerCase(), Number(r.price) / 1e8]))
   return (
     <Card
       title={
@@ -363,6 +372,14 @@ function MarketPosition({
           </tbody>
         </table>
       </Fold>
+      <PositionHistory
+        chain={market.chain}
+        queryKey={['aave', market.id, user]}
+        load={(signal) => aaveHistory(market.chain.id, market.pool, user, aTokens, signal)}
+        equityUsd={Number(s.equityBase) / 1e8}
+        now={nowPrices}
+        reference={s.debtBase > 0n ? { address: debt.reserve.token.address, symbol: debt.reserve.token.symbol } : undefined}
+      />
       {paying.length > 0 && (
         <Fold title="Bonus Merkl" value={`+ ${fmtPct(s.rewardsApy)} · ${paying.length} campagne${paying.length > 1 ? 's' : ''}`}>
           <table className="reserves campaigns cards">
