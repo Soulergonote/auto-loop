@@ -2,7 +2,7 @@
  * Intrinsic yield of yield-bearing tokens (wstETH, weETH, sUSDe, syrupUSDC, sDAI…): the growth of their exchange rate,
  * which Aave and Morpho price but do not show as a rate.
  *
- * Current figures come from tokenYield.ts (rate published on-chain, Pendle, Morpho's API). For Aave reserves no source
+ * Current figures come from tokenYield.ts (rate published on-chain, vault share price, Pendle, Morpho's API). For Aave reserves no source
  * knows, the fallback is the token's Aave price adapter: Aave prices these tokens with a "CAPO" adapter (base asset
  * price x exchange rate) that stores a snapshot of the rate and its date, set by Aave's risk stewards. Growth from that
  * snapshot to the current rate gives a trailing average, sometimes over many months. Tokens without such an adapter
@@ -15,7 +15,7 @@ import { fmtDate } from './format'
 import { readTokenYields } from './tokenYield'
 
 /** Where a yield comes from, freshest first; `pt` is a Pendle PT's fixed yield. */
-export type YieldSource = 'rate' | 'pendle' | 'morpho' | 'aave' | 'pt'
+export type YieldSource = 'rate' | 'vault' | 'pendle' | 'morpho' | 'aave' | 'pt'
 
 export type NativeYield = {
   /** compounded annual yield, fraction */
@@ -38,6 +38,8 @@ export function yieldSourceText(y: NativeYield): string {
   switch (y.source) {
     case 'rate':
       return `taux on-chain${y.via ? ` ${y.via}` : ''}${copy}`
+    case 'vault':
+      return `prix de part on-chain sur 7 jours${copy}`
     case 'pendle':
       return `Pendle, rendement récent${copy}`
     case 'morpho':

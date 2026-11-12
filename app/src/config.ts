@@ -402,6 +402,16 @@ export function rpcUrls(chain: Chain): string[] {
   return PUBLICNODE[chain.id] ? [PUBLICNODE[chain.id], chain.rpcUrls.default.http[0]] : [...chain.rpcUrls.default.http]
 }
 
+/**
+ * Keyless RPCs that answer calls at an old block (PublicNode refuses them without a token), for the share-price growth
+ * of vault tokens (tokenYield.ts). Checked 12 Nov 2026: state 7 and 30 days back, CORS open to the app's origin.
+ */
+export const ARCHIVE_RPCS: Record<number, string[]> = {
+  [mainnet.id]: ['https://eth.drpc.org', 'https://mainnet.gateway.tenderly.co', 'https://eth-mainnet.public.blastapi.io'],
+  [base.id]: ['https://base.drpc.org', 'https://base.gateway.tenderly.co', 'https://mainnet.base.org'],
+  [avalanche.id]: ['https://api.avax.network/ext/bc/C/rpc', 'https://avalanche-mainnet.gateway.tenderly.co'],
+}
+
 export type QuoteMode = 'auto' | 'live' | 'mock'
 const rawMode = import.meta.env.VITE_QUOTE_MODE as string | undefined
 export const QUOTE_MODE: QuoteMode = rawMode === 'live' || rawMode === 'mock' ? rawMode : 'auto'

@@ -3,6 +3,7 @@
  * Morpho's API are read for any address. Add a token here only when:
  *
  * - its contract publishes its own current rate (`ONCHAIN_RATES`): the most exact source, read on-chain;
+ * - it is an ERC-4626 vault no API knows (`VAULTS`): its share price is read now and 7 days ago, on-chain;
  * - it exists on several chains and a source only knows one of them (`SAME_TOKEN`): the bridged copies earn what the
  *   original earns, e.g. syrupUSDC on Base gets the Ethereum figure. Check that prices match before adding a copy.
  */
@@ -21,8 +22,25 @@ export const ONCHAIN_RATES: OnchainRate[] = [
 ]
 
 /**
+ * ERC-4626 vaults whose yield no API gives: the growth of `convertToAssets` over the last 7 days, annualised. Only the
+ * vault's home chain is listed; its bridged copies are in SAME_TOKEN. The chain needs an archive RPC (ARCHIVE_RPCS).
+ * Checked 12 Nov 2026 (7-day yield then): savUSD 7.8 %, wsrUSD 6.2 %, syrupUSDG 4.9 %, yoUSD 5.1 %.
+ * Not listed: wstUSR, whose rate has not moved for 30 days (USR depegged to ~0.03 $ in the meantime).
+ */
+export const VAULTS: { chainId: number; token: Address }[] = [
+  // Avant savUSD (avUSD staked), native on Avalanche
+  { chainId: 43114, token: '0x06d47F3fb376649c3A9Dafe069B3D6E35572219E' },
+  // Reservoir wsrUSD (rUSD savings), native on Ethereum
+  { chainId: 1, token: '0xd3fD63209FA2D55B07A0f6db36C2f43900be3094' },
+  // Maple syrupUSDG (USDG pool), native on Ethereum
+  { chainId: 1, token: '0x87b65C4aAFFA76881f9E96F3e7ED945ddFC3Cd7A' },
+  // YO yoUSD (USDC), Base vault; the Ethereum vault at the same address keeps the same share price
+  { chainId: 8453, token: '0x0000000f2eB9f69274678c76222B35eEc7588a65' },
+]
+
+/**
  * One token on several chains, by chain id: a copy no source knows takes the yield found for another copy (its own
- * figure always wins). Prices checked equal across copies on 10 Nov 2026.
+ * figure always wins). Prices checked equal across copies on 10 Nov 2026 (savUSD, wsrUSD, syrupUSDG, yoUSD: 12 Nov).
  */
 export const SAME_TOKEN: Record<string, Record<number, Address>> = {
   sUSDe: {
@@ -58,11 +76,23 @@ export const SAME_TOKEN: Record<string, Record<number, Address>> = {
     8453: '0x7D214438D0F27AfCcC23B3d1e1a53906aCE5CFEa',
   },
   savUSD: {
+    43114: '0x06d47F3fb376649c3A9Dafe069B3D6E35572219E',
     1: '0xb8D89678E75a973E74698c976716308abB8a46A4',
     8453: '0xa6EF20FE18CD529cA15A8a53A29D1832B1F848ff',
+    143: '0x9648dB94F1e6B19e7D755585542981F97dc806c6',
   },
   wsrUSD: {
     1: '0xd3fD63209FA2D55B07A0f6db36C2f43900be3094',
     8453: '0x62344be8CA1c339B46274a4017dd87AF436900B1',
+    42161: '0x4809010926aec940b550D34a46A52739f996D75D',
+    143: '0x4809010926aec940b550D34a46A52739f996D75D',
+  },
+  syrupUSDG: {
+    1: '0x87b65C4aAFFA76881f9E96F3e7ED945ddFC3Cd7A',
+    42161: '0xE1B0dC5A21b10f1634fBfbE9976fBA2Ee2e1c762',
+  },
+  yoUSD: {
+    8453: '0x0000000f2eB9f69274678c76222B35eEc7588a65',
+    1: '0x0000000f2eB9f69274678c76222B35eEc7588a65',
   },
 }

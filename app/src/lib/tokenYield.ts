@@ -3,8 +3,9 @@
  * knows the token. Sources, best first:
  *
  * 1. `rate`: the rate the token's contract publishes (sDAI, sUSDS, stUSDS), read on-chain, see ONCHAIN_RATES.
- * 2. `pendle`: the underlying yield Pendle's API shows for the token when Pendle has a market on it (recent average).
- * 3. `morpho`: the asset yield of Morpho's API (Ethereum tokens mostly).
+ * 2. `vault`: growth of an ERC-4626 vault's share price over the last 7 days, read on-chain (savUSD, wsrUSD…), see VAULTS.
+ * 3. `pendle`: the underlying yield Pendle's API shows for the token when Pendle has a market on it (recent average).
+ * 4. `morpho`: the asset yield of Morpho's API (Ethereum tokens mostly).
  *
  * A token missing from every source is looked up again through its copies on other chains (SAME_TOKEN). Callers fall
  * back to their own figure when nothing is found: Aave's CAPO average for Aave reserves (nativeYield.ts).
@@ -13,12 +14,12 @@
  * plus its place in SOURCE_ORDER.
  */
 import { readContracts } from '@wagmi/core'
-import { getAddress, isAddress, parseAbi, type Address } from 'viem'
-import { pendleChain } from '../config'
+import { createPublicClient, fallback, getAddress, http, isAddress, parseAbi, type Address } from 'viem'
+import { ARCHIVE_RPCS, pendleChain } from '../config'
 import { wagmiConfig } from '../wagmi'
 import { gql } from './morphoApi'
 import type { NativeYield, YieldSource } from './nativeYield'
-import { ONCHAIN_RATES, SAME_TOKEN } from './yieldTokens'
+import { ONCHAIN_RATES, SAME_TOKEN, VAULTS } from './yieldTokens'
 
 const YEAR = 365 * 86_400
 const TTL_MS = 30 * 60_000
@@ -30,7 +31,7 @@ export type Found = { apy: number; via?: string }
 export type SourceData = Map<string, Found>
 type Sources = Partial<Record<Exclude<YieldSource, 'aave' | 'pt'>, SourceData>>
 
-export const SOURCE_ORDER = ['rate', 'pendle', 'morpho'] as const
+export const SOURCE_ORDER = ['rate', 'vault', 'pendle', 'morpho'] as const
 
 export const tokenKey = (chainId: number, address: string) => `${chainId}:${address.toLowerCase()}`
 
@@ -95,6 +96,45 @@ function readOnchainRates(): Promise<SourceData> {
   })
 }
 
+/** Share price growth from `before` to `now` over `seconds`, compounded to a year. */
+export function growthToApy(before: bigint, now: bigint, seconds: number): number {
+  if (before <= 0n || seconds <= 0) return NaN
+  return Math.expm1(Math.log(Number((now * 10n ** 18n) / before) / 1e18) * (YEAR / seconds))
+}
+
+const VAULT_WINDOW = 7 * 86_400
+const vaultAbi = parseAbi(['function convertToAssets(uint256 shares) view returns (uint256)'])
+
+/** Share price of each listed vault of this chain now and about 7 days ago, through an archive RPC. */
+function readVaultYields(chainId: number): Promise<SourceData> {
+  const vaults = VAULTS.filter((v) => v.chainId === chainId)
+  const urls = ARCHIVE_RPCS[chainId]
+  const chain = wagmiConfig.chains.find((c) => c.id === chainId)
+  if (vaults.length === 0 || !urls || !chain) return Promise.resolve(new Map())
+  return cached(`vault:${chainId}`, async () => {
+    const client = createPublicClient({ chain, transport: fallback(urls.map((u) => http(u, { timeout: 10_000, retryCount: 1 }))) })
+    const head = await client.getBlock()
+    // block time from the last 1,000 blocks, then the block about 7 days back and its real timestamp
+    const earlier = await client.getBlock({ blockNumber: head.number - 1_000n })
+    const perBlock = Number(head.timestamp - earlier.timestamp) / 1_000
+    const past = await client.getBlock({ blockNumber: head.number - BigInt(Math.round(VAULT_WINDOW / perBlock)) })
+    const read = (blockNumber: bigint) =>
+      client.multicall({
+        contracts: vaults.map((v) => ({ address: v.token, abi: vaultAbi, functionName: 'convertToAssets', args: [10n ** 18n] }) as const),
+        blockNumber,
+        allowFailure: true,
+      })
+    const [now, before] = await Promise.all([read(head.number), read(past.number)])
+    const out: SourceData = new Map()
+    vaults.forEach((v, i) => {
+      const a = now[i].result
+      const b = before[i].result
+      if (a !== undefined && b !== undefined) out.set(tokenKey(chainId, v.token), { apy: growthToApy(b, a, Number(head.timestamp - past.timestamp)) })
+    })
+    return out
+  })
+}
+
 type PendleMarket = { underlyingAsset?: { address?: string }; underlyingInterestApy?: number; liquidity?: { usd?: number } }
 
 /** Pendle markets → underlying token's yield (interest only, not reward tokens); the deepest market wins for a token. */
@@ -152,13 +192,14 @@ export async function readTokenYields(chainId: number, addresses: readonly Addre
   const byChain = new Map<number, string[]>()
   for (const a of addresses) for (const t of tokenCopies(chainId, a)) byChain.set(t.chainId, [...(byChain.get(t.chainId) ?? []), t.address])
   const chains = [...byChain.keys()]
-  const [rate, pendle, morpho] = await Promise.all([
+  const [rate, vault, pendle, morpho] = await Promise.all([
     readOnchainRates(),
+    Promise.all(chains.map(readVaultYields)),
     Promise.all(chains.map(readPendleYields)),
     Promise.all(chains.map((c) => readMorphoYields(c, byChain.get(c)!))),
   ])
   const merge = (maps: SourceData[]): SourceData => new Map(maps.flatMap((m) => [...m]))
-  const sources: Sources = { rate, pendle: merge(pendle), morpho: merge(morpho) }
+  const sources: Sources = { rate, vault: merge(vault), pendle: merge(pendle), morpho: merge(morpho) }
   for (const a of addresses) {
     const y = pickTokenYield(chainId, a, sources)
     if (y) out.set(a.toLowerCase(), y)
