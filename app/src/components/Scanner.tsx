@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import type { Address } from 'viem'
 import { MARKETS, MORPHO_NETWORKS, aggregatorsFor, getMarket, networkName, type Market } from '../config'
 import { merklQuery } from '../lib/merkl'
 import { snapshotQuery } from '../lib/snapshot'
 import { scanMarket, type ScanFlag } from '../lib/scan'
+import { groupLines, spreadOf } from '../lib/scanGroups'
 import { SCAN_HFS, loadScanner, saveScanner, scannerQuery, type ScannerPrefs } from '../lib/prefs'
 import { morphoMarketsQuery, type MorphoMarket } from '../lib/morpho'
 import { scanMorpho, type MorphoScanFlag } from '../lib/morphoScan'
 import { ptInfosQuery } from '../lib/pendle'
-import { fmtLltv, fmtDate, fmtDollars, fmtMaturity, fmtPct, fmtX, ptShortSymbol } from '../lib/format'
+import { fmtAddress, fmtLltv, fmtDate, fmtDollars, fmtMaturity, fmtPct, fmtX, ptShortSymbol } from '../lib/format'
 import { Card, Fold, Notice, Segmented, Skel, Tag, useSlow } from './ui'
 import type { MorphoTab } from './MorphoView'
 
@@ -20,7 +21,7 @@ const HFS = SCAN_HFS
 type Filter = ScannerPrefs['filter']
 type Protocol = ScannerPrefs['protocol']
 /** sortable columns; numbers sort high first on the first click, the pair A to Z */
-type SortKey = 'pair' | 'leverage' | 'apy' | 'nativeApy' | 'rewardsApy' | 'capacityUsd'
+type SortKey = 'pair' | 'leverage' | 'apy' | 'spread' | 'rewardsApy' | 'capacityUsd'
 const ROWS = 20
 /** Pairs where less than this (USD) can still be looped are hidden (borrow cap or cash used up). */
 const MIN_CAPACITY_USD = 1_000
@@ -50,6 +51,14 @@ function networksOf(protocol: Protocol): { chainId: number; label: string }[] {
 /** One line of the table, Aave pair or Morpho market. */
 type Line = {
   key: string
+  /** same pair, network and protocol: shown as one line with variants */
+  group: string
+  /** unlevered legs (see ScanRow): collateral yield, borrow cost; spread = their difference */
+  collateralYield: number
+  borrowCost: number
+  spread: number
+  /** tells apart the markets of one group (Morpho: the oracle) */
+  note?: string
   pair: string
   place: string
   protocol: 'aave' | 'morpho'
@@ -73,6 +82,37 @@ const flagTags = (flags: (ScanFlag | MorphoScanFlag)[]) =>
       {FLAG_TAG[f].text}
     </Tag>
   ))
+
+/** The net APY of a line, leg by leg: collateral yield × leverage, − borrow cost × (leverage − 1), + bonuses. */
+function ApyBreakdown({ line: l }: { line: Line }) {
+  const L = l.leverage
+  return (
+    <dl className="breakdown">
+      <div>
+        <dt>Rendement du collatéral</dt>
+        <dd>
+          {fmtPct(l.collateralYield)} × {fmtX(L, true)} = {fmtPct(l.collateralYield * L)}
+        </dd>
+      </div>
+      <div>
+        <dt>Coût de l’emprunt</dt>
+        <dd className={l.borrowCost > 0 ? 'bad' : undefined}>
+          {fmtPct(l.borrowCost)} × {fmtX(L - 1, true)} = −{fmtPct(l.borrowCost * (L - 1))}
+        </dd>
+      </div>
+      {l.rewardsApy > 0 && (
+        <div>
+          <dt>Bonus Merkl</dt>
+          <dd className="good">+{fmtPct(l.rewardsApy)}</dd>
+        </div>
+      )}
+      <div className="total">
+        <dt>APY net</dt>
+        <dd className={l.apy < 0 ? 'bad' : 'good'}>{fmtPct(l.apy)}</dd>
+      </div>
+    </dl>
+  )
+}
 
 /**
  * Every pair of every Aave market and every listed Morpho Blue market, looped at a target health factor, ranked by
@@ -125,6 +165,10 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
       for (const r of scanMarket(q.data, campaigns, { targetHf, minCapacityBase: LOW_CAPACITY }))
         out.push({
           key: `${r.marketId}-${r.collateral.token.address}-${r.debt.token.address}`,
+          group: `${r.marketId}-${r.collateral.token.address}-${r.debt.token.address}`,
+          collateralYield: r.collateralYield,
+          borrowCost: r.borrowCost,
+          spread: spreadOf(r),
           pair: `${r.collateral.token.symbol} / ${r.debt.token.symbol}`,
           place: `Aave · ${label(r.marketId)}`,
           protocol: 'aave',
@@ -157,6 +201,11 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
       for (const r of scanMorpho(list, { targetHf, pts: morphoPts[i].data, lowCapacityUsd: LOW_CAPACITY_USD }))
         out.push({
           key: `morpho-${n.chain.id}-${r.market.id}`,
+          group: `morpho-${n.chain.id}-${r.market.collateral.address}-${r.market.loan.address}`,
+          collateralYield: r.collateralYield,
+          borrowCost: r.market.borrowApy,
+          spread: r.collateralYield - r.market.borrowApy,
+          note: `oracle ${r.market.oracleType ? `${r.market.oracleType} ` : ''}${fmtAddress(r.market.params.oracle)}`,
           pair: `${ptShortSymbol(r.market.collateral.symbol)} / ${r.market.loan.symbol}`,
           place: `Morpho · ${n.label}`,
           protocol: 'morpho',
@@ -189,19 +238,21 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
     .toLowerCase()
     .split(/[\s/]+/)
     .filter(Boolean)
-  const shown = rows
-    .filter(
-      (r) =>
-        (filter === 'all' || (filter === 'stable' ? r.stable : r.correlated)) &&
-        (protocol === 'all' || r.protocol === protocol) &&
-        words.every((w) => r.pair.toLowerCase().includes(w)) &&
-        (showNegative || r.apy > 0 || r.nativeUnknown) &&
-        r.capacityUsd >= MIN_CAPACITY_USD,
-    )
-    .sort((a, b) => {
-      const d = sort.key === 'pair' ? a.pair.localeCompare(b.pair) : a[sort.key] - b[sort.key]
-      return sort.desc ? -d : d
-    })
+  const shown = rows.filter(
+    (r) =>
+      (filter === 'all' || (filter === 'stable' ? r.stable : r.correlated)) &&
+      (protocol === 'all' || r.protocol === protocol) &&
+      words.every((w) => r.pair.toLowerCase().includes(w)) &&
+      (showNegative || r.apy > 0 || r.nativeUnknown) &&
+      r.capacityUsd >= MIN_CAPACITY_USD,
+  )
+
+  const groups = groupLines(shown).sort((x, y) => {
+    const a = x.head
+    const b = y.head
+    const d = sort.key === 'pair' ? a.pair.localeCompare(b.pair) : a[sort.key] - b[sort.key]
+    return sort.desc ? -d : d
+  })
   const sortBy = (key: SortKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'pair' }))
   const head = (key: SortKey, text: string, num = true) => (
     <th className={`sortable ${num ? 'num' : ''}`} aria-sort={sort.key === key ? (sort.desc ? 'descending' : 'ascending') : undefined}>
@@ -219,7 +270,8 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
   ]
   const merklFailed = chainIds.filter((_, i) => merkl[i].isError)
   const retry = () => [...snapshots, ...morphoLists].forEach((q) => (q.isError || q.isPending) && void q.refetch())
-  const visible = all ? shown : shown.slice(0, ROWS)
+  const visible = all ? groups : groups.slice(0, ROWS)
+  const [opened, setOpened] = useState<string>()
   const hf = hfText.replace('.', ',')
 
   return (
@@ -309,49 +361,126 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
               {head('pair', 'Paire', false)}
               {head('leverage', 'Levier')}
               {head('apy', 'APY net')}
-              {head('nativeApy', 'Rendement du token')}
+              {head('spread', 'Écart')}
               {head('rewardsApy', 'Bonus Merkl')}
               {head('capacityUsd', 'Capacité')}
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {visible.map((r) => (
-              <tr key={r.key} className="clickable" onClick={r.open}>
-                <td className="lead">
-                  {r.pair}
-                  {(chain === 'all' || protocol === 'all') && <span className="muted"> · {r.place}</span>}
-                  <div className="tags">{r.tags}</div>
-                </td>
-                <td data-label="Levier" className="num">
-                  {fmtX(r.leverage, true)}
-                </td>
-                <td data-label="APY net" className={`num ${r.apy < 0 ? 'bad' : 'good'}`}>
-                  <strong>{fmtPct(r.apy)}</strong>
-                </td>
-                <td data-label="Rendement du token" className="num detail">
-                  {r.nativeApy !== 0 ? fmtPct(r.nativeApy) : <span className="na">—</span>}
-                </td>
-                <td data-label="Bonus Merkl" className="num detail">
-                  {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : <span className="na">—</span>}
-                  {r.rewardsEnd !== undefined && <div className="muted small">jusqu’au {fmtDate(r.rewardsEnd)}</div>}
-                </td>
-                <td data-label="Capacité" className="num">
-                  {fmtDollars(r.capacityUsd, true)}
-                </td>
-                <td className="row-action">
-                  <button
-                    className="btn small"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      r.open()
-                    }}
-                  >
-                    Ouvrir
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {visible.map(({ head: r, variants }) => {
+              const open = opened === r.group
+              return (
+                <Fragment key={r.group}>
+                  <tr className="clickable" onClick={r.open}>
+                    <td className="lead">
+                      {r.pair}
+                      {(chain === 'all' || protocol === 'all') && <span className="muted"> · {r.place}</span>}
+                      <div className="tags">
+                        {r.tags}
+                        {variants.length > 0 && (
+                          <Tag>
+                            + {variants.length} marché{variants.length > 1 ? 's' : ''}
+                          </Tag>
+                        )}
+                        <button
+                          type="button"
+                          className="link"
+                          aria-expanded={open}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setOpened(open ? undefined : r.group)
+                          }}
+                        >
+                          {open ? 'Masquer le détail' : 'Détail'}
+                        </button>
+                      </div>
+                    </td>
+                    <td data-label="Levier" className="num">
+                      {fmtX(r.leverage, true)}
+                    </td>
+                    <td data-label="APY net" className={`num ${r.apy < 0 ? 'bad' : 'good'}`}>
+                      <strong>{fmtPct(r.apy)}</strong>
+                    </td>
+                    <td data-label="Écart" className={`num detail ${r.spread < 0 ? 'bad' : ''}`}>
+                      {fmtPct(r.spread)}
+                    </td>
+                    <td data-label="Bonus Merkl" className="num detail">
+                      {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : <span className="na">—</span>}
+                      {r.rewardsEnd !== undefined && <div className="muted small">jusqu’au {fmtDate(r.rewardsEnd)}</div>}
+                    </td>
+                    <td data-label="Capacité" className="num">
+                      {fmtDollars(r.capacityUsd, true)}
+                    </td>
+                    <td className="row-action">
+                      <button
+                        className="btn small"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          r.open()
+                        }}
+                      >
+                        Ouvrir
+                      </button>
+                    </td>
+                  </tr>
+                  {open && (
+                    <tr className="scan-detail">
+                      <td colSpan={7}>
+                        <ApyBreakdown line={r} />
+                        {variants.length > 0 && (
+                          <table className="reserves variants">
+                            <thead>
+                              <tr>
+                                <th>Autres marchés</th>
+                                <th className="num">Levier</th>
+                                <th className="num">APY net</th>
+                                <th className="num">Écart</th>
+                                <th className="num">Capacité</th>
+                                <th></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {variants.map((v) => (
+                                <tr key={v.key} className="clickable" onClick={v.open}>
+                                  <td className="lead">
+                                    <div className="tags">{v.tags}</div>
+                                    {v.note && <div className="muted small">{v.note}</div>}
+                                  </td>
+                                  <td data-label="Levier" className="num">
+                                    {fmtX(v.leverage, true)}
+                                  </td>
+                                  <td data-label="APY net" className={`num ${v.apy < 0 ? 'bad' : 'good'}`}>
+                                    {fmtPct(v.apy)}
+                                  </td>
+                                  <td data-label="Écart" className="num">
+                                    {fmtPct(v.spread)}
+                                  </td>
+                                  <td data-label="Capacité" className="num">
+                                    {fmtDollars(v.capacityUsd, true)}
+                                  </td>
+                                  <td className="row-action">
+                                    <button
+                                      className="btn small"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        v.open()
+                                      }}
+                                    >
+                                      Ouvrir
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
             {loading > 0 &&
               visible.length < 5 &&
               Array.from({ length: 5 - visible.length }, (_, i) => (
@@ -366,10 +495,10 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
       ) : (
         <p className="muted">Aucune paire ne correspond à ces filtres. Changer de health factor ou de type de paire.</p>
       )}
-      {shown.length > ROWS && (
+      {groups.length > ROWS && (
         <div className="actions">
           <span className="muted small">
-            {all ? shown.length : ROWS} paires sur {shown.length}.
+            {all ? groups.length : ROWS} paires sur {groups.length}.
           </span>
           <button className="btn small" onClick={() => setAll(!all)}>
             {all ? `Afficher les ${ROWS} premières` : 'Afficher toutes les paires'}
@@ -382,11 +511,12 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           Les bonus Merkl ne comptent que si la position y a droit à ce health factor. Les taux sont variables : l’APY change avec l’utilisation du marché.
         </p>
         <p className="muted small">
-          « Rendement du token » est le rendement propre des tokens à rendement (wstETH, sUSDe, syrupUSDC…) : la hausse de leur taux de change, prise à la
-          source la plus récente qui connaît le token (taux publié on-chain, Pendle, API Morpho, sinon moyenne de l’adaptateur de prix Aave), sur le collatéral
-          moins celle d’une dette qui en a un, multipliée par le levier : un rendement brut, avant le coût de l’emprunt, qui peut dépasser l’APY net. Sans
-          source, l’étiquette « rendement du token non compté » le signale. Pour un PT Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe
-          de son marché Pendle, valable jusqu’à l’échéance.
+          « Écart » est le rendement du collatéral moins le coût de l’emprunt, sans levier ni bonus : ce que la paire rapporte par unité de levier, la mesure à
+          comparer entre deux paires. Le rendement du collatéral compte le taux de dépôt et le rendement propre des tokens à rendement (wstETH, sUSDe,
+          syrupUSDC…), pris à la source la plus récente qui connaît le token (taux publié on-chain, Pendle, API Morpho, sinon moyenne de l’adaptateur de prix
+          Aave) ; le coût de l’emprunt retranche celui d’une dette qui en a un. Sans source, l’étiquette « rendement du token non compté » le signale. Pour un
+          PT Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe de son marché Pendle, valable jusqu’à l’échéance. « Détail » montre l’APY
+          net jambe par jambe ; « + N marchés » regroupe les autres marchés Morpho de la même paire sur le même réseau (autre LLTV ou autre oracle).
         </p>
         <p className="muted small">
           Non compté : le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes Merkl à public restreint. La capacité est le capital encore «

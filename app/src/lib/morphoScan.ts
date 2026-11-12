@@ -20,6 +20,8 @@ export type MorphoScanRow = {
   nativeApy: number
   /** borrow APY net of the borrow-side rewards the API counts */
   borrowApy: number
+  /** unlevered collateral yield (PT implied APY or the token's own) */
+  collateralYield: number
   apy: number
   /** equity that can still be looped before the market runs out of loan token, USD */
   capacityUsd: number
@@ -69,6 +71,7 @@ export function scanMorpho(markets: MorphoMarket[], opts: MorphoScanOptions): Mo
       healthFactor,
       nativeApy: collateralApy * leverage,
       borrowApy,
+      collateralYield: collateralApy,
       apy,
       capacityUsd,
       pt,

@@ -51,6 +51,10 @@ describe('scanMarket', () => {
     expect(top.emode?.id).toBe(1)
     expect(top.apy).toBeCloseTo(0.06 * top.leverage - 0.04 * (top.leverage - 1))
     expect(top.correlated && top.stable).toBe(true)
+    // the unlevered legs rebuild the net APY
+    expect(top.collateralYield).toBeCloseTo(0.06)
+    expect(top.borrowCost).toBeCloseTo(0.04)
+    for (const r of rows) expect(r.collateralYield * r.leverage - r.borrowCost * (r.leverage - 1) + r.rewardsApy).toBeCloseTo(r.apy)
     // losing pairs are still listed (USDC against WETH borrowed at 2 % earns, WETH against USDC at 4 % loses)
     expect(rows.find((r) => r.collateral.token.symbol === 'WETH' && r.debt.token.symbol === 'USDC')!.apy).toBeLessThan(0)
     expect(rows.every((r, i) => i === 0 || rows[i - 1].apy >= r.apy)).toBe(true)

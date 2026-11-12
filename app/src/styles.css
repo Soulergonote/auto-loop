@@ -179,6 +179,18 @@ input[type='checkbox'] { width: auto; min-height: 0; accent-color: var(--accent)
 .reserves .num, .reserves th.num { text-align: right; }
 .reward { color: var(--good); }
 
+/* scanner: a line's net APY leg by leg, and the other markets of the same pair */
+.scan-detail > td { background: var(--bg); }
+.breakdown { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, max-content)); gap: 4px 24px; margin: 0; font-size: 13px; }
+.breakdown > div { display: flex; flex-direction: column; }
+.breakdown dt { color: var(--muted); font-size: 12px; }
+.breakdown dd { margin: 0; font-variant-numeric: tabular-nums; }
+.breakdown dd.good { color: var(--good); }
+.breakdown dd.bad { color: var(--bad); }
+.breakdown .total dd { font-weight: 600; }
+.reserves.variants { margin-top: 12px; }
+.reserves.variants td { border-top: 1px solid var(--border); }
+
 .steps { margin: 0; padding-left: 20px; color: var(--muted); }
 .steps li { margin: 4px 0; }
 .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -260,6 +272,9 @@ footer { text-align: center; }
   .scan-search { max-width: none; }
   table.scan.cards tr { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 12px; }
   table.scan.cards td { display: flex; flex-direction: column; text-align: left; padding: 0; gap: 0; }
+  table.scan.cards tr.scan-detail { display: block; }
+  table.scan.cards tr.scan-detail > td { display: block; background: none; }
+  table.scan.cards .variants tr { background: var(--card); }
   table.scan.cards td.lead { grid-column: 1 / -1; display: block; }
   table.scan.cards td.detail, table.scan.cards td.row-action { display: none; }
 }
