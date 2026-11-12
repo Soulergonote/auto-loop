@@ -50,41 +50,33 @@ export const DEMO_TOKENS: Token[] = [
   { symbol: 'EURC', name: 'Euro Coin', address: '0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42', decimals: 6 },
 ]
 
-export type AggregatorId = '0x' | '1inch' | 'velora' | 'kyber'
+export type AggregatorId = 'velora' | 'kyber'
 /** An aggregator, or 'best': every aggregator that quotes on the chain is asked and the highest output wins. */
 export type AggregatorChoice = AggregatorId | 'best'
 
 type Aggregator = {
   label: string
   router: Address
-  needsKey: boolean
-  available: boolean
   /** chains the aggregator quotes on (undefined = not restricted) */
   chains?: number[]
 }
 
 /**
  * Router each aggregator's calldata must target. LeverageExecutor approves and calls the same address,
- * which holds for all of them (0x: AllowanceHolder, never Settler; KyberSwap: MetaAggregationRouterV2, same address on
+ * which holds for both (KyberSwap: MetaAggregationRouterV2, same address on
  * every chain listed). Same values as contracts/test/fork/BaseFork.t.sol; to re-verify against each aggregator's docs
  * before any deployment.
  */
 export const AGGREGATORS: Record<AggregatorId, Aggregator> = {
-  '0x': { label: '0x', router: '0x0000000000001fF3684f28c67538d4D072C22734', needsKey: true, available: false },
-  '1inch': { label: '1inch', router: '0x111111125421cA6dc452d289314280a0f8842A65', needsKey: true, available: false },
   velora: {
     label: 'Velora',
     router: '0x6A000F20005980200259B80c5102003040001068',
-    needsKey: false,
-    available: true,
     // from the API's own "Supported chains" error, 2026-10-31; Sonic (146) is listed but answers 503
     chains: [1, 10, 56, 100, 130, 137, 4663, 8453, 42161, 43114],
   },
   kyber: {
     label: 'KyberSwap',
     router: '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5',
-    needsKey: false,
-    available: true,
     // Mantle answers 404 (checked 2026-11-01); Arc quotes since 2026-11-10; Unichain, HyperEVM, MegaETH 2026-11-11
     // (router checked in each route answer). Also quotes on Berachain, Ronin, Etherlink: no Aave v3 nor Morpho API there.
     chains: [1, 10, 56, 130, 137, 143, 146, 999, 4326, 5042, 8453, 9745, 42161, 43114, 59144],
@@ -114,10 +106,7 @@ export const KYBER_CHAIN_SLUGS: Record<number, string> = {
 export const KYBER_CLIENT_ID = 'auto-loop'
 
 export function aggregatorsFor(chainId: number): AggregatorId[] {
-  return (Object.keys(AGGREGATORS) as AggregatorId[]).filter((id) => {
-    const a = AGGREGATORS[id]
-    return a.available && (!a.chains || a.chains.includes(chainId))
-  })
+  return (Object.keys(AGGREGATORS) as AggregatorId[]).filter((id) => supportsChain(id, chainId))
 }
 
 export function supportsChain(id: AggregatorId, chainId: number): boolean {

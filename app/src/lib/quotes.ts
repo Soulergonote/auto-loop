@@ -293,7 +293,7 @@ async function fetchJson(url: string, init: RequestInit = {}): Promise<any> {
   try {
     body = JSON.parse(text)
   } catch {
-    // the dev proxy answers 5xx with an empty body when it cannot reach the API host
+    // an API host can answer 5xx with an empty body
     throw new QuoteError(res.status >= 500 ? `API injoignable (HTTP ${res.status})` : `réponse illisible (HTTP ${res.status})`)
   }
   if (!res.ok) {
@@ -304,41 +304,6 @@ async function fetchJson(url: string, init: RequestInit = {}): Promise<any> {
 }
 
 const LIVE: Record<AggregatorId, (req: QuoteRequest, signal?: AbortSignal) => Promise<RawQuote>> = {
-  // 0x Swap API v2, AllowanceHolder flow: approve and call transaction.to (AllowanceHolder), never Settler.
-  async '0x'(req, signal) {
-    const q = new URLSearchParams({
-      chainId: String(req.chainId),
-      sellToken: req.sell.address,
-      buyToken: req.buy.address,
-      sellAmount: req.sellAmount.toString(),
-      taker: req.taker,
-      slippageBps: req.slippageBps.toString(),
-    })
-    const body = await fetchJson(`/api/0x/swap/allowance-holder/quote?${q}`, { signal })
-    if (body.liquidityAvailable === false) throw new QuoteError('pas de liquidité chez 0x')
-    const spender = body.issues?.allowance?.spender ?? body.allowanceTarget
-    if (spender && getAddress(spender) !== getAddress(body.transaction.to)) {
-      throw new QuoteError('0x : la cible à approuver diffère de la cible appelée')
-    }
-    return { to: body.transaction.to, data: body.transaction.data, value: body.transaction.value, buyAmount: body.buyAmount }
-  },
-
-  // 1inch Swap API v6.0. disableEstimate: the contract does not hold the tokens yet when quoting.
-  async '1inch'(req, signal) {
-    const q = new URLSearchParams({
-      src: req.sell.address,
-      dst: req.buy.address,
-      amount: req.sellAmount.toString(),
-      from: req.taker,
-      origin: req.taker,
-      slippage: (Number(req.slippageBps) / 100).toString(),
-      disableEstimate: 'true',
-      allowPartialFill: 'false',
-    })
-    const body = await fetchJson(`/api/1inch/swap/v6.0/${req.chainId}/swap?${q}`, { signal })
-    return { to: body.tx.to, data: body.tx.data, value: body.tx.value, buyAmount: body.dstAmount }
-  },
-
   // KyberSwap API v1: route, then build. No fee unless the integrator asks for one: any extraFee is refused.
   async kyber(req, signal) {
     const chain = KYBER_CHAIN_SLUGS[req.chainId]

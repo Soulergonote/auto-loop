@@ -22,7 +22,6 @@ Le build ne dépend d'aucun serveur : le navigateur appelle directement l'API Ve
 | `VITE_EXECUTORS` | Adresse du contrat déployé pour chaque marché, en JSON (`{"base":"0x…"}`) : un contrat par pool Aave. Marché absent : l'app propose de **déployer le contrat v2 depuis le portefeuille connecté** (bouton « Déployer le contrat », routeurs = agrégateurs qui cotent sur la chaîne, prêteur gratuit = Morpho Blue là où il existe), ou de coller l'adresse d'un contrat déjà déployé ; l'adresse est retenue dans le navigateur. Toute adresse, d'ici ou du navigateur, n'est utilisée qu'après vérification on-chain que son code est exactement celui du contrat (v2, ou v1 pour un contrat déjà déployé) pour ce Pool. Avec un contrat v1 enregistré dans le navigateur, un bandeau propose de déployer la v2. `VITE_EXECUTOR_ADDRESS` reste lue pour Base. |
 | `VITE_RPC_URL_<chainId>` | RPC d'une chaîne pour les lectures et simulations (vide = PublicNode, puis le RPC public de la chaîne). `VITE_RPC_URL` vaut pour Base. Pour un fork local : `anvil --fork-url https://mainnet.base.org --chain-id 8453` puis `http://127.0.0.1:8545`. |
 | `VITE_QUOTE_MODE` | `auto` (API réelles, repli sur un devis simulé si elles ne répondent pas), `live` ou `mock`. Un devis simulé n’est jamais exécutable. |
-| `ZEROX_API_KEY`, `ONEINCH_API_KEY` | Lues uniquement par le serveur de dev (proxy `/api/0x` et `/api/1inch` dans `vite.config.ts`), jamais envoyées au navigateur : 0x et 1inch ne marchent donc pas dans le build statique. Inutiles tant que 0x et 1inch sont désactivés ; Velora n’en demande pas. |
 | `VITE_VELORA_INCLUDE_DEXS`, `VITE_VELORA_EXCLUDE_DEXS` | Listes de DEX (noms Velora, séparés par des virgules) autorisés ou exclus des routes. Vide = toutes les routes. Sert surtout au test sur fork (voir plus bas). |
 | `VITE_DEMO` | `true` : prix et paramètres fictifs, pour voir l’interface sans réseau. |
 
@@ -168,7 +167,7 @@ Limite propre au fork : le fork est figé au bloc du `fork.sh`, alors que Velora
 | `src/config.ts` | Adresses (Pool Aave, tokens, routeurs des agrégateurs), variables d’environnement. |
 | `src/abi.ts` | ABI du contrat (vérifiée contre les signatures Solidity dans les tests) et d’Aave. |
 | `src/lib/math.ts` | Calculs de levier, health factor, montant à vendre à la fermeture. |
-| `src/lib/quotes.ts` | Devis Velora v6.2 (contrôle des frais), 0x (AllowanceHolder) et 1inch v6 désactivés, devis simulé. |
+| `src/lib/quotes.ts` | Devis Velora v6.2 et KyberSwap (contrôle des frais), devis simulé. |
 | `e2e/` | Test de bout en bout sur fork : `fork.sh` (re-fork, déploiement, fonds de test), `run.cjs` (Chromium + portefeuille de test). |
 | `src/lib/signatures.ts` | Délégation de crédit et permit d’aToken en EIP-712. |
 | `src/lib/execute.ts` | Enchaînement approve → signature → simulation → transaction. |
@@ -180,9 +179,8 @@ Limite propre au fork : le fork est figé au bloc du `fork.sh`, alors que Velora
 ## Pas encore testé
 
 - Un vrai portefeuille (MetaMask, Rabby) : le test utilise un portefeuille injecté qui relaie vers anvil, les mêmes appels (`eth_sendTransaction`, `eth_signTypedData_v4`) mais sans l’écran de confirmation.
-- Devis 0x et 1inch (désactivés, clés API absentes).
 - Autres paires que WETH / USDC.
 
 ## Limites v1
 
-Une seule plateforme (Aave v3, Base). Les paramètres affichés ignorent l’eMode (un avertissement s’affiche s’il est actif). Le calcul du prix de liquidation suppose que le collatéral de la paire est le seul du compte. Les clés API passent par le serveur de dev de Vite : pour un déploiement, il faudra un petit backend ou des fonctions serverless.
+Une seule plateforme (Aave v3, Base). Les paramètres affichés ignorent l’eMode (un avertissement s’affiche s’il est actif). Le calcul du prix de liquidation suppose que le collatéral de la paire est le seul du compte.

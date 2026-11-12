@@ -264,7 +264,7 @@ export function useSlow(pending: boolean, ms = 15_000): boolean {
 
 /** Aggregator choice: "Meilleur prix" plus the aggregators that quote on this chain, nothing else. */
 export function AggregatorPicker({ chainId, value, onChange }: { chainId: number; value: AggregatorChoice; onChange: (a: AggregatorChoice) => void }) {
-  const usable = (Object.keys(AGGREGATORS) as AggregatorId[]).filter((id) => AGGREGATORS[id].available && supportsChain(id, chainId))
+  const usable = (Object.keys(AGGREGATORS) as AggregatorId[]).filter((id) => supportsChain(id, chainId))
   return (
     <div className="field">
       <span>Agrégateur</span>

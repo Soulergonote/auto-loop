@@ -2,7 +2,7 @@
 
 Deux versions cohabitent : `LeverageExecutorV2` (v2, voir [la section v2](#v2--leverageexecutorv2)), que l'app déploie depuis le 08/11/2026, et `LeverageExecutor` (v1, déployée par Azerty sur Plasma), que l'app reconnaît et utilise toujours là où elle est déjà déployée.
 
-`LeverageExecutor` ouvre et ferme une position à levier sur Aave v3 en **une seule transaction**, avec un swap via un agrégateur (Velora, KyberSwap ; 0x et 1inch prévus). Conception : voir `../architecture.md`.
+`LeverageExecutor` ouvre et ferme une position à levier sur Aave v3 en **une seule transaction**, avec un swap via un agrégateur (Velora, KyberSwap). Conception : voir `../architecture.md`.
 
 ## Contenu
 
@@ -70,7 +70,6 @@ Prérequis côté utilisateur : `C.approve(executor, initial)` et `variableDebtD
   - ouverture 3x WETH/USDC avec swap Uniswap v3 (1 WETH + 4 769 USDC empruntés → 2,996 aWETH, HF 1,24), puis fermeture totale 7 jours plus tard : dette à 0, aucun reste dans le contrat ;
   - rejeu d'un vrai devis Velora (2 000 USDC → WETH via Augustus v6.2) : 1,838 aWETH, HF 1,82.
 - 01/11/2026, contrat sans owner : 3/3 fork Base passent (Uniswap v3 ouverture + fermeture ; vrai devis Velora : 1,881 aWETH, HF 1,79 ; vrai devis KyberSwap : 1,882 aWETH, HF 1,79). Déploiement depuis le bouton de l'app puis ouverture et fermeture réussis sur fork local de Base.
-- Devis 0x et 1inch pas encore testés : leurs API demandent une clé (`ZEROX_API_KEY`, `ONEINCH_API_KEY`).
 - `evm_version = "cancun"` est nécessaire : le Pool Aave de Base utilise des opcodes Cancun et le fork revert (`NotActivated`) en `shanghai`.
 - La dette Aave peut dépasser `debtAmount` de 1 à 2 wei (arrondi du solde à l'échelle), d'où `assertApproxEqAbs` dans les tests fork.
 
