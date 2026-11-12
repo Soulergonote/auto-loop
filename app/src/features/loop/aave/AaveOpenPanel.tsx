@@ -5,7 +5,7 @@ import { AGGREGATORS, QUOTE_MODE, type AggregatorChoice, type Token } from '../.
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../../../services/merkl'
 import { CampaignTable } from '../shared/CampaignTable'
 import { RiskPanel } from '../shared/RiskPanel'
-import { eligibleEModes, withEMode, type EModeCategory, type Reserves, type UserState } from '../../../protocols/aave/useMarket'
+import { canBorrow, eligibleEModes, withEMode, type EModeCategory, type Reserves, type UserState } from '../../../protocols/aave/useMarket'
 import { useQuote } from '../../../services/quotes/useQuote'
 import { useDebounced } from '../../../ui/useDebounced'
 import { getQuote, quoteLabel } from '../../../services/quotes/quotes'
@@ -250,7 +250,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
   // first cause first (charte v2): balance, then market state, liquidity, health factor, swap
   if (user && initial && capBalance !== undefined && initial > capBalance) problems.push(`Solde ${K.symbol} insuffisant.`)
   if (!C.config.active || C.config.paused || C.config.frozen) problems.push(`${C.token.symbol} est gelé ou en pause sur Aave.`)
-  if (!D.config.borrowingEnabled || D.config.paused || D.config.frozen) problems.push(`${D.token.symbol} ne peut pas être emprunté.`)
+  if (!canBorrow(D, reserves.emode)) problems.push(`${D.token.symbol} ne peut pas être emprunté.`)
   if (!D.config.flashLoanEnabled) problems.push(`Flash loan désactivé sur ${D.token.symbol}.`)
   if (C.config.ltvBps === 0) problems.push(`${C.token.symbol} n’est pas accepté comme collatéral (LTV 0).`)
   if (C.config.isolated) problems.push(`${C.token.symbol} est en isolation mode : non supporté par le contrat v1.`)

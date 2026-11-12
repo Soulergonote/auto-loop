@@ -8,7 +8,7 @@ import { maxLeverage, netApy } from '../../domain/math'
 import { aaveRatesAfter } from '../../domain/irm'
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, type Campaign } from '../../services/merkl'
 import { loopNativeApy } from '../../services/yield/nativeYield'
-import { eligibleEModes, type EModeCategory } from '../../protocols/aave/useMarket'
+import { canBorrow, eligibleEModes, type EModeCategory } from '../../protocols/aave/useMarket'
 import type { Snapshot, SnapReserve } from '../../protocols/aave/snapshot'
 import { isCorrelated, isUsdStable } from '../../domain/pairs'
 
@@ -81,7 +81,8 @@ export type ScanOptions = {
 /** A PT is only looped while it can still be bought: before maturity, through a known Pendle market. */
 const canBeCollateral = (r: SnapReserve) =>
   r.config.active && !r.config.paused && !r.config.frozen && !r.config.isolated && (!r.pt || (!!r.pt.market && !r.pt.expired && !!r.native))
-const canBeBorrowed = (r: SnapReserve) => r.config.active && !r.config.paused && !r.config.frozen && r.config.borrowingEnabled && r.config.flashLoanEnabled
+/** borrowable outside eMode or in one of its categories (canBorrow checks the configuration actually used) */
+const canBeBorrowed = (r: SnapReserve) => r.config.active && !r.config.paused && !r.config.frozen && r.config.flashLoanEnabled
 
 /** What is left under a cap (whole tokens, 0 = none), in base units. */
 function roomUnderCap(capTokens: bigint, used: bigint, price: bigint): bigint {
@@ -124,7 +125,7 @@ export function scanMarket(snapshot: Snapshot, campaigns: Campaign[] | undefined
               },
             }
           : C0
-        if (C.config.ltvBps === 0) continue
+        if (C.config.ltvBps === 0 || !canBorrow(D, emode)) continue
         const leverage = leverageAtHf(C.config.liquidationThresholdBps, C.config.ltvBps, opts.targetHf)
         if (!(leverage >= MIN_SCAN_LEVERAGE)) continue
         const healthFactor = hfAtLeverage(C.config.liquidationThresholdBps, leverage)

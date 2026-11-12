@@ -40,6 +40,17 @@ describe('scanner maths', () => {
 })
 
 describe('scanMarket', () => {
+  it('lists a debt asset borrowable only inside an eMode (Aave v3.6, e.g. weETH / WETH on Monad)', () => {
+    const weeth = reserve(0, 'weETH', { ltv: 0, lt: 0, price: 3200n * USD })
+    const weth = reserve(1, 'WETH', { price: 3000n * USD })
+    weth.config.borrowingEnabled = false
+    const usdc = reserve(2, 'USDC')
+    const rows = scanMarket(snapshot([weeth, weth, usdc], [emode(4, [0], [1])]), [], { targetHf: 1.1 })
+    expect(rows.find((r) => r.collateral.token.symbol === 'weETH' && r.debt.token.symbol === 'WETH')?.emode?.id).toBe(4)
+    // outside the eMode WETH stays unborrowable
+    expect(rows.some((r) => r.debt.token.symbol === 'WETH' && !r.emode)).toBe(false)
+  })
+
   it('picks the eMode when it pays more and ranks pairs by yield', () => {
     const usde = reserve(0, 'USDe', { supplyApy: 0.06 })
     const usdc = reserve(1, 'USDC', { supplyApy: 0.03, borrowApy: 0.04 })

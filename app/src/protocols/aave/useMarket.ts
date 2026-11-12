@@ -341,6 +341,16 @@ export function eligibleEModes(categories: EModeCategory[], collateral: Reserve,
     .sort((a, b) => b.ltvBps - a.ltvBps || a.id - b.id)
 }
 
+/**
+ * Whether `debt` can be borrowed by an account in `emode` (none: outside eMode). Since Aave v3.6 (pool revision 12) a
+ * category's borrowable bitmap replaces the reserve's « borrowing enabled » flag inside eMode: WETH on Monad or MegaETH,
+ * wstETH on Ethereum, Base or Arbitrum are borrowable only inside their eMode.
+ */
+export function canBorrow(debt: Reserve, emode?: EModeCategory): boolean {
+  const c = debt.config
+  return c.active && !c.paused && !c.frozen && (emode ? hasBit(emode.borrowableBitmap, debt.id) : c.borrowingEnabled)
+}
+
 /** The pair as Aave sees it inside the category: the collateral's LTV and liquidation threshold are the category's. */
 export function withEMode(reserves: Reserves, category?: EModeCategory): Reserves {
   if (!category) return { ...reserves, emode: undefined }

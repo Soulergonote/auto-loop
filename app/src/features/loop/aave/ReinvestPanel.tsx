@@ -5,7 +5,7 @@ import type { Address, Hash } from 'viem'
 import { wagmiConfig } from '../../../chain/wagmi'
 import { debtTokenAbi, erc20Abi } from '../../../chain/abi'
 import type { AggregatorChoice, Token } from '../../../config'
-import { withEMode, type EModeCategory, type Reserves, type UserState } from '../../../protocols/aave/useMarket'
+import { canBorrow, withEMode, type EModeCategory, type Reserves, type UserState } from '../../../protocols/aave/useMarket'
 import { snapshotQuery } from '../../../protocols/aave/snapshot'
 import { useQuote } from '../../../services/quotes/useQuote'
 import { getQuote, type Quote } from '../../../services/quotes/quotes'
@@ -216,7 +216,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
     if (legError) problems.push(legError instanceof Error ? legError.message : String(legError))
     if (lever.error) problems.push(`Devis du levier : ${lever.error instanceof Error ? lever.error.message : String(lever.error)}`)
     if (debtAmount > 0n) {
-      if (!D.config.borrowingEnabled || D.config.paused || D.config.frozen) problems.push(`${D.token.symbol} ne peut pas être emprunté.`)
+      if (!canBorrow(D, reserves.emode)) problems.push(`${D.token.symbol} ne peut pas être emprunté.`)
       if (!D.config.flashLoanEnabled) problems.push(`Flash loan désactivé sur ${D.token.symbol}.`)
       if (!C.config.active || C.config.paused || C.config.frozen) problems.push(`${C.token.symbol} est gelé ou en pause sur Aave.`)
     }
