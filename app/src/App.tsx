@@ -25,7 +25,7 @@ import {
   type Token,
 } from './config'
 import { eligibleEModes, useEModeCategories, useMarket, useReserveTokens, withEMode, withIncentives } from './lib/useMarket'
-import { useCampaigns } from './lib/merkl'
+import { merklQuery, useCampaigns } from './lib/merkl'
 import { fmtAddress, fmtAmount, fmtDate, fmtPct, fmtPrice } from './lib/format'
 import { Picker } from './components/Picker'
 import { useBalances } from './lib/capital'
@@ -46,6 +46,10 @@ import { needsRenewal } from './lib/pendle'
 import { yieldSourceText } from './lib/nativeYield'
 import { toBase } from './lib/math'
 import { Positions } from './components/Positions'
+import { useQuery } from '@tanstack/react-query'
+import { snapshotQuery } from './lib/snapshot'
+import { scanMarket, type ScanRow } from './lib/scan'
+import { BEST_MIN_CAPACITY, bestPair, loadScanner, savePair, savedPair } from './lib/prefs'
 
 type View = 'loop' | 'scan' | 'positions'
 /** each screen has its own address, so a link or a reload lands on it */
@@ -375,15 +379,43 @@ export function App() {
     linked.current = undefined
   }, [tokens, market.id])
 
+  // nothing picked on this network yet: the last pair opened there in this browser, else the scanner's best
+  // correlated pair (positive yield, room to loop) at the scanner's target health factor, else WETH / USDC
+  const remembered = useMemo(() => (morpho ? undefined : savedPair(market.id)), [morpho, market.id, picked])
+  const wantBest = !morpho && !DEMO && view === 'loop' && !remembered && picked?.market !== market.id && !linked.current
+  const bestSnapshot = useQuery({ ...snapshotQuery(market), enabled: wantBest })
+  const bestCampaigns = useQuery({ ...merklQuery(market.chain.id), enabled: wantBest })
+  const bests = useRef(new Map<string, ScanRow | null>())
+  if (wantBest && !bests.current.has(market.id) && bestSnapshot.data?.market.id === market.id && (bestCampaigns.isFetched || bestCampaigns.isError)) {
+    const rows = scanMarket(bestSnapshot.data, bestCampaigns.data, { targetHf: Number(loadScanner('').hf), minCapacityBase: BEST_MIN_CAPACITY })
+    bests.current.set(market.id, bestPair(rows) ?? null)
+  }
+  const best = bests.current.get(market.id) ?? undefined
+
   const pair = useMemo(() => {
     if (!tokens || tokens.length < 2) return undefined
+    const of = (c?: Token, d?: Token) => (c && d && c !== d ? { collateral: c, debt: d } : undefined)
     if (picked?.market === market.id) {
-      const collateral = tokens.find((t) => t.address === picked.collateral)
-      const debt = tokens.find((t) => t.address === picked.debt)
-      if (collateral && debt) return { collateral, debt }
+      const p = of(
+        tokens.find((t) => t.address === picked.collateral),
+        tokens.find((t) => t.address === picked.debt),
+      )
+      if (p) return p
     }
-    return defaultPair(tokens)
-  }, [tokens, picked, market.id])
+    const bySymbol = (sym: string) => tokens.find((t) => t.symbol.toLowerCase() === sym.toLowerCase())
+    const saved = remembered && of(bySymbol(remembered.collateral), bySymbol(remembered.debt))
+    if (saved) return saved
+    const top =
+      best &&
+      of(
+        tokens.find((t) => t.address === best.collateral.token.address),
+        tokens.find((t) => t.address === best.debt.token.address),
+      )
+    return top ?? defaultPair(tokens)
+  }, [tokens, picked, market.id, remembered, best])
+  useEffect(() => {
+    if (pair && picked?.market === market.id && !morpho) savePair(market.id, pair.collateral.symbol, pair.debt.symbol)
+  }, [pair, picked, market.id, morpho])
 
   // the address follows the screen: network and pair of the Boucle, so a reload or a shared link reopens them
   useEffect(() => {
@@ -408,7 +440,16 @@ export function App() {
     window.scrollTo({ top: 0 })
   }
   const seed =
-    pair && picked?.market === market.id && picked.collateral === pair.collateral.address && picked.debt === pair.debt.address ? picked.seed : undefined
+    pair && picked?.market === market.id && picked.collateral === pair.collateral.address && picked.debt === pair.debt.address
+      ? picked.seed
+      : pair &&
+          best &&
+          !remembered &&
+          picked?.market !== market.id &&
+          best.collateral.token.address === pair.collateral.address &&
+          best.debt.token.address === pair.debt.address
+        ? { emode: best.emode?.id ?? 0, leverage: best.leverage, nonce: 0 }
+        : undefined
   const setPair = (collateral: Token, debt: Token, seed?: Seed) =>
     setPicked({
       market: market.id,

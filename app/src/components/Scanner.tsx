@@ -1,10 +1,11 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import type { Address } from 'viem'
 import { MARKETS, MORPHO_NETWORKS, aggregatorsFor, getMarket, networkName, type Market } from '../config'
 import { merklQuery } from '../lib/merkl'
 import { snapshotQuery } from '../lib/snapshot'
 import { scanMarket, type ScanFlag } from '../lib/scan'
+import { SCAN_HFS, loadScanner, saveScanner, scannerQuery, type ScannerPrefs } from '../lib/prefs'
 import { morphoMarketsQuery, type MorphoMarket } from '../lib/morpho'
 import { scanMorpho, type MorphoScanFlag } from '../lib/morphoScan'
 import { ptInfosQuery } from '../lib/pendle'
@@ -15,9 +16,9 @@ import type { MorphoTab } from './MorphoView'
 /** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (positions' Merkl rewards) or « Renouveler » (a PT near maturity). */
 export type Pick = { marketId: string; collateral: Address; debt: Address; emode: number; leverage: number; tab?: 'reinvest' | 'renew' }
 
-const HFS = ['1.05', '1.1', '1.2', '1.5'] as const
-type Filter = 'correlated' | 'stable' | 'all'
-type Protocol = 'all' | 'aave' | 'morpho'
+const HFS = SCAN_HFS
+type Filter = ScannerPrefs['filter']
+type Protocol = ScannerPrefs['protocol']
 /** sortable columns; numbers sort high first on the first click, the pair A to Z */
 type SortKey = 'pair' | 'leverage' | 'apy' | 'nativeApy' | 'rewardsApy' | 'capacityUsd'
 const ROWS = 20
@@ -78,12 +79,21 @@ const flagTags = (flags: (ScanFlag | MorphoScanFlag)[]) =>
  * yield (rates + token yield + eligible Merkl on Aave).
  */
 export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; onPickMorpho: (m: MorphoMarket, tab?: MorphoTab, leverage?: number) => void }) {
-  const [scope, setScope] = useState<number | 'all'>('all')
-  const [hfText, setHf] = useState<(typeof HFS)[number]>('1.1')
-  const [filter, setFilter] = useState<Filter>('correlated')
-  const [showNegative, setShowNegative] = useState(false)
+  // filters: from a shared link, else as left in this browser; kept in the address and the browser
+  const [initial] = useState(loadScanner)
+  const [scope, setScope] = useState<number | 'all'>(initial.scope)
+  const [hfText, setHf] = useState<(typeof HFS)[number]>(initial.hf)
+  const [filter, setFilter] = useState<Filter>(initial.filter)
+  const [showNegative, setShowNegative] = useState(initial.negative)
   const [all, setAll] = useState(false)
-  const [protocol, setProtocol] = useState<Protocol>('all')
+  const [protocol, setProtocol] = useState<Protocol>(initial.protocol)
+  useEffect(() => {
+    const prefs = { protocol, scope, hf: hfText, filter, negative: showNegative }
+    saveScanner(prefs)
+    const query = scannerQuery(prefs)
+    const target = `#scanner${query ? `?${query}` : ''}`
+    if (window.location.hash.startsWith('#scanner') && window.location.hash !== target) window.history.replaceState(null, '', target)
+  }, [protocol, scope, hfText, filter, showNegative])
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'apy', desc: true })
   // network and protocol are separate filters; only what they leave is read
