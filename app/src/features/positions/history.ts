@@ -13,6 +13,7 @@
 import { getPublicClient } from '@wagmi/core'
 import { decodeEventLog, getAddress, parseAbiItem, zeroAddress, type Address, type Hex } from 'viem'
 import { wagmiConfig } from '../../chain/wagmi'
+import { LLAMA_CHAIN } from '../../config'
 
 export type FlowKind = 'supply' | 'withdraw' | 'borrow' | 'repay' | 'seized' | 'liquidationRepay'
 
@@ -238,27 +239,6 @@ export async function morphoHistory(
 }
 
 /* --------------------------------------------------------------- prices --------------------------------------------------------------- */
-
-/** DefiLlama's name of each chain of the app */
-export const LLAMA_CHAIN: Record<number, string> = {
-  1: 'ethereum',
-  42161: 'arbitrum',
-  8453: 'base',
-  43114: 'avax',
-  10: 'optimism',
-  137: 'polygon',
-  56: 'bsc',
-  5000: 'mantle',
-  9745: 'plasma',
-  59144: 'linea',
-  146: 'sonic',
-  143: 'monad',
-  4326: 'megaeth',
-  5042: 'arc',
-  130: 'unichain',
-  999: 'hyperliquid',
-  4663: 'robinhood',
-}
 
 export const priceKey = (token: Address, time: number) => `${token.toLowerCase()}@${time}`
 
