@@ -16,7 +16,18 @@ function errText(e: unknown) {
  * With `upgrade`, the market runs a v1 executor: it keeps working, the banner offers the v2 (closes without premium).
  * With `upgrade="pendle"`, a v2 executor deployed before PT loops: the banner offers one with Pendle's router.
  */
-export function DeployPanel({ market, onReady, upgrade }: { market: Market; onReady: (a: Address) => void; upgrade?: boolean | 'pendle' }) {
+export function DeployPanel({
+  market,
+  onReady,
+  upgrade,
+  shared,
+}: {
+  market: Market
+  onReady: (a: Address) => void
+  upgrade?: boolean | 'pendle'
+  /** the network's shared v2 executor, already deployed and checked: offered instead of a deployment */
+  shared?: Address
+}) {
   const { isConnected, chainId } = useAccount()
   const { switchChain } = useSwitchChain()
   const routers = executorRouters(market.chain.id)
@@ -58,9 +69,13 @@ export function DeployPanel({ market, onReady, upgrade }: { market: Market; onRe
           <span>
             {upgrade === 'pendle'
               ? `Le contrat Auto-loop de ${market.label} n’autorise pas le routeur Pendle : il reste utilisable pour les autres paires. Une transaction déploie un contrat qui gère aussi les PT.`
-              : `Contrat Auto-loop v1 sur ${market.label} : il reste utilisable. La v2 ferme les positions sans prime de flash loan quand Morpho a la liquidité ; une transaction la déploie.`}
+              : `Contrat Auto-loop v1 sur ${market.label} : il reste utilisable. La v2 ferme les positions sans prime de flash loan quand Morpho a la liquidité et corrige un défaut de la v1 (des aTokens envoyés au contrat peuvent bloquer les fermetures)${shared ? ' ; le contrat v2 commun de ce réseau est déjà déployé, la position reste sur le compte Aave' : ' ; une transaction la déploie, une fois pour tous les utilisateurs'}.`}
           </span>
-          {!isConnected ? null : chainId !== market.chain.id ? (
+          {shared ? (
+            <button className="btn" onClick={() => onReady(shared)}>
+              Utiliser le contrat commun {fmtAddress(shared)}
+            </button>
+          ) : !isConnected ? null : chainId !== market.chain.id ? (
             <button className="btn" onClick={() => switchChain({ chainId: market.chain.id })}>
               Passer sur {market.chain.name}
             </button>
@@ -74,8 +89,9 @@ export function DeployPanel({ market, onReady, upgrade }: { market: Market; onRe
       {error && <Notice tone="bad">{error}</Notice>}
       <Fold title="Contrat" value="sans propriétaire, routeurs figés" plain>
         <p className="muted small">
-          Seul le gas est payé. Le contrat n’a ni propriétaire ni fonction d’administration et ne garde aucun fonds : dépôts et dette restent sur le compte Aave
-          de l’adresse qui signe. Prêteur flash gratuit :{' '}
+          Seul le gas est payé, une seule fois pour tous : le contrat est déployé à une adresse commune, la même pour tout utilisateur de l’app sur ce réseau
+          (CREATE2 par le déployeur déterministe 0x4e59…956C), et l’app l’utilise dès qu’il existe. Le contrat n’a ni propriétaire ni fonction d’administration
+          et ne garde aucun fonds : dépôts et dette restent sur le compte Aave de l’adresse qui signe. Prêteur flash gratuit :{' '}
           {market.chain.id in MORPHO_BLUE ? `Morpho Blue (${fmtAddress(MORPHO_BLUE[market.chain.id])})` : 'aucun sur ce réseau, prime Aave'}. Routeurs autorisés
           :{' '}
           {routers.map((r, i) => (

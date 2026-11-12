@@ -37,7 +37,16 @@ import { OpenPanel } from './components/OpenPanel'
 import { ClosePanel } from './components/ClosePanel'
 import { SwapCollateralPanel } from './components/SwapCollateralPanel'
 import { DeployPanel } from './components/DeployPanel'
-import { deployExecutor, deployMorphoExecutor, useExecutorCheck, useMorphoExecutorCheck } from './lib/deploy'
+import {
+  deployExecutor,
+  deployMorphoExecutor,
+  sharedExecutorAddress,
+  sharedMorphoExecutorAddress,
+  useExecutorCheck,
+  useMorphoExecutorCheck,
+  useSharedExecutor,
+  useSharedMorphoExecutor,
+} from './lib/deploy'
 import { GateProvider, type Gate } from './components/gate'
 import { MorphoView, type MorphoSeed, type MorphoTab } from './components/MorphoView'
 import type { MorphoMarket } from './lib/morpho'
@@ -270,6 +279,20 @@ export function App() {
   const declaredMorpho = useMemo(() => getMorphoNet(marketId, localExecutors), [marketId, localExecutors])
   const morphoCheck = useMorphoExecutorCheck(morpho ? declaredMorpho : { ...declaredMorpho, executor: undefined })
   const morphoNet = useMemo(() => (morphoCheck.data ? declaredMorpho : { ...declaredMorpho, executor: undefined }), [declaredMorpho, morphoCheck.data])
+  // the shared executor of the network (CREATE2, same address for everyone): used as soon as someone deployed it
+  const sharedAave = useSharedExecutor(
+    declared,
+    !DEMO && !morpho && (!declared.executor || check.data?.version === 1 || (check.data !== undefined && !check.data.pendle)),
+  )
+  const sharedMorpho = useSharedMorphoExecutor(declaredMorpho, !DEMO && morpho && !declaredMorpho.executor)
+  useEffect(() => {
+    if (!morpho && !declared.executor && sharedAave.data) setLocalExecutor(declared.id, sharedAave.data)
+    if (morpho && !declaredMorpho.executor && sharedMorpho.data) setLocalExecutor(declaredMorpho.id, sharedMorpho.data)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [morpho, declared.id, declared.executor, declaredMorpho.id, declaredMorpho.executor, sharedAave.data, sharedMorpho.data])
+  const isShared = (m: Market) => !!m.executor && m.executor === sharedExecutorAddress(m)
+  const isSharedMorpho = !!morphoNet.executor && morphoNet.executor === sharedMorphoExecutorAddress(morphoNet)
+
   // what the summary's single button walks through before the screen's own action (charte v2, rule 2)
   const gate = useMemo<Gate | undefined>(() => {
     if (DEMO) return undefined
@@ -554,7 +577,7 @@ export function App() {
               <span className="addr">{fmtAddress(market.executor)}</span>
             </a>
             {market.executorVersion === 1 && ' (v1)'}
-            {market.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
+            {isShared(market) ? ' (contrat commun, même adresse pour tous)' : market.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
           </>
         )}
       </p>
@@ -580,7 +603,7 @@ export function App() {
       )}
       {!DEMO && !declared.executor && <DeployPanel market={market} onReady={(a) => setLocalExecutor(market.id, a)} />}
       {!DEMO && market.executorVersion === 1 && market.executorSource === 'wallet' && (
-        <DeployPanel market={market} upgrade onReady={(a) => setLocalExecutor(market.id, a)} />
+        <DeployPanel market={market} upgrade shared={sharedAave.data ?? undefined} onReady={(a) => setLocalExecutor(market.id, a)} />
       )}
     </>
   )
@@ -601,7 +624,7 @@ export function App() {
             >
               <span className="addr">{fmtAddress(morphoNet.executor)}</span>
             </a>
-            {morphoNet.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
+            {isSharedMorpho ? ' (contrat commun, même adresse pour tous)' : morphoNet.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
           </>
         )}
       </p>

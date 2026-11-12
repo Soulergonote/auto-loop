@@ -66,6 +66,11 @@ const anvil = async (method, params) =>
   const MARKET = process.env.MARKET || 'base'
   const CHAIN_HEX = process.env.CHAIN_HEX || '0x2105'
   await page.addInitScript((m) => localStorage.setItem('auto-loop.market', m), MARKET)
+  // the Boucle opens on the last pair of the network, else the scanner's best one: start from WETH / USDC as before
+  // (PAIR=cbETH/WETH for another one)
+  const [PC, PD] = (process.env.PAIR || 'WETH/USDC').split('/')
+  if (!MARKET.startsWith('morpho'))
+    await page.addInitScript(([m, c, d]) => localStorage.setItem('auto-loop.pairs', JSON.stringify({ [m]: { collateral: c, debt: d } })), [MARKET, PC, PD])
   if (process.env.EXECUTOR)
     await page.addInitScript(([a, m]) => localStorage.setItem('auto-loop.executors', JSON.stringify({ [m]: a })), [process.env.EXECUTOR, MARKET])
   if (process.env.CLOCK)
@@ -208,7 +213,7 @@ const anvil = async (method, params) =>
     await page.locator('summary', { hasText: 'Réglages' }).click()
     await page.getByRole('radio', { name: process.env.AGG }).click()
   }
-  // SLIP=1 : another slippage than the default (a frozen fork drifts from the live quotes)
+  // SLIP='1 %' : another slippage than the default (a frozen fork drifts from the live quotes)
   if (process.env.SLIP) {
     if (!process.env.AGG) await page.locator('summary', { hasText: 'Réglages' }).click()
     await page.getByRole('radio', { name: process.env.SLIP, exact: true }).click()

@@ -71,7 +71,9 @@ export function useGateStep(needs: 'contract' | 'wallet' | 'none' = 'contract'):
                 setStep(undefined)
               }
             },
-        reason: error ?? `Une fois sur ${g.label} : déploie le contrat Auto-loop depuis le portefeuille, seul le gas est payé.`,
+        reason:
+          error ??
+          `Une fois sur ${g.label} : déploie le contrat Auto-loop commun depuis le portefeuille (une fois pour tous les utilisateurs), seul le gas est payé.`,
         bad: !!error,
       }
   }

@@ -75,9 +75,10 @@ function MorphoDeployPanel({ net, onReady }: { net: MorphoNet; onReady: (a: Addr
       {error && <Notice tone="bad">{error}</Notice>}
       <Fold title="Contrat" value="sans propriétaire, routeurs figés" plain>
         <p className="muted small">
-          Seul le gas est payé. Le contrat n’a ni propriétaire ni fonction d’administration et ne garde aucun fonds : collatéral et dette restent sur le compte
-          Morpho de l’adresse qui signe. Il n’agit sur ce compte que pendant la transaction signée : l’autorisation Morpho est donnée puis retirée dans la même
-          transaction. Morpho Blue : <span className="addr">{fmtAddress(net.morpho)}</span>. Routeurs autorisés :{' '}
+          Seul le gas est payé, une seule fois pour tous : le contrat est déployé à une adresse commune à tous les utilisateurs de l’app sur ce réseau
+          (CREATE2), et l’app l’utilise dès qu’il existe. Le contrat n’a ni propriétaire ni fonction d’administration et ne garde aucun fonds : collatéral et
+          dette restent sur le compte Morpho de l’adresse qui signe. Il n’agit sur ce compte que pendant la transaction signée : l’autorisation Morpho est
+          donnée puis retirée dans la même transaction. Morpho Blue : <span className="addr">{fmtAddress(net.morpho)}</span>. Routeurs autorisés :{' '}
           {routers.map((r, i) => (
             <span key={r.router}>
               {i > 0 && ', '}

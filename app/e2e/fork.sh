@@ -14,7 +14,7 @@
 # NET=plasma: Plasma (anvil --chain-id 9745), no executor (deployed from the app), 5000 USDe and 5000 USDT0 to the user,
 # taken from their aTokens (USDe/GHO is the pair used for real there). NET=monad: Monad (anvil --chain-id 143), same with
 # 5000 USDC and 1 WETH. On Monad, run vite with VITE_KYBER_INCLUDED_SOURCES=uniswapv3,uniswap-v4,pancake-v3,curve-stable-ng
-# (its prop AMMs and order books revert on a fork) and use SLIP='0,5 %' in run.cjs (the fork drifts from live quotes).
+# (its prop AMMs and order books revert on a fork) and use SLIP='1 %' in run.cjs (the fork drifts from live quotes).
 # Optional: SOLC=/path/to/solc-0.8.27 when forge cannot download solc.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
