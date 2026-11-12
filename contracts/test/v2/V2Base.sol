@@ -10,6 +10,7 @@ import {LeverageExecutorV2} from "../../src/LeverageExecutorV2.sol";
 import {IAaveV3Pool} from "../../src/interfaces/IAaveV3.sol";
 import {MockAggregatorRouter, IPriceOracle} from "../mocks/MockAggregatorRouter.sol";
 import {MockMorpho, MockBalancerVault} from "../mocks/MockFlashLenders.sol";
+import {SwapExecutorBase} from "../../src/base/SwapExecutorBase.sol";
 
 interface IDebtToken {
     function approveDelegation(address delegatee, uint256 amount) external;
@@ -104,7 +105,7 @@ abstract contract V2Base is TestnetProcedures {
     function _step(address tokenIn, address tokenOut, uint256 amountIn, uint256 tolBps)
         internal
         view
-        returns (LeverageExecutorV2.Step memory)
+        returns (SwapExecutorBase.Step memory)
     {
         return _stepVia(address(router), tokenIn, tokenOut, amountIn, tolBps);
     }
@@ -112,9 +113,9 @@ abstract contract V2Base is TestnetProcedures {
     function _stepVia(address r, address tokenIn, address tokenOut, uint256 amountIn, uint256 tolBps)
         internal
         view
-        returns (LeverageExecutorV2.Step memory)
+        returns (SwapExecutorBase.Step memory)
     {
-        return LeverageExecutorV2.Step({
+        return SwapExecutorBase.Step({
             router: r,
             tokenOut: tokenOut,
             data: abi.encodeCall(MockAggregatorRouter.swap, (tokenIn, tokenOut, amountIn, address(executor))),
@@ -122,8 +123,8 @@ abstract contract V2Base is TestnetProcedures {
         });
     }
 
-    function _one(LeverageExecutorV2.Step memory s) internal pure returns (LeverageExecutorV2.Step[] memory a) {
-        a = new LeverageExecutorV2.Step[](1);
+    function _one(SwapExecutorBase.Step memory s) internal pure returns (SwapExecutorBase.Step[] memory a) {
+        a = new SwapExecutorBase.Step[](1);
         a[0] = s;
     }
 
@@ -131,14 +132,14 @@ abstract contract V2Base is TestnetProcedures {
     function _two(address tokenIn, address mid, address tokenOut, uint256 amountIn, uint256 tolBps)
         internal
         view
-        returns (LeverageExecutorV2.Step[] memory a)
+        returns (SwapExecutorBase.Step[] memory a)
     {
-        a = new LeverageExecutorV2.Step[](2);
+        a = new SwapExecutorBase.Step[](2);
         a[0] = _step(tokenIn, mid, amountIn, tolBps);
         a[1] = _step(mid, tokenOut, a[0].minOut, tolBps);
     }
 
-    function _none() internal pure returns (LeverageExecutorV2.Step[] memory a) {}
+    function _none() internal pure returns (SwapExecutorBase.Step[] memory a) {}
 
     /// @dev debt (USDX units) for `initial` WETH of equity at leverage `levX100` (300 = 3x)
     function _debtFor(uint256 initial, uint256 levX100) internal view returns (uint256) {

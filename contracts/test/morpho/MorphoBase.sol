@@ -9,6 +9,7 @@ import {IMorpho, MarketParams, Authorization, MorphoSignature} from "../../src/i
 import {MockAggregatorRouter, IPriceOracle} from "../mocks/MockAggregatorRouter.sol";
 import {MORPHO_BLUE_BYTECODE} from "./MorphoBlueBytecode.sol";
 import {TestToken, UsdPrices, MockMorphoOracle, FixedRateIrm} from "./MorphoMocks.sol";
+import {SwapExecutorBase} from "../../src/base/SwapExecutorBase.sol";
 
 interface IMorphoAdmin {
     function DOMAIN_SEPARATOR() external view returns (bytes32);
@@ -110,20 +111,20 @@ abstract contract MorphoBase is Test {
     function _step(address tokenIn, address tokenOut, uint256 amountIn, uint256 minOut)
         internal
         view
-        returns (LeverageExecutorMorpho.Step memory)
+        returns (SwapExecutorBase.Step memory)
     {
-        return LeverageExecutorMorpho.Step(
+        return SwapExecutorBase.Step(
             address(router), tokenOut, abi.encodeCall(router.swap, (tokenIn, tokenOut, amountIn, address(ex))), minOut
         );
     }
 
-    function _one(LeverageExecutorMorpho.Step memory s) internal pure returns (LeverageExecutorMorpho.Step[] memory a) {
-        a = new LeverageExecutorMorpho.Step[](1);
+    function _one(SwapExecutorBase.Step memory s) internal pure returns (SwapExecutorBase.Step[] memory a) {
+        a = new SwapExecutorBase.Step[](1);
         a[0] = s;
     }
 
-    function _none() internal pure returns (LeverageExecutorMorpho.Step[] memory) {
-        return new LeverageExecutorMorpho.Step[](0);
+    function _none() internal pure returns (SwapExecutorBase.Step[] memory) {
+        return new SwapExecutorBase.Step[](0);
     }
 
     function _guard(uint256 minHf) internal view returns (LeverageExecutorMorpho.Guard memory) {

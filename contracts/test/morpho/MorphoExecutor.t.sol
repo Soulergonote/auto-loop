@@ -7,6 +7,7 @@ import {AttackRouter} from "../mocks/AttackRouter.sol";
 import {IPriceOracle} from "../mocks/MockAggregatorRouter.sol";
 import {MockMorphoOracle} from "./MorphoMocks.sol";
 import {MorphoBase, IMorphoAdmin} from "./MorphoBase.sol";
+import {SwapExecutorBase} from "../../src/base/SwapExecutorBase.sol";
 
 contract MorphoOpenTest is MorphoBase {
     function test_openWithAuth_levers_and_leaves_nothing() public {
@@ -127,7 +128,7 @@ contract MorphoOpenTest is MorphoBase {
         LeverageExecutorMorpho.OpenParams memory p = _openParams();
         p.guard.deadline = block.timestamp - 1;
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorMorpho.Expired.selector, block.timestamp - 1));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.Expired.selector, block.timestamp - 1));
         ex.open(p);
     }
 
@@ -137,7 +138,7 @@ contract MorphoOpenTest is MorphoBase {
         LeverageExecutorMorpho.AuthSigs memory a = _auth(userKey, user);
         vm.startPrank(user);
         pt1.approve(address(ex), p.capitalAmount);
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorMorpho.InsufficientOutput.selector, 3960e18, 3990e18));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InsufficientOutput.selector, 3960e18, 3990e18));
         ex.openWithAuth(p, a);
         vm.stopPrank();
     }
@@ -146,7 +147,7 @@ contract MorphoOpenTest is MorphoBase {
         LeverageExecutorMorpho.OpenParams memory p = _openParams();
         p.market.collateralToken = address(usdc);
         vm.prank(user);
-        vm.expectRevert(LeverageExecutorMorpho.SameAsset.selector);
+        vm.expectRevert(SwapExecutorBase.SameAsset.selector);
         ex.open(p);
     }
 }
@@ -235,7 +236,7 @@ contract MorphoAuthTest is MorphoBase {
         // mid-swap, the route tries to borrow for the user (who authorized the executor for this transaction)
         attack.arm(address(morpho), abi.encodeCall(IMorpho.borrow, (m1, 1000e6, 0, user, eve)));
         LeverageExecutorMorpho.OpenParams memory p = _openParams();
-        p.steps[0] = LeverageExecutorMorpho.Step(
+        p.steps[0] = SwapExecutorBase.Step(
             address(attack),
             address(pt1),
             abi.encodeCall(attack.swapAndCall, (address(usdc), address(pt1), 3800e6, address(ex2))),
@@ -263,7 +264,7 @@ contract MorphoAuthTest is MorphoBase {
         c.steps = _none();
         attack.arm(address(ex2), abi.encodeCall(ex2.close, (c)));
         LeverageExecutorMorpho.OpenParams memory p = _openParams();
-        p.steps[0] = LeverageExecutorMorpho.Step(
+        p.steps[0] = SwapExecutorBase.Step(
             address(attack),
             address(pt1),
             abi.encodeCall(attack.swapAndCall, (address(usdc), address(pt1), 3800e6, address(ex2))),
@@ -291,11 +292,11 @@ contract MorphoAuthTest is MorphoBase {
         vm.startPrank(user);
         IMorphoAdmin(address(morpho)).setAuthorization(address(ex), true);
         pt1.approve(address(ex), p.capitalAmount);
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorMorpho.RouterNotAllowed.selector, address(0xBEEF)));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.RouterNotAllowed.selector, address(0xBEEF)));
         ex.open(p);
         p.steps[0].tokenOut = address(usdc);
         p.steps[0].router = address(router);
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorMorpho.WrongFinalToken.selector, address(usdc), address(pt1)));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.WrongFinalToken.selector, address(usdc), address(pt1)));
         ex.open(p);
         vm.stopPrank();
     }
@@ -314,12 +315,12 @@ contract MorphoAuthTest is MorphoBase {
     function test_constructor_refuses_bad_routers() public {
         address[] memory routers = new address[](1);
         routers[0] = address(morpho);
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorMorpho.InvalidRouter.selector, address(morpho)));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InvalidRouter.selector, address(morpho)));
         new LeverageExecutorMorpho(morpho, routers);
         routers[0] = makeAddr("eoa");
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorMorpho.InvalidRouter.selector, routers[0]));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InvalidRouter.selector, routers[0]));
         new LeverageExecutorMorpho(morpho, routers);
-        vm.expectRevert(LeverageExecutorMorpho.ZeroAddress.selector);
+        vm.expectRevert(SwapExecutorBase.ZeroAddress.selector);
         new LeverageExecutorMorpho(IMorpho(address(0)), new address[](0));
     }
 }
@@ -465,7 +466,7 @@ contract MorphoCloseTest is MorphoBase {
 }
 
 contract MorphoRollTest is MorphoBase {
-    function _roll(MarketParams memory to, LeverageExecutorMorpho.Step[] memory steps, uint256 minHf)
+    function _roll(MarketParams memory to, SwapExecutorBase.Step[] memory steps, uint256 minHf)
         internal
         returns (LeverageExecutorMorpho.RollResult memory r)
     {
@@ -527,7 +528,7 @@ contract MorphoRollTest is MorphoBase {
         vm.expectRevert(LeverageExecutorMorpho.LoanTokenMismatch.selector);
         ex.roll(p);
         p.to = m2;
-        vm.expectRevert(LeverageExecutorMorpho.InvalidSteps.selector);
+        vm.expectRevert(SwapExecutorBase.InvalidSteps.selector);
         ex.roll(p);
         p.to = m3;
         p.steps = _one(_step(address(pt1), address(pt1), 1, 0));

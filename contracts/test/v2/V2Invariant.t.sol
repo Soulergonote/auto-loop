@@ -8,6 +8,7 @@ import {LeverageExecutorV2} from "../../src/LeverageExecutorV2.sol";
 import {IAaveV3Pool} from "../../src/interfaces/IAaveV3.sol";
 import {MockAggregatorRouter} from "../mocks/MockAggregatorRouter.sol";
 import {V2Base, IDebtToken} from "./V2Base.sol";
+import {SwapExecutorBase} from "../../src/base/SwapExecutorBase.sol";
 
 interface IScaled {
     function scaledBalanceOf(address user) external view returns (uint256);
@@ -86,9 +87,9 @@ contract V2Handler is Test {
     function _step(address tokenIn, address tokenOut, uint256 amountIn)
         internal
         view
-        returns (LeverageExecutorV2.Step memory)
+        returns (SwapExecutorBase.Step memory)
     {
-        return LeverageExecutorV2.Step({
+        return SwapExecutorBase.Step({
             router: address(router),
             tokenOut: tokenOut,
             data: abi.encodeCall(router.swap, (tokenIn, tokenOut, amountIn, address(ex))),
@@ -100,13 +101,13 @@ contract V2Handler is Test {
     function _route(address tokenIn, address tokenOut, address mid, uint256 amountIn, bool two)
         internal
         view
-        returns (LeverageExecutorV2.Step[] memory s)
+        returns (SwapExecutorBase.Step[] memory s)
     {
         if (!two) {
-            s = new LeverageExecutorV2.Step[](1);
+            s = new SwapExecutorBase.Step[](1);
             s[0] = _step(tokenIn, tokenOut, amountIn);
         } else {
-            s = new LeverageExecutorV2.Step[](2);
+            s = new SwapExecutorBase.Step[](2);
             s[0] = _step(tokenIn, mid, amountIn);
             s[1] = _step(mid, tokenOut, s[0].minOut);
         }

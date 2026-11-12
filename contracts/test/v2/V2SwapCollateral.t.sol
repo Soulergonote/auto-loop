@@ -9,6 +9,7 @@ import {EIP712SigUtils} from "aave-v3-origin/tests/utils/EIP712SigUtils.sol";
 import {LeverageExecutorV2} from "../../src/LeverageExecutorV2.sol";
 import {LazyBalancer} from "../mocks/MockFlashLenders.sol";
 import {V2Base, IDebtToken} from "./V2Base.sol";
+import {SwapExecutorBase} from "../../src/base/SwapExecutorBase.sol";
 
 /// @notice swapCollateral (change 4): replace the collateral, debt unchanged, through each flash lender, and the
 /// Pendle-PT-like case of an asset that is collateral only inside an eMode (base LTV 0).
@@ -195,28 +196,28 @@ contract V2SwapCollateralTest is V2Base {
     function test_revert_swapCollateral_slippage() public {
         LeverageExecutorV2.SwapCollateralParams memory p = _openAndFullSwapParams(address(morpho));
         router.setSlippageBps(100);
-        vm.expectPartialRevert(LeverageExecutorV2.InsufficientOutput.selector);
+        vm.expectPartialRevert(SwapExecutorBase.InsufficientOutput.selector);
         _swapAs(alice, p);
     }
 
     function test_revert_swapCollateral_wrongFinalToken() public {
         LeverageExecutorV2.SwapCollateralParams memory p = _openAndFullSwapParams(address(morpho));
         p.steps = _one(_step(WETH, USDX, 1e18, 50));
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.WrongFinalToken.selector, USDX, WBTC));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.WrongFinalToken.selector, USDX, WBTC));
         _swapAs(alice, p);
     }
 
     function test_revert_swapCollateral_noSteps() public {
         LeverageExecutorV2.SwapCollateralParams memory p = _openAndFullSwapParams(address(morpho));
         p.steps = _none();
-        vm.expectRevert(LeverageExecutorV2.InvalidSteps.selector);
+        vm.expectRevert(SwapExecutorBase.InvalidSteps.selector);
         _swapAs(alice, p);
     }
 
     function test_revert_swapCollateral_sameAsset() public {
         LeverageExecutorV2.SwapCollateralParams memory p = _swapParams(1, 1, 1, address(morpho));
         p.toAsset = WETH;
-        vm.expectRevert(LeverageExecutorV2.SameAsset.selector);
+        vm.expectRevert(SwapExecutorBase.SameAsset.selector);
         _swapAs(alice, p);
     }
 
@@ -247,7 +248,7 @@ contract V2SwapCollateralTest is V2Base {
     function test_revert_swapCollateral_expired() public {
         LeverageExecutorV2.SwapCollateralParams memory p = _openAndFullSwapParams(address(morpho));
         vm.warp(p.guard.deadline + 1);
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.Expired.selector, p.guard.deadline));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.Expired.selector, p.guard.deadline));
         _swapAs(alice, p);
     }
 

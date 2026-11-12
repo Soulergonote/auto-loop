@@ -11,6 +11,7 @@ import {IAaveV3Pool} from "../../src/interfaces/IAaveV3.sol";
 import {AttackRouter} from "../mocks/AttackRouter.sol";
 import {MockMorpho} from "../mocks/MockFlashLenders.sol";
 import {V2Base, IDebtToken} from "./V2Base.sol";
+import {SwapExecutorBase} from "../../src/base/SwapExecutorBase.sol";
 
 /// @notice Attacks on every entry point and callback: forged flash loan callbacks, re-entrancy from inside a
 /// swap route, abuse of allowances other users left, deployment mistakes, and the bytecode itself.
@@ -335,7 +336,7 @@ contract V2SecurityTest is V2Base {
         LeverageExecutorV2.OpenParams memory p = _openParams(0, 1e6);
         p.steps[0].router = aWETH;
         p.steps[0].data = abi.encodeCall(IERC20.transferFrom, (alice, attacker, 1e18));
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.RouterNotAllowed.selector, aWETH));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.RouterNotAllowed.selector, aWETH));
         vm.prank(attacker);
         executor.open(p);
     }
@@ -400,24 +401,24 @@ contract V2SecurityTest is V2Base {
 
     function test_constructor_rejectsBadRouters() public {
         LeverageExecutorV2.FlashLender[] memory none;
-        vm.expectRevert(LeverageExecutorV2.ZeroAddress.selector);
+        vm.expectRevert(SwapExecutorBase.ZeroAddress.selector);
         new LeverageExecutorV2(IAaveV3Pool(address(0)), _routers(address(router)), none);
 
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.InvalidRouter.selector, address(pool)));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InvalidRouter.selector, address(pool)));
         new LeverageExecutorV2(pool, _routers(address(pool)), none);
 
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.InvalidRouter.selector, address(0)));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InvalidRouter.selector, address(0)));
         new LeverageExecutorV2(pool, _routers(address(0)), none);
 
         address eoa = makeAddr("eoa");
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.InvalidRouter.selector, eoa));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InvalidRouter.selector, eoa));
         new LeverageExecutorV2(pool, _routers(eoa), none);
 
         address self = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.InvalidRouter.selector, self));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InvalidRouter.selector, self));
         new LeverageExecutorV2(pool, _routers(self), none);
 
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.InvalidRouter.selector, address(morpho)));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InvalidRouter.selector, address(morpho)));
         new LeverageExecutorV2(
             pool, _routers(address(morpho)), _lenders(LeverageExecutorV2.FlashKind.Morpho, address(morpho))
         );
@@ -428,7 +429,7 @@ contract V2SecurityTest is V2Base {
         LeverageExecutorV2.FlashLender[] memory none;
         address[4] memory aaveTokens = [WBTC, aWETH, vUSDX, USDX];
         for (uint256 i; i < aaveTokens.length; ++i) {
-            vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.InvalidRouter.selector, aaveTokens[i]));
+            vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InvalidRouter.selector, aaveTokens[i]));
             new LeverageExecutorV2(pool, _routers(aaveTokens[i]), none);
         }
     }

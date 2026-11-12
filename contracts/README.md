@@ -16,6 +16,7 @@ Deux versions cohabitent : `LeverageExecutorV2` (v2, voir [la section v2](#v2--l
 | `script/quote-velora.sh`, `script/quote-kyber.sh` | Récupèrent un devis Velora ou KyberSwap réel (USDC → WETH) avec le contrat comme taker. |
 | `script/export-bytecode.cjs` | Compile les contrats (v1, v2, Morpho) avec solc-js 0.8.27 et écrit `app/src/generated/executorBytecode.ts`, utilisé par le bouton « Déployer le contrat » de l'app. |
 | `script/setup.sh` | Installe les dépendances dans `lib/`. |
+| `src/base/SwapExecutorBase.sol` | Base commune de la v2 et du contrat Morpho : liste blanche des routeurs, chaînes de swaps (approbation exacte remise à 0, entrée plafonnée, sortie contrôlée par différence de solde), renvoi des restes à l'appelant. Écrite une fois, auditée une fois. |
 | `src/LeverageExecutorV2.sol` | La v2 (chaînes de swaps, capital en n'importe quel token, garde, changement de collatéral, flash loans gratuits). |
 | `src/interfaces/IFlashLenders.sol` | Interfaces des flash loans Morpho Blue et Balancer v2. |
 | `test/v2/*.t.sol` | 136 tests v2 sur le même Aave v3.6 local : ouverture, fermeture, changement de collatéral, attaques, fuzz, invariants et preuves de l'audit interne (`V2Audit.t.sol`). |

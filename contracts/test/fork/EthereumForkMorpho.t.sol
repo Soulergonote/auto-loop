@@ -10,6 +10,7 @@ import {IMorpho, IMorphoOracle, MarketParams, Authorization, MorphoSignature} fr
 import {MockAggregatorRouter, IPriceOracle} from "../mocks/MockAggregatorRouter.sol";
 import {UsdPrices} from "../morpho/MorphoMocks.sol";
 import {MORPHO_BLUE_BYTECODE} from "../morpho/MorphoBlueBytecode.sol";
+import {SwapExecutorBase} from "../../src/base/SwapExecutorBase.sol";
 
 interface IMorphoDomain {
     function DOMAIN_SEPARATOR() external view returns (bytes32);
@@ -98,10 +99,10 @@ contract EthereumForkMorphoTest is Test {
     function _one(address tokenIn, address tokenOut, uint256 amountIn)
         internal
         view
-        returns (LeverageExecutorMorpho.Step[] memory s)
+        returns (SwapExecutorBase.Step[] memory s)
     {
-        s = new LeverageExecutorMorpho.Step[](1);
-        s[0] = LeverageExecutorMorpho.Step(
+        s = new SwapExecutorBase.Step[](1);
+        s[0] = SwapExecutorBase.Step(
             address(router),
             tokenOut,
             abi.encodeCall(router.swap, (tokenIn, tokenOut, amountIn, address(ex))),
@@ -119,7 +120,7 @@ contract EthereumForkMorphoTest is Test {
         p.market = m;
         p.capitalToken = m.loanToken;
         p.capitalAmount = 10_000e6;
-        p.capitalSteps = new LeverageExecutorMorpho.Step[](0);
+        p.capitalSteps = new SwapExecutorBase.Step[](0);
         p.debtAmount = (lev - 1) * 10_000e6;
         p.steps = _one(m.loanToken, m.collateralToken, lev * 10_000e6);
         p.guard = _guard(1e18);
@@ -239,7 +240,7 @@ contract EthereumForkMorphoTest is Test {
         p.to = usd3b;
         p.repayAmount = type(uint256).max;
         p.collateralToMove = type(uint256).max;
-        p.steps = new LeverageExecutorMorpho.Step[](0);
+        p.steps = new SwapExecutorBase.Step[](0);
         p.guard = _guard(1.05e18);
         LeverageExecutorMorpho.AuthSigs memory a = _auth();
         vm.prank(user);

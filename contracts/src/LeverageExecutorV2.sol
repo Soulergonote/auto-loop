@@ -6,6 +6,8 @@ import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC2
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+import {SwapExecutorBase} from "./base/SwapExecutorBase.sol";
+
 import {IAaveV3Pool, IFlashLoanReceiver, ICreditDelegationToken} from "./interfaces/IAaveV3.sol";
 import {
     IMorphoFlashLender,
@@ -56,20 +58,15 @@ contract LeverageExecutorV2 is
     IFlashLoanReceiver,
     IMorphoFlashLoanCallback,
     IBalancerFlashLoanRecipient,
-    ReentrancyGuard
+    ReentrancyGuard,
+    SwapExecutorBase
 {
     using SafeERC20 for IERC20;
 
     uint256 private constant MODE_NONE = 0;
     uint256 private constant MODE_VARIABLE = 2;
 
-    /// @notice Longest swap chain accepted.
-    uint256 public constant MAX_STEPS = 4;
-
     IAaveV3Pool public immutable POOL;
-
-    /// @notice Aggregator routers the contract may call (quote's `to`), fixed at deployment.
-    mapping(address => bool) public isRouterAllowed;
 
     /// @notice Free flash lenders accepted for close and swapCollateral, fixed at deployment.
     /// The Aave Pool itself is always accepted (pass `address(POOL)`), with its premium.
@@ -95,17 +92,6 @@ contract LeverageExecutorV2 is
         Open,
         Close,
         SwapCollateral
-    }
-
-    /// @param router   whitelisted router (the quote's `to`)
-    /// @param tokenOut token this step must deliver
-    /// @param data     calldata from the aggregator, quoted with this contract as taker and recipient
-    /// @param minOut   minimum amount of tokenOut this step must deliver
-    struct Step {
-        address router;
-        address tokenOut;
-        bytes data;
-        uint256 minOut;
     }
 
     /// @param minHealthFactor the call reverts if the caller's health factor ends below it (1e18 = 1.00; 0 = no check)
@@ -185,16 +171,7 @@ contract LeverageExecutorV2 is
         bytes32 s;
     }
 
-    event RouterAllowed(address indexed router);
     event FlashLenderAllowed(address indexed lender, FlashKind kind);
-    event Swapped(
-        address indexed user,
-        address indexed router,
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 amountOut
-    );
     event PositionOpened(
         address indexed user,
         address indexed collateralAsset,
@@ -220,13 +197,8 @@ contract LeverageExecutorV2 is
         SwapCollateralResult result
     );
 
-    error ZeroAddress();
-    error SameAsset();
     error ZeroAmount();
-    error Expired(uint256 deadline);
     error HealthFactorTooLow(uint256 healthFactor, uint256 minHealthFactor);
-    error InvalidRouter(address router);
-    error RouterNotAllowed(address router);
     error InvalidFlashLender(address lender);
     error FlashLenderNotAllowed(address lender);
     error CallerNotLender();
@@ -234,11 +206,7 @@ contract LeverageExecutorV2 is
     error InvalidFlashLoan();
     error UnexpectedFlashLoan();
     error FlashLoanNotExecuted();
-    error InvalidSteps();
     error UnexpectedSteps();
-    error WrongFinalToken(address tokenOut, address expected);
-    error InsufficientOutput(uint256 received, uint256 minOut);
-    error ExcessiveInput(uint256 spent, uint256 maxIn);
     error SellExceedsWithdrawn(uint256 toSell, uint256 withdrawn);
     error InsufficientToRepayFlashLoan(uint256 balance, uint256 owed);
 
@@ -262,8 +230,7 @@ contract LeverageExecutorV2 is
                 router == address(pool) || router == address(this) || router.code.length == 0
                     || flashLenderKind[router] != FlashKind.None || _isAaveToken(pool, router)
             ) revert InvalidRouter(router);
-            isRouterAllowed[router] = true;
-            emit RouterAllowed(router);
+            _allowRouter(router);
         }
     }
 
@@ -657,65 +624,9 @@ contract LeverageExecutorV2 is
     // Swaps
     // ---------------------------------------------------------------------------------------------
 
-    /// @dev Runs `steps` from `amountIn` of `tokenIn`; each step's input is everything the previous one delivered.
-    function _swapChain(
-        address user,
-        address tokenIn,
-        uint256 amountIn,
-        Step[] memory steps,
-        address tokenOut,
-        address[] memory tokens
-    ) internal returns (uint256 amount) {
-        uint256 n = steps.length;
-        if (n == 0 || n > MAX_STEPS) revert InvalidSteps();
-        if (steps[n - 1].tokenOut != tokenOut) revert WrongFinalToken(steps[n - 1].tokenOut, tokenOut);
-        amount = amountIn;
-        address tin = tokenIn;
-        for (uint256 i; i < n; ++i) {
-            Step memory s = steps[i];
-            if (s.tokenOut == tin) revert SameAsset();
-            amount = _swap(user, tin, amount, s, tokens);
-            tin = s.tokenOut;
-        }
-    }
-
-    function _swap(address user, address tokenIn, uint256 amountIn, Step memory s, address[] memory tokens)
-        internal
-        returns (uint256 received)
-    {
-        if (!isRouterAllowed[s.router]) revert RouterNotAllowed(s.router);
-        // defense in depth: a call to a token contract could spend allowances users gave to this contract
-        for (uint256 i; i < tokens.length; ++i) {
-            if (s.router == tokens[i]) revert InvalidRouter(s.router);
-        }
-
-        uint256 inBefore = IERC20(tokenIn).balanceOf(address(this));
-        uint256 outBefore = IERC20(s.tokenOut).balanceOf(address(this));
-
-        IERC20(tokenIn).forceApprove(s.router, amountIn);
-        (bool ok, bytes memory ret) = s.router.call(s.data);
-        if (!ok) {
-            assembly ("memory-safe") {
-                revert(add(ret, 32), mload(ret))
-            }
-        }
-        IERC20(tokenIn).forceApprove(s.router, 0);
-
-        uint256 inAfter = IERC20(tokenIn).balanceOf(address(this));
-        uint256 spent = inBefore > inAfter ? inBefore - inAfter : 0;
-        if (spent > amountIn) revert ExcessiveInput(spent, amountIn);
-        received = IERC20(s.tokenOut).balanceOf(address(this)) - outBefore;
-        if (received < s.minOut) revert InsufficientOutput(received, s.minOut);
-        emit Swapped(user, s.router, tokenIn, s.tokenOut, spent, received);
-    }
-
     // ---------------------------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------------------------
-
-    function _checkDeadline(uint256 deadline) internal view {
-        if (block.timestamp > deadline) revert Expired(deadline);
-    }
 
     function _checkHealth(address user, uint256 minHealthFactor) internal view returns (uint256 hf) {
         (,,,,, hf) = POOL.getUserAccountData(user);
@@ -779,34 +690,4 @@ contract LeverageExecutorV2 is
         }
     }
 
-    function _add(address[] memory set, uint256 n, address token) internal pure returns (uint256) {
-        if (token == address(0)) revert ZeroAddress();
-        for (uint256 i; i < n; ++i) {
-            if (set[i] == token) return n;
-        }
-        set[n] = token;
-        return n + 1;
-    }
-
-    function _balances(address[] memory tokens) internal view returns (uint256[] memory bals) {
-        bals = new uint256[](tokens.length);
-        for (uint256 i; i < tokens.length; ++i) {
-            bals[i] = IERC20(tokens[i]).balanceOf(address(this));
-        }
-    }
-
-    /// @dev Sends `user` everything this call left in the contract, token by token.
-    function _sweep(address[] memory tokens, uint256[] memory before, address user)
-        internal
-        returns (uint256[] memory sent)
-    {
-        sent = new uint256[](tokens.length);
-        for (uint256 i; i < tokens.length; ++i) {
-            uint256 bal = IERC20(tokens[i]).balanceOf(address(this));
-            if (bal > before[i]) {
-                sent[i] = bal - before[i];
-                IERC20(tokens[i]).safeTransfer(user, sent[i]);
-            }
-        }
-    }
 }

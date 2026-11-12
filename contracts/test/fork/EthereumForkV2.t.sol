@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {LeverageExecutorV2} from "../../src/LeverageExecutorV2.sol";
 import {IAaveV3Pool} from "../../src/interfaces/IAaveV3.sol";
+import {SwapExecutorBase} from "../../src/base/SwapExecutorBase.sol";
 
 interface IAaveEMode {
     function setUserEMode(uint8 categoryId) external;
@@ -112,19 +113,19 @@ contract EthereumForkV2Test is Test {
         (,,,,, hf) = IAaveV3Pool(POOL).getUserAccountData(user);
     }
 
-    function _one(LeverageExecutorV2.Step memory s) internal pure returns (LeverageExecutorV2.Step[] memory a) {
-        a = new LeverageExecutorV2.Step[](1);
+    function _one(SwapExecutorBase.Step memory s) internal pure returns (SwapExecutorBase.Step[] memory a) {
+        a = new SwapExecutorBase.Step[](1);
         a[0] = s;
     }
 
     function _curve(bool usdcToUsde, uint256 amountIn, uint256 tolBps)
         internal
         view
-        returns (LeverageExecutorV2.Step memory)
+        returns (SwapExecutorBase.Step memory)
     {
         (int128 i, int128 j) = usdcToUsde ? (int128(1), int128(0)) : (int128(0), int128(1));
         uint256 dy = ICurveNg(CURVE_USDE_USDC).get_dy(i, j, amountIn);
-        return LeverageExecutorV2.Step({
+        return SwapExecutorBase.Step({
             router: CURVE_USDE_USDC,
             tokenOut: usdcToUsde ? USDE : USDC,
             data: abi.encodeCall(ICurveNg.exchange, (i, j, amountIn, 0, address(ex))),
@@ -263,7 +264,7 @@ contract EthereumForkV2Test is Test {
         p.capitalToken = PT;
         p.capitalAmount = ptAmount;
         p.capitalSteps = _one(
-            LeverageExecutorV2.Step({
+            SwapExecutorBase.Step({
                 router: PENDLE_ROUTER,
                 tokenOut: SUSDE,
                 data: abi.encodeCall(IPendleRouter.redeemPyToToken, (address(ex), YT, ptAmount, out)),

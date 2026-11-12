@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {LeverageExecutorV2} from "../../src/LeverageExecutorV2.sol";
 import {IAaveV3Pool} from "../../src/interfaces/IAaveV3.sol";
+import {SwapExecutorBase} from "../../src/base/SwapExecutorBase.sol";
 
 interface IAddressesProviderV2 {
     function getPriceOracle() external view returns (address);
@@ -110,9 +111,9 @@ contract BaseForkV2Test is Test {
     function _uni(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint256 expectedOut, uint256 tolBps)
         internal
         view
-        returns (LeverageExecutorV2.Step memory)
+        returns (SwapExecutorBase.Step memory)
     {
-        return LeverageExecutorV2.Step({
+        return SwapExecutorBase.Step({
             router: UNI_ROUTER02,
             tokenOut: tokenOut,
             data: abi.encodeCall(
@@ -123,8 +124,8 @@ contract BaseForkV2Test is Test {
         });
     }
 
-    function _one(LeverageExecutorV2.Step memory s) internal pure returns (LeverageExecutorV2.Step[] memory a) {
-        a = new LeverageExecutorV2.Step[](1);
+    function _one(SwapExecutorBase.Step memory s) internal pure returns (SwapExecutorBase.Step[] memory a) {
+        a = new SwapExecutorBase.Step[](1);
         a[0] = s;
     }
 
@@ -166,7 +167,7 @@ contract BaseForkV2Test is Test {
         vm.stopPrank();
     }
 
-    function _closeAll(address lender, LeverageExecutorV2.Step[] memory steps, address collateral, uint256 toSell)
+    function _closeAll(address lender, SwapExecutorBase.Step[] memory steps, address collateral, uint256 toSell)
         internal
         returns (LeverageExecutorV2.CloseResult memory r)
     {
@@ -233,7 +234,7 @@ contract BaseForkV2Test is Test {
         p.capitalAmount = capital;
         p.capitalSteps = _one(_uni(WETH, WSTETH, 100, capital, _at(WETH, 1e18, WSTETH, 1e18, capital), 100));
         p.debtAmount = debt;
-        LeverageExecutorV2.Step[] memory s = new LeverageExecutorV2.Step[](2);
+        SwapExecutorBase.Step[] memory s = new SwapExecutorBase.Step[](2);
         s[0] = _uni(USDC, WETH, 500, debt, _at(USDC, 1e6, WETH, 1e18, debt), 100);
         s[0].minOut = wethMid;
         s[1] = _uni(WETH, WSTETH, 100, wethMid, _at(WETH, 1e18, WSTETH, 1e18, wethMid), 100);
@@ -254,7 +255,7 @@ contract BaseForkV2Test is Test {
         uint256 owed = IERC20(vUSDC).balanceOf(user);
         uint256 toSell = _at(USDC, 1e6, WSTETH, 1e18, owed) * 103 / 100;
         uint256 wethOut = _at(WSTETH, 1e18, WETH, 1e18, toSell) * 99 / 100;
-        LeverageExecutorV2.Step[] memory c = new LeverageExecutorV2.Step[](2);
+        SwapExecutorBase.Step[] memory c = new SwapExecutorBase.Step[](2);
         c[0] = _uni(WSTETH, WETH, 100, toSell, wethOut, 0);
         c[0].minOut = wethOut;
         c[1] = _uni(WETH, USDC, 500, wethOut, owed, 0);
@@ -334,8 +335,8 @@ contract BaseForkV2Test is Test {
         _openWethFromUsdc(3_000e6);
         uint256 debt = IERC20(vUSDC).balanceOf(user);
         uint256 toSell = _at(USDC, 1e6, WETH, 1e18, debt) * 102 / 100;
-        LeverageExecutorV2.Step[] memory s = new LeverageExecutorV2.Step[](1);
-        s[0] = LeverageExecutorV2.Step({
+        SwapExecutorBase.Step[] memory s = new SwapExecutorBase.Step[](1);
+        s[0] = SwapExecutorBase.Step({
             router: address(br),
             tokenOut: USDC,
             data: abi.encodeCall(BalancerTouchingRouter.swap, (WETH, USDC, toSell, debt * 102 / 100, address(ex2))),

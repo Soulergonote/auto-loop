@@ -6,6 +6,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 import {LeverageExecutorV2} from "../../src/LeverageExecutorV2.sol";
 import {V2Base} from "./V2Base.sol";
+import {SwapExecutorBase} from "../../src/base/SwapExecutorBase.sol";
 
 /// @notice Proof tests for the findings of the internal v2 audit of 2026-11-06 (see README, "Audit interne").
 contract V2AuditTest is V2Base {
@@ -159,8 +160,8 @@ contract V2AuditTest is V2Base {
         LeverageExecutorV2.OpenParams memory p = _openParams(0, 0);
         p.capitalToken = address(leaky);
         p.capitalAmount = 10e18;
-        p.capitalSteps = new LeverageExecutorV2.Step[](1);
-        p.capitalSteps[0] = LeverageExecutorV2.Step({
+        p.capitalSteps = new SwapExecutorBase.Step[](1);
+        p.capitalSteps[0] = SwapExecutorBase.Step({
             router: address(lr),
             tokenOut: WETH,
             data: abi.encodeCall(LeakRouter.swap, (leaky, address(ex), 10e18 + 1, WETH, 1e18)),
@@ -169,7 +170,7 @@ contract V2AuditTest is V2Base {
         p.steps = _none();
         vm.startPrank(alice);
         leaky.approve(address(ex), 10e18);
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.ExcessiveInput.selector, 10e18 + 1, 10e18));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.ExcessiveInput.selector, 10e18 + 1, 10e18));
         ex.open(p);
         vm.stopPrank();
     }

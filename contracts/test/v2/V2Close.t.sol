@@ -9,6 +9,7 @@ import {EIP712SigUtils} from "aave-v3-origin/tests/utils/EIP712SigUtils.sol";
 import {LeverageExecutorV2} from "../../src/LeverageExecutorV2.sol";
 import {MockMorpho, LazyLender} from "../mocks/MockFlashLenders.sol";
 import {V2Base} from "./V2Base.sol";
+import {SwapExecutorBase} from "../../src/base/SwapExecutorBase.sol";
 
 /// @notice Close and deleverage: free flash lenders (change 5), swap chains on the way out (change 1), guard
 /// (change 3), return values and events (change 6).
@@ -211,7 +212,7 @@ contract V2CloseTest is V2Base {
         _open(alice, 1e18, 300);
         LeverageExecutorV2.CloseParams memory p = _fullCloseParams(address(pool));
         vm.expectEmit(true, true, true, false, address(executor));
-        emit LeverageExecutorV2.Swapped(alice, address(router), WETH, USDX, p.collateralToSell, 0);
+        emit SwapExecutorBase.Swapped(alice, address(router), WETH, USDX, p.collateralToSell, 0);
         vm.recordLogs();
         LeverageExecutorV2.CloseResult memory r = _closeAs(alice, p);
 
@@ -311,7 +312,7 @@ contract V2CloseTest is V2Base {
         _open(alice, 1e18, 300);
         LeverageExecutorV2.CloseParams memory p = _fullCloseParams(address(morpho));
         p.steps = _one(_step(WETH, WBTC, p.collateralToSell, 50));
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.WrongFinalToken.selector, WBTC, USDX));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.WrongFinalToken.selector, WBTC, USDX));
         _closeAs(alice, p);
     }
 
@@ -336,7 +337,7 @@ contract V2CloseTest is V2Base {
     function test_revert_close_sameAsset() public {
         LeverageExecutorV2.CloseParams memory p = _closeParams(1, 1, 1, address(morpho));
         p.debtAsset = WETH;
-        vm.expectRevert(LeverageExecutorV2.SameAsset.selector);
+        vm.expectRevert(SwapExecutorBase.SameAsset.selector);
         _closeAs(alice, p);
     }
 
@@ -356,7 +357,7 @@ contract V2CloseTest is V2Base {
         _open(alice, 1e18, 300);
         LeverageExecutorV2.CloseParams memory p = _fullCloseParams(address(morpho));
         vm.warp(p.guard.deadline + 1);
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.Expired.selector, p.guard.deadline));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.Expired.selector, p.guard.deadline));
         _closeAs(alice, p);
     }
 

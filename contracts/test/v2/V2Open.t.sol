@@ -7,6 +7,7 @@ import {EIP712SigUtils} from "aave-v3-origin/tests/utils/EIP712SigUtils.sol";
 
 import {LeverageExecutorV2} from "../../src/LeverageExecutorV2.sol";
 import {V2Base, IDebtToken} from "./V2Base.sol";
+import {SwapExecutorBase} from "../../src/base/SwapExecutorBase.sol";
 
 /// @notice Open: swap chains (change 1), any-token capital (change 2), guard (change 3), return values and
 /// events (change 6).
@@ -39,7 +40,7 @@ contract V2OpenTest is V2Base {
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, debt);
 
         vm.expectEmit(true, true, true, true, address(executor));
-        emit LeverageExecutorV2.Swapped(alice, address(router), USDX, WETH, debt, 2e18);
+        emit SwapExecutorBase.Swapped(alice, address(router), USDX, WETH, debt, 2e18);
         // the HF is checked against the return value below
         vm.expectEmit(true, true, true, false, address(executor));
         emit LeverageExecutorV2.PositionOpened(alice, WETH, USDX, WETH, 1e18, 3e18, debt, 0);
@@ -139,10 +140,10 @@ contract V2OpenTest is V2Base {
         uint256 wethOut = router.quote(WBTC, WETH, p.steps[0].minOut);
         uint256 wbtcBefore = _bal(WBTC, alice);
         vm.expectEmit(true, true, true, true, address(executor));
-        emit LeverageExecutorV2.Swapped(alice, address(router), USDX, WBTC, debt, wbtcOut);
+        emit SwapExecutorBase.Swapped(alice, address(router), USDX, WBTC, debt, wbtcOut);
         vm.expectEmit(true, true, true, true, address(executor));
         // the second step's calldata sells the first step's minimum (as the app quotes it)
-        emit LeverageExecutorV2.Swapped(alice, address(router), WBTC, WETH, p.steps[0].minOut, wethOut);
+        emit SwapExecutorBase.Swapped(alice, address(router), WBTC, WETH, p.steps[0].minOut, wethOut);
         vm.prank(alice);
         (uint256 supplied,,) = executor.open(p);
 
@@ -157,7 +158,7 @@ contract V2OpenTest is V2Base {
         uint256 debt = _debtFor(1e18, 250);
         _approveOpen(alice, WETH, 1e18, debt);
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, debt);
-        LeverageExecutorV2.Step[] memory s = new LeverageExecutorV2.Step[](4);
+        SwapExecutorBase.Step[] memory s = new SwapExecutorBase.Step[](4);
         s[0] = _step(USDX, WBTC, debt, 50);
         s[1] = _step(WBTC, WETH, s[0].minOut, 50);
         s[2] = _step(WETH, WBTC, s[1].minOut, 50);
@@ -178,7 +179,7 @@ contract V2OpenTest is V2Base {
         _approveOpen(alice, WETH, 1e18, debt);
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, debt);
         p.steps = _none();
-        vm.expectRevert(LeverageExecutorV2.InvalidSteps.selector);
+        vm.expectRevert(SwapExecutorBase.InvalidSteps.selector);
         vm.prank(alice);
         executor.open(p);
     }
@@ -187,14 +188,14 @@ contract V2OpenTest is V2Base {
         uint256 debt = _debtFor(1e18, 300);
         _approveOpen(alice, WETH, 1e18, debt);
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, debt);
-        LeverageExecutorV2.Step[] memory s = new LeverageExecutorV2.Step[](5);
+        SwapExecutorBase.Step[] memory s = new SwapExecutorBase.Step[](5);
         s[0] = _step(USDX, WBTC, debt, 50);
         s[1] = _step(WBTC, WETH, s[0].minOut, 50);
         s[2] = _step(WETH, WBTC, s[1].minOut, 50);
         s[3] = _step(WBTC, USDX, s[2].minOut, 50);
         s[4] = _step(USDX, WETH, s[3].minOut, 50);
         p.steps = s;
-        vm.expectRevert(LeverageExecutorV2.InvalidSteps.selector);
+        vm.expectRevert(SwapExecutorBase.InvalidSteps.selector);
         vm.prank(alice);
         executor.open(p);
     }
@@ -204,7 +205,7 @@ contract V2OpenTest is V2Base {
         _approveOpen(alice, WETH, 1e18, debt);
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, debt);
         p.steps = _one(_step(USDX, WBTC, debt, 50));
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.WrongFinalToken.selector, WBTC, WETH));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.WrongFinalToken.selector, WBTC, WETH));
         vm.prank(alice);
         executor.open(p);
     }
@@ -213,12 +214,12 @@ contract V2OpenTest is V2Base {
         uint256 debt = _debtFor(1e18, 300);
         _approveOpen(alice, WETH, 1e18, debt);
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, debt);
-        LeverageExecutorV2.Step[] memory s = new LeverageExecutorV2.Step[](2);
+        SwapExecutorBase.Step[] memory s = new SwapExecutorBase.Step[](2);
         s[0] = _step(USDX, WETH, debt, 50);
         s[0].tokenOut = USDX; // a "swap" USDX -> USDX would measure nothing
         s[1] = _step(USDX, WETH, debt, 50);
         p.steps = s;
-        vm.expectRevert(LeverageExecutorV2.SameAsset.selector);
+        vm.expectRevert(SwapExecutorBase.SameAsset.selector);
         vm.prank(alice);
         executor.open(p);
     }
@@ -229,7 +230,7 @@ contract V2OpenTest is V2Base {
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, debt);
         p.steps = _two(USDX, WBTC, WETH, debt, 50);
         router.setSlippageBps(100); // 1 % below the quote, tolerance was 0.5 %
-        vm.expectPartialRevert(LeverageExecutorV2.InsufficientOutput.selector);
+        vm.expectPartialRevert(SwapExecutorBase.InsufficientOutput.selector);
         vm.prank(alice);
         executor.open(p);
     }
@@ -242,7 +243,7 @@ contract V2OpenTest is V2Base {
         p.steps[1].minOut = router.quote(WBTC, WETH, p.steps[0].minOut) + 1;
         vm.expectRevert(
             abi.encodeWithSelector(
-                LeverageExecutorV2.InsufficientOutput.selector,
+                SwapExecutorBase.InsufficientOutput.selector,
                 router.quote(WBTC, WETH, p.steps[0].minOut),
                 p.steps[1].minOut
             )
@@ -258,7 +259,7 @@ contract V2OpenTest is V2Base {
         p.steps = _two(USDX, WBTC, WETH, debt, 50);
         address rogue = address(new RogueRouterStub());
         p.steps[1].router = rogue;
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.RouterNotAllowed.selector, rogue));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.RouterNotAllowed.selector, rogue));
         vm.prank(alice);
         executor.open(p);
     }
@@ -277,18 +278,18 @@ contract V2OpenTest is V2Base {
         IDebtToken(vUSDX).approveDelegation(address(ex), debt);
         vm.stopPrank();
 
-        LeverageExecutorV2.Step[] memory s = new LeverageExecutorV2.Step[](3);
+        SwapExecutorBase.Step[] memory s = new SwapExecutorBase.Step[](3);
         s[0] = _stepFor(ex, USDX, WBTC, debt, 50);
-        s[1] = LeverageExecutorV2.Step({
+        s[1] = SwapExecutorBase.Step({
             router: address(pt),
             tokenOut: address(pt),
             data: abi.encodeCall(IERC20.transferFrom, (alice, attacker, 1)),
             minOut: 0
         });
-        s[2] = LeverageExecutorV2.Step({router: address(router), tokenOut: WETH, data: "", minOut: 0});
+        s[2] = SwapExecutorBase.Step({router: address(router), tokenOut: WETH, data: "", minOut: 0});
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, debt);
         p.steps = s;
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.InvalidRouter.selector, address(pt)));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InvalidRouter.selector, address(pt)));
         vm.prank(alice);
         ex.open(p);
     }
@@ -312,7 +313,7 @@ contract V2OpenTest is V2Base {
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, debt);
         p.steps = _two(USDX, WBTC, WETH, debt, 50);
         p.steps[0].data = abi.encodeCall(router.swap, (USDX, WBTC, debt, attacker));
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.InsufficientOutput.selector, 0, p.steps[0].minOut));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InsufficientOutput.selector, 0, p.steps[0].minOut));
         vm.prank(alice);
         executor.open(p);
     }
@@ -352,9 +353,9 @@ contract V2OpenTest is V2Base {
         p.capitalSteps = _one(_step(WBTC, WETH, capital, 50));
 
         vm.expectEmit(true, true, true, true, address(executor));
-        emit LeverageExecutorV2.Swapped(alice, address(router), WBTC, WETH, capital, 1.5e18);
+        emit SwapExecutorBase.Swapped(alice, address(router), WBTC, WETH, capital, 1.5e18);
         vm.expectEmit(true, true, true, true, address(executor));
-        emit LeverageExecutorV2.Swapped(alice, address(router), USDX, WETH, debt, 1.5e18);
+        emit SwapExecutorBase.Swapped(alice, address(router), USDX, WETH, debt, 1.5e18);
         vm.prank(alice);
         (uint256 supplied,,) = executor.open(p);
         assertEq(supplied, 3e18);
@@ -493,7 +494,7 @@ contract V2OpenTest is V2Base {
         LeverageExecutorV2.OpenParams memory p = _openParams(capital, 2700e6);
         p.capitalToken = WBTC;
         p.capitalSteps = _one(_step(WBTC, USDX, capital, 50));
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.WrongFinalToken.selector, USDX, WETH));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.WrongFinalToken.selector, USDX, WETH));
         vm.prank(alice);
         executor.open(p);
     }
@@ -519,7 +520,7 @@ contract V2OpenTest is V2Base {
     function test_revert_open_sameAsset() public {
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, 1e6);
         p.debtAsset = WETH;
-        vm.expectRevert(LeverageExecutorV2.SameAsset.selector);
+        vm.expectRevert(SwapExecutorBase.SameAsset.selector);
         vm.prank(alice);
         executor.open(p);
     }
@@ -527,7 +528,7 @@ contract V2OpenTest is V2Base {
     function test_revert_open_zeroAddressToken() public {
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, 1e6);
         p.steps[0].tokenOut = address(0);
-        vm.expectRevert(LeverageExecutorV2.ZeroAddress.selector);
+        vm.expectRevert(SwapExecutorBase.ZeroAddress.selector);
         vm.prank(alice);
         executor.open(p);
     }
@@ -569,7 +570,7 @@ contract V2OpenTest is V2Base {
         _approveOpen(alice, WETH, 1e18, debt);
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, debt);
         vm.warp(p.guard.deadline + 1);
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.Expired.selector, p.guard.deadline));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.Expired.selector, p.guard.deadline));
         vm.prank(alice);
         executor.open(p);
     }
@@ -579,7 +580,7 @@ contract V2OpenTest is V2Base {
         _approveOpen(alice, WETH, 1e18, debt);
         LeverageExecutorV2.OpenParams memory p = _openParams(1e18, debt);
         p.guard.deadline = 0;
-        vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV2.Expired.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.Expired.selector, 0));
         vm.prank(alice);
         executor.open(p);
     }
@@ -630,9 +631,9 @@ contract V2OpenTest is V2Base {
     function _stepFor(LeverageExecutorV2 ex, address tokenIn, address tokenOut, uint256 amountIn, uint256 tolBps)
         internal
         view
-        returns (LeverageExecutorV2.Step memory)
+        returns (SwapExecutorBase.Step memory)
     {
-        return LeverageExecutorV2.Step({
+        return SwapExecutorBase.Step({
             router: address(router),
             tokenOut: tokenOut,
             data: abi.encodeCall(router.swap, (tokenIn, tokenOut, amountIn, address(ex))),
