@@ -1,0 +1,4 @@
+src/generated
+src/lib/__fixtures__
+*.css
+dist

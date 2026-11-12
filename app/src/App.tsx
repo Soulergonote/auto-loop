@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
-import { CHOOSE_WALLET, useWallets } from './components/wallets'
-import { formatUnits, type Address } from 'viem'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useAccount } from 'wagmi'
+import { type Address } from 'viem'
 import {
   DEFAULT_COLLATERAL_SYMBOLS,
   DEFAULT_DEBT_SYMBOLS,
@@ -24,18 +23,11 @@ import {
   type Market,
   type Token,
 } from './config'
-import { eligibleEModes, useEModeCategories, useMarket, useReserveTokens, withEMode, withIncentives } from './lib/useMarket'
-import { merklQuery, useCampaigns } from './lib/merkl'
-import { fmtAddress, fmtAmount, fmtDate, fmtPct, fmtPrice } from './lib/format'
-import { Picker } from './components/Picker'
+import { useReserveTokens } from './lib/useMarket'
+import { merklQuery } from './lib/merkl'
+import { fmtAddress } from './lib/format'
 import { useBalances } from './lib/capital'
-import { WINDOWS, useRateAverages, type Window } from './lib/rateHistory'
-import { useClaimables } from './lib/reinvest'
-import { ReinvestPanel } from './components/ReinvestPanel'
-import { AggregatorPicker, Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary } from './components/ui'
-import { OpenPanel } from './components/OpenPanel'
-import { ClosePanel } from './components/ClosePanel'
-import { SwapCollateralPanel } from './components/SwapCollateralPanel'
+import { AggregatorPicker, Card, LoopLayout, Notice, Segmented, Skel, Summary } from './components/ui'
 import { DeployPanel } from './components/DeployPanel'
 import {
   deployExecutor,
@@ -51,15 +43,15 @@ import { GateProvider, type Gate } from './components/gate'
 import { MorphoView, type MorphoSeed, type MorphoTab } from './components/MorphoView'
 import type { MorphoMarket } from './lib/morpho'
 import { Scanner, type Pick } from './components/Scanner'
-import { needsRenewal } from './lib/pendle'
-import { yieldSourceText } from './lib/nativeYield'
-import { toBase } from './lib/math'
 import { Positions } from './components/Positions'
 import { useQuery } from '@tanstack/react-query'
 import { snapshotQuery } from './lib/snapshot'
 import { scanMarket, type ScanRow } from './lib/scan'
 import { BEST_MIN_CAPACITY, bestPair, loadScanner, savePair, savedPair } from './lib/prefs'
 
+import { WalletButton } from './components/WalletButton'
+import { TokenSelect } from './components/TokenSelect'
+import { PairView, type Seed } from './components/PairView'
 type View = 'loop' | 'scan' | 'positions'
 /** each screen has its own address, so a link or a reload lands on it */
 const HASHES: Record<View, string> = { loop: 'boucle', scan: 'scanner', positions: 'positions' }
@@ -67,8 +59,6 @@ function viewFromHash(): View | undefined {
   const h = window.location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]
   return (Object.keys(HASHES) as View[]).find((v) => HASHES[v] === h)
 }
-/** How the Boucle screen opens a pair: eMode and leverage, the tab, and for « Ouvrir » a capital amount and token. */
-type Seed = { emode: number; leverage: number; tab?: Pick['tab']; amount?: string; capital?: Address }
 
 type Protocol = 'aave' | 'morpho'
 const AAVE_MARKETS = MARKETS.filter((m) => !m.soon)
@@ -80,144 +70,6 @@ const PLACES: Record<Protocol, { id: string; chainId: number; label: string }[]>
     label: networkName(m.label),
   })),
   morpho: MORPHO_NETWORKS.map((n) => ({ id: n.id, chainId: n.chain.id, label: n.label })),
-}
-
-function WalletButton({ market }: { market: { chain: Market['chain'] } }) {
-  const { address, chainId, chain, isConnected } = useAccount()
-  const { connect, isPending } = useConnect()
-  const wallets = useWallets()
-  const { disconnect } = useDisconnect()
-  const { switchChain } = useSwitchChain()
-  const menu = useRef<HTMLDetailsElement>(null)
-  const [copied, setCopied] = useState(false)
-  // the menu closes on a click elsewhere or Escape, like any dropdown
-  useEffect(() => {
-    const close = (e: Event) => {
-      const d = menu.current
-      if (d?.open && (e.type === 'keydown' ? (e as KeyboardEvent).key === 'Escape' : !d.contains(e.target as Node))) d.open = false
-    }
-    const open = () => {
-      if (!menu.current) return
-      menu.current.open = true
-      menu.current.querySelector<HTMLElement>('[role=menuitem]')?.focus()
-    }
-    document.addEventListener('mousedown', close)
-    document.addEventListener('keydown', close)
-    window.addEventListener(CHOOSE_WALLET, open)
-    return () => {
-      document.removeEventListener('mousedown', close)
-      document.removeEventListener('keydown', close)
-      window.removeEventListener(CHOOSE_WALLET, open)
-    }
-  }, [])
-
-  if (!isConnected) {
-    const label = isPending ? 'Connexion…' : 'Connecter le portefeuille'
-    if (wallets.length < 2)
-      return (
-        <button className="btn" disabled={!wallets.length || isPending} onClick={() => wallets[0] && connect({ connector: wallets[0] })}>
-          {label}
-        </button>
-      )
-    // several browser wallets: the user picks which one
-    return (
-      <details className="wallet-menu" ref={menu}>
-        <summary className="btn">{label}</summary>
-        <div className="menu" role="menu">
-          {wallets.map((w) => (
-            <button
-              key={w.uid}
-              role="menuitem"
-              className="wallet-choice"
-              disabled={isPending}
-              onClick={() => {
-                if (menu.current) menu.current.open = false
-                connect({ connector: w })
-              }}
-            >
-              {w.icon && <img src={w.icon} alt="" width={20} height={20} />}
-              {w.name}
-            </button>
-          ))}
-        </div>
-      </details>
-    )
-  }
-  const wrong = chainId !== market.chain.id
-  const explorer = (chain ?? market.chain).blockExplorers?.default.url
-  const pick = (run: () => void) => () => {
-    run()
-    if (menu.current) menu.current.open = false
-  }
-  return (
-    <details className="wallet-menu" ref={menu}>
-      <summary className="btn">
-        <span className={wrong ? 'warn-text' : 'muted'}>{chain?.name ?? 'Réseau inconnu'}</span>
-        <span className="addr">{fmtAddress(address!)}</span>
-      </summary>
-      <div className="menu" role="menu">
-        {wrong && (
-          <button role="menuitem" onClick={pick(() => switchChain({ chainId: market.chain.id }))}>
-            Passer sur {market.chain.name}
-          </button>
-        )}
-        <button
-          role="menuitem"
-          onClick={() => {
-            void navigator.clipboard?.writeText(address!).then(() => {
-              setCopied(true)
-              setTimeout(() => setCopied(false), 1_500)
-            })
-          }}
-        >
-          {copied ? 'Adresse copiée' : 'Copier l’adresse'}
-        </button>
-        {explorer && (
-          <a role="menuitem" href={`${explorer}/address/${address}`} target="_blank" rel="noreferrer" onClick={pick(() => {})}>
-            Voir sur l’explorateur
-          </a>
-        )}
-        <button role="menuitem" onClick={pick(() => disconnect())}>
-          Déconnecter
-        </button>
-      </div>
-    </details>
-  )
-}
-
-type TokenSelectProps = {
-  tokens: Token[]
-  value: Token
-  onChange: (t: Token) => void
-  exclude: Token
-  label: string
-  /** wallet balances, shown beside each token when a wallet is connected */
-  balances?: Map<Address, bigint>
-}
-
-function TokenSelect({ tokens, value, onChange, exclude, label, balances }: TokenSelectProps) {
-  const withBalances = !!balances && balances.size > 0
-  return (
-    <Picker
-      label={label}
-      value={value.address}
-      onChange={(a) => onChange(tokens.find((t) => t.address === a)!)}
-      columns={withBalances ? ['Solde'] : undefined}
-      // tokens the wallet holds first
-      options={[...tokens]
-        .sort((a, b) => Number((balances?.get(b.address) ?? 0n) > 0n) - Number((balances?.get(a.address) ?? 0n) > 0n))
-        .map((t) => {
-          const b = balances?.get(t.address)
-          return {
-            value: t.address,
-            label: t.symbol,
-            disabled: t.address === exclude.address,
-            sub: t.address === exclude.address ? 'déjà de l’autre côté de la paire' : undefined,
-            cells: withBalances ? [b ? fmtAmount(b, t.decimals) : <span className="na">—</span>] : undefined,
-          }
-        })}
-    />
-  )
 }
 
 const MARKET_KEY = 'auto-loop.market'
@@ -773,280 +625,4 @@ export function App() {
       </footer>
     </div>
   )
-}
-
-type PairViewProps = {
-  market: Market
-  collateral: Token
-  debt: Token
-  nativeToken?: Address
-  /** the market's tokens */
-  tokens?: Token[]
-  /** shows another pair of the market */
-  onPair: (collateral: Token, debt: Token, seed?: Seed) => void
-  account?: Address
-  aggregator: AggregatorChoice
-  selectors: ReactNode
-  common: ReactNode
-  notes: ReactNode
-  seed?: Seed
-  /** keeps a newly deployed executor for this market */
-  onExecutor: (a: Address) => void
-}
-
-function PairView({
-  market: m,
-  collateral,
-  debt,
-  nativeToken,
-  tokens,
-  onPair,
-  account,
-  aggregator,
-  selectors,
-  common,
-  notes,
-  seed,
-  onExecutor,
-}: PairViewProps) {
-  const [tab, setTab] = useState<'open' | 'close' | 'swap' | 'reinvest' | 'renew'>(seed?.tab ?? 'open')
-  // filled by the reinvest flow's last step: "Augmenter" with the capital it gained
-  const [augment, setAugment] = useState<{ emode: number; leverage: number; amount: string; capital?: Address }>()
-  // a PT roll in two steps: after the close, open this PT with the collateral given back
-  const [roll, setRoll] = useState<{ to: Token; leverage: number; emode: number }>()
-  const market = useMarket(m, collateral, debt, account, nativeToken)
-  const emodes = useEModeCategories(m)
-  const incentives = useCampaigns(m)
-  const r = market.reserves && withIncentives(market.reserves, incentives.data)
-  // closing works inside the account's current eMode, if it applies to the pair
-  const currentEMode = r && market.user ? eligibleEModes(emodes, r.collateral, r.debt).find((c) => c.id === market.user!.eModeCategory) : undefined
-
-  const { claimables } = useClaimables(m.chain.id, account)
-  const canReinvest = !!account && (claimables.length > 0 || tab === 'reinvest')
-  // contract v2: the collateral of an existing position can be changed without closing it
-  const canSwap = !!account && m.executorVersion === 2 && !!market.user && market.user.aTokenBalance > 0n
-  // a PT in its last month (or matured) can be rolled into a later one, without closing
-  const pt = r?.collateral.pt
-  const canRenew = canSwap && !!pt && needsRenewal(pt)
-  const averages = useRateAverages(m.chain.id, m.pool, [collateral.address, debt.address])
-  // where each token's own yield comes from, shown under the rates
-  const nativeNotes = r
-    ? [r.collateral, r.debt].flatMap((x) => (x.native && !x.native.fixedUntil ? [`${x.token.symbol} : ${yieldSourceText(x.native)}`] : []))
-    : []
-
-  const head = (
-    <>
-      {notes}
-      {!DEMO && (pt || r?.debt.pt) && m.executorVersion === 2 && !m.executorPendle && m.executorSource === 'wallet' && (
-        <DeployPanel market={m} upgrade="pendle" onReady={onExecutor} />
-      )}
-      <Card title="Marché">
-        {selectors}
-        {market.error && <Notice>Lecture d’Aave impossible : {market.error.message.split('\n')[0]}</Notice>}
-        {r === null && <Notice tone="bad">Cette paire n’est pas listée sur Aave v3 {m.label}.</Notice>}
-        {r && (
-          <Fold
-            title="Taux Aave"
-            value={`${r.collateral.token.symbol} dépôt ${fmtPct(r.collateral.supplyApy)} · ${r.debt.token.symbol} emprunt ${fmtPct(r.debt.borrowApy)}`}
-          >
-            <table className="reserves cards">
-              <thead>
-                <tr>
-                  <th>Actif</th>
-                  <th className="num">Prix oracle</th>
-                  <th className="num">LTV / seuil liq.</th>
-                  <th className="num">APY dépôt</th>
-                  <th className="num">APY emprunt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[r.collateral, r.debt].map((x) => (
-                  <tr key={x.token.address}>
-                    <td className="lead">{x.token.symbol}</td>
-                    <td className="num" data-label="Prix oracle">
-                      {fmtPrice(x.price)}
-                    </td>
-                    <td className="num" data-label="LTV / seuil liq.">
-                      {fmtPct(x.config.ltvBps / 10_000, 0)} / {fmtPct(x.config.liquidationThresholdBps / 10_000, 0)}
-                    </td>
-                    <td className="num" data-label="APY dépôt">
-                      <div>
-                        {fmtPct(x.supplyApy)}
-                        {x.native && (
-                          <span className="muted">
-                            {' '}
-                            + {fmtPct(x.native.apy)} {x.native.fixedUntil ? 'fixe' : 'token'}
-                          </span>
-                        )}
-                        {x.supplyRewardApr > 0 && <span className="reward"> + {fmtPct(x.supplyRewardApr)} Merkl</span>}
-                        <Averages values={averages.data?.get(x.token.address.toLowerCase())?.supply} pending={averages.isPending} />
-                      </div>
-                    </td>
-                    <td className="num" data-label="APY emprunt">
-                      <div>
-                        {fmtPct(x.borrowApy)}
-                        {x.native && (
-                          <span className="muted">
-                            {' '}
-                            + {fmtPct(x.native.apy)} {x.native.fixedUntil ? 'fixe' : 'token'}
-                          </span>
-                        )}
-                        {x.borrowRewardApr > 0 && <span className="reward"> − {fmtPct(x.borrowRewardApr)} Merkl</span>}
-                        <Averages values={averages.data?.get(x.token.address.toLowerCase())?.borrow} pending={averages.isPending} />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="muted small">Moyennes 7 j et 30 j : hausse des index Aave sur la période, annualisée.</p>
-            {pt?.market && (
-              <p className="muted small">
-                « fixe » : APY implicite du marché Pendle de {r.collateral.token.symbol}, acquis jusqu’à l’échéance du {fmtDate(pt.expiry)}.
-              </p>
-            )}
-            {nativeNotes.length > 0 && (
-              <p className="muted small">« token » : rendement propre du token, hausse de son taux de change ({nativeNotes.join(' ; ')}).</p>
-            )}
-            {incentives.isError && <p className="muted small">Merkl indisponible : APY sans bonus.</p>}
-          </Fold>
-        )}
-      </Card>
-      <div className="tabs">
-        <Segmented
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: 'open', label: 'Ouvrir / augmenter' },
-            { value: 'close', label: 'Fermer / réduire' },
-            ...(canSwap || tab === 'swap' ? [{ value: 'swap' as const, label: 'Changer de collatéral' }] : []),
-            ...(canRenew || tab === 'renew' ? [{ value: 'renew' as const, label: 'Renouveler' }] : []),
-            ...(canReinvest ? [{ value: 'reinvest' as const, label: 'Réinvestir' }] : []),
-          ]}
-        />
-      </div>
-    </>
-  )
-
-  if (!r)
-    return (
-      <LoopLayout
-        summary={
-          <Summary
-            items={[{ label: 'Health factor', key: true }, { label: 'Prix de liquidation' }, { label: 'APY net', key: true }, { label: 'Coût total' }]}
-            action={
-              <button className="btn primary" disabled>
-                Ouvrir la position
-              </button>
-            }
-          />
-        }
-      >
-        {head}
-      </LoopLayout>
-    )
-  if (tab === 'reinvest')
-    return (
-      <ReinvestPanel
-        reserves={r}
-        emode={currentEMode}
-        onDone={market.refetchUser}
-        user={market.user}
-        account={account}
-        aggregator={aggregator}
-        common={common}
-        head={head}
-        onAugment={(capital, leverage) => {
-          setAugment({
-            emode: market.user?.eModeCategory ?? 0,
-            leverage: leverage ?? 2,
-            amount: formatUnits(capital, r.collateral.token.decimals),
-          })
-          // the wallet now holds the collateral the flow brought: read its balance again before the "Augmenter" checks
-          void market.refetchUser()
-          setTab('open')
-          window.scrollTo({ top: 0 })
-        }}
-      />
-    )
-  if ((tab === 'swap' || tab === 'renew') && account && market.user)
-    return (
-      <SwapCollateralPanel
-        key={tab}
-        renew={tab === 'renew'}
-        onClose={() => setTab('close')}
-        onTwoStep={(to, leverage) => {
-          setRoll({ to, leverage, emode: market.user?.eModeCategory ?? 0 })
-          setTab('close')
-          window.scrollTo({ top: 0 })
-        }}
-        reserves={withEMode(r, currentEMode)}
-        emode={market.user.eModeCategory ? emodes.find((c) => c.id === market.user!.eModeCategory) : undefined}
-        tokens={tokens}
-        campaigns={incentives.data}
-        user={market.user}
-        account={account}
-        aggregator={aggregator}
-        common={common}
-        head={head}
-        onDone={market.refetchUser}
-        onShowPair={(c) => {
-          setTab('close')
-          onPair(c, debt)
-        }}
-      />
-    )
-  return tab === 'open' || tab === 'swap' || tab === 'renew' ? (
-    <OpenPanel
-      reserves={r}
-      tokens={tokens}
-      emodes={emodes}
-      seed={augment ?? seed}
-      user={market.user}
-      account={account}
-      aggregator={aggregator}
-      common={common}
-      head={head}
-      onDone={market.refetchUser}
-    />
-  ) : (
-    <ClosePanel
-      reserves={withEMode(r, currentEMode)}
-      then={
-        roll && {
-          label: `Ouvrir ${roll.to.symbol} au même levier`,
-          // a new pair: the view starts again on « Ouvrir », with the old PT given back as capital
-          run: (back) => {
-            // the old PT given back is the capital, or the debt asset when the close redeemed it all (matured PT)
-            const inPt = toBase(back.collateral, r.collateral.side) >= toBase(back.debt, r.debt.side)
-            onPair(roll.to, debt, {
-              emode: roll.emode,
-              leverage: roll.leverage,
-              amount: inPt ? formatUnits(back.collateral, collateral.decimals) : formatUnits(back.debt, debt.decimals),
-              capital: inPt ? collateral.address : debt.address,
-            })
-            window.scrollTo({ top: 0 })
-          },
-        }
-      }
-      user={market.user}
-      account={account}
-      aggregator={aggregator}
-      common={common}
-      head={head}
-      onDone={market.refetchUser}
-    />
-  )
-}
-
-/** Second line of a rate cell: its 7- and 30-day averages, a skeleton while they are read, nothing if unreadable. */
-function Averages({ values, pending }: { values?: Partial<Record<Window, number>>; pending: boolean }) {
-  if (pending)
-    return (
-      <div>
-        <Skel w={8} />
-      </div>
-    )
-  if (!values || WINDOWS.every((w) => values[w] === undefined)) return null
-  return <div className="muted small">{WINDOWS.map((w) => `${w} j ${values[w] !== undefined ? fmtPct(values[w]!) : '—'}`).join(' · ')}</div>
 }

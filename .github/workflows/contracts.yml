@@ -1,0 +1,31 @@
+name: Tester les contrats
+
+on:
+  push:
+    branches: [main]
+    paths: ['contracts/**', '.github/workflows/contracts.yml']
+  pull_request:
+    paths: ['contracts/**', '.github/workflows/contracts.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+      - uses: actions/cache@v4
+        with:
+          path: contracts/lib
+          key: contracts-lib-${{ hashFiles('contracts/script/setup.sh') }}
+      - run: bash script/setup.sh
+      # fork tests need archive RPCs: run them locally (see contracts/README.md)
+      - run: forge test --no-match-path 'test/fork/*'

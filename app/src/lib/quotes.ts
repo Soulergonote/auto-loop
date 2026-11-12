@@ -281,6 +281,8 @@ const KYBER_API = 'https://aggregator-api.kyberswap.com'
 
 type RawQuote = { to: string; data: string; value?: string; buyAmount: string }
 
+// raw JSON of a third-party API, narrowed by each caller
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function fetchJson(url: string, init: RequestInit = {}): Promise<any> {
   let res: Response
   try {
@@ -289,6 +291,7 @@ async function fetchJson(url: string, init: RequestInit = {}): Promise<any> {
     throw new QuoteError('API injoignable')
   }
   const text = await res.text()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let body: any
   try {
     body = JSON.parse(text)

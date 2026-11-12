@@ -1,7 +1,7 @@
 // Fork check of the Pendle routes through the executor, without the browser: open a PT loop, then close it.
 //   NET=ethereum bash e2e/fork.sh   (prints the executor)
 //   EXECUTOR=0x… VITE_RPC_URL_1=http://127.0.0.1:8545 npx vite-node e2e/pendle-check.ts [pt] [eMode]
-import { createPublicClient, createWalletClient, http, maxUint256, parseAbi, parseUnits, type Address } from 'viem'
+import { createPublicClient, createWalletClient, http, maxUint256, parseUnits, type Address } from 'viem'
 import { mainnet } from 'viem/chains'
 import { getQuote } from '../src/lib/quotes'
 import { closeCall, encodeCall, openCall, type ClosePlan, type OpenPlan } from '../src/lib/execute'

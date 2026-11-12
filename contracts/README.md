@@ -2,7 +2,7 @@
 
 Deux versions cohabitent : `LeverageExecutorV2` (v2, voir [la section v2](#v2--leverageexecutorv2)), que l'app déploie depuis le 08/11/2026, et `LeverageExecutor` (v1, déployée par Azerty sur Plasma), que l'app reconnaît et utilise toujours là où elle est déjà déployée.
 
-`LeverageExecutor` ouvre et ferme une position à levier sur Aave v3 en **une seule transaction**, avec un swap via un agrégateur (Velora, KyberSwap). Conception : voir `../architecture.md`.
+`LeverageExecutor` ouvre et ferme une position à levier sur Aave v3 en **une seule transaction**, avec un swap via un agrégateur (Velora, KyberSwap). Conception : voir `../docs/architecture.md`.
 
 ## Contenu
 
@@ -14,7 +14,7 @@ Deux versions cohabitent : `LeverageExecutorV2` (v2, voir [la section v2](#v2--l
 | `test/mocks/MockAggregatorRouter.sol` | Routeur factice (slippage réglable, routes malveillantes). |
 | `test/fork/BaseFork.t.sol` | Tests sur fork de Base (Aave v3 réel, swap Uniswap v3, puis rejeu de calldata Velora ou KyberSwap réel). Ignorés sans `BASE_RPC_URL`. |
 | `script/quote-velora.sh`, `script/quote-kyber.sh` | Récupèrent un devis Velora ou KyberSwap réel (USDC → WETH) avec le contrat comme taker. |
-| `script/export-bytecode.cjs` | Compile les contrats (v1, v2, Morpho) avec solc-js 0.8.27 et écrit `app/src/executorBytecode.ts`, utilisé par le bouton « Déployer le contrat » de l'app. |
+| `script/export-bytecode.cjs` | Compile les contrats (v1, v2, Morpho) avec solc-js 0.8.27 et écrit `app/src/generated/executorBytecode.ts`, utilisé par le bouton « Déployer le contrat » de l'app. |
 | `script/setup.sh` | Installe les dépendances dans `lib/`. |
 | `src/LeverageExecutorV2.sol` | La v2 (chaînes de swaps, capital en n'importe quel token, garde, changement de collatéral, flash loans gratuits). |
 | `src/interfaces/IFlashLenders.sol` | Interfaces des flash loans Morpho Blue et Balancer v2. |

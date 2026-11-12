@@ -1,9 +1,14 @@
 # Auto-loop
 
-Ouvrir ou fermer une position à levier sur Aave v3 (Base) en une seule transaction : flash loan, swap via un agrégateur, dépôt.
+Ouvrir, ajuster ou fermer une position à levier en **une seule transaction** (flash loan, swap via un agrégateur, dépôt) sur Aave v3 et Morpho Blue, boucles Pendle PT comprises, sur une quinzaine de réseaux EVM.
 
-- `app/` : interface web (Vite + React + wagmi), 100 % statique, publiée sur GitHub Pages à chaque push sur `main`.
-- `contracts/` : contrat `LeverageExecutor` (Foundry) et ses tests.
-- `architecture.md`, `agregateurs.md` : choix d'architecture et comparatif des agrégateurs.
+App en ligne : https://soulergonote.github.io/auto-loop/ (100 % statique, publiée à chaque push sur `main`).
 
-Non audité. Le contrat n'est pas encore déployé sur Base : l'interface calcule tout mais ne propose pas encore de signer.
+| Dossier | Contenu |
+|---|---|
+| `app/` | Interface web (Vite, React, wagmi/viem). Organisation et commandes : `app/README.md`. |
+| `contracts/` | Contrats Foundry : `LeverageExecutor` (v1, encore utilisé), `LeverageExecutorV2` (Aave, déployé par l'app), `LeverageExecutorMorpho` (Morpho Blue), et leurs tests. Voir `contracts/README.md`. |
+| `docs/` | Choix d'architecture (`architecture.md`) et comparatif des agrégateurs (`agregateurs.md`). |
+| `.github/workflows/` | `pages.yml` : lint, format, tests et build de l'app, puis publication. `contracts.yml` : `forge test` hors tests sur fork. |
+
+Agrégateurs : Velora et KyberSwap. Les contrats n'ont ni propriétaire ni admin et ne gardent aucun fonds ; audit interne de la V2 seulement, pas d'audit externe.

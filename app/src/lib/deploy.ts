@@ -4,7 +4,7 @@ import { deployContract, getPublicClient, sendTransaction, waitForTransactionRec
 import { useQuery } from '@tanstack/react-query'
 import { wagmiConfig } from '../wagmi'
 import { executorAbi, executorAbiV1, morphoExecutorAbi } from '../abi'
-import { EXECUTOR_BYTECODE_MORPHO, EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../executorBytecode'
+import { EXECUTOR_BYTECODE_MORPHO, EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../generated/executorBytecode'
 import { executorLenders, executorRouters, type Market, type MorphoNet } from '../config'
 
 export type ExecutorVersion = 1 | 2

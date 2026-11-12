@@ -118,8 +118,7 @@ export async function loadSnapshot(market: Market): Promise<Snapshot> {
     const amount = (k: number) => toBase((amounts[3 * i + k].result as bigint | undefined) ?? 0n, side)
     const pt = pts.get(token.address.toLowerCase())
     const curve = curves[i]?.result as
-      | { optimalUsageRatio: number; baseVariableBorrowRate: number; variableRateSlope1: number; variableRateSlope2: number }
-      | undefined
+      { optimalUsageRatio: number; baseVariableBorrowRate: number; variableRateSlope1: number; variableRateSlope2: number } | undefined
     const irm: AaveIrm | undefined = curve && {
       optimal: curve.optimalUsageRatio / 1e4,
       base: curve.baseVariableBorrowRate / 1e4,

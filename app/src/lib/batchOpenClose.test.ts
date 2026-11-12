@@ -78,7 +78,9 @@ function finalAllowances(calls: BatchCall[], start: Record<string, bigint>, spen
         state[c.to] = d.args[1] as bigint
         continue
       }
-    } catch {}
+    } catch {
+      // not this ABI
+    }
     try {
       const d = decodeFunctionData({ abi: debtTokenAbi, data: c.data })
       if (d.functionName === 'approveDelegation') {
@@ -86,7 +88,9 @@ function finalAllowances(calls: BatchCall[], start: Record<string, bigint>, spen
         state[c.to] = d.args[1] as bigint
         continue
       }
-    } catch {}
+    } catch {
+      // not this ABI
+    }
   }
   return state
 }

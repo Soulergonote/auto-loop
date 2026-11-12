@@ -18,8 +18,8 @@ import {
   type Hex,
 } from 'viem'
 import { arc } from 'viem/chains'
-import { morphoExecutorAbi, morphoAbi } from '../src/abi'
-import { EXECUTOR_BYTECODE_MORPHO } from '../src/executorBytecode'
+import { morphoExecutorAbi } from '../src/abi'
+import { EXECUTOR_BYTECODE_MORPHO } from '../src/generated/executorBytecode'
 import { MORPHO_BLUE, executorRouters, AGGREGATORS } from '../src/config'
 
 const RPC = 'https://rpc.mainnet.arc.io'
