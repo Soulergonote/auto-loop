@@ -257,6 +257,7 @@ export const LLAMA_CHAIN: Record<number, string> = {
   5042: 'arc',
   130: 'unichain',
   999: 'hyperliquid',
+  4663: 'robinhood',
 }
 
 export const priceKey = (token: Address, time: number) => `${token.toLowerCase()}@${time}`

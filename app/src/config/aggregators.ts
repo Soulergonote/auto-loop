@@ -34,9 +34,9 @@ export const AGGREGATORS: Record<AggregatorId, Aggregator> = {
   kyber: {
     label: 'KyberSwap',
     router: '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5',
-    // Mantle answers 404 (checked 2026-11-01); Arc quotes since 2026-11-10; Unichain, HyperEVM, MegaETH 2026-11-11
-    // (router checked in each route answer). Also quotes on Berachain, Ronin, Etherlink: no Aave v3 nor Morpho API there.
-    chains: [1, 10, 56, 130, 137, 143, 146, 999, 4326, 5042, 8453, 9745, 42161, 43114, 59144],
+    // Mantle answers 404 (checked 2026-11-01); Arc quotes since 2026-11-10; Unichain, HyperEVM, MegaETH 2026-11-11,
+    // Robinhood Chain 2026-11-12 (router checked in each route answer). Also quotes on Berachain, Ronin, Etherlink: no Aave v3 nor Morpho API there.
+    chains: [1, 10, 56, 130, 137, 143, 146, 999, 4326, 4663, 5042, 8453, 9745, 42161, 43114, 59144],
   },
   oneinch: {
     label: '1inch',
@@ -70,6 +70,7 @@ export const KYBER_CHAIN_SLUGS: Record<number, string> = {
   146: 'sonic',
   999: 'hyperevm',
   4326: 'megaeth',
+  4663: 'robinhood',
   5042: 'arc',
   8453: 'base',
   9745: 'plasma',

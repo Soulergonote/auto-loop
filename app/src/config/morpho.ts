@@ -1,5 +1,5 @@
 import type { Address, Chain } from 'viem'
-import { arbitrum, arc, base, hyperEvm, mainnet, monad, optimism, polygon, unichain } from 'viem/chains'
+import { arbitrum, arc, base, hyperEvm, mainnet, monad, optimism, polygon, robinhood, unichain } from 'viem/chains'
 import { BUILD_EXECUTORS, FORK_MORPHO_EXECUTOR } from './executors'
 
 /**
@@ -43,6 +43,9 @@ export const MORPHO_NETWORKS: MorphoNetDef[] = [
   { id: 'morpho-hyperevm', label: 'HyperEVM', chain: hyperEvm, morpho: MORPHO_BLUE[999] },
   // Monad: Morpho API + morpho-ts addresses.ts agree; code and owner() read on chain 2026-11-12
   { id: 'morpho-monad', label: 'Monad', chain: monad, morpho: '0xD5D960E8C380B724a48AC59E2DfF1b2CB4a1eAee' },
+  // Robinhood Chain: Morpho API (morphoBlues) + owner() read on chain 2026-11-12; Velora and KyberSwap quote there.
+  // Katana, Stable, Tempo: markets in the API but no aggregator quotes there (checked 2026-11-12).
+  { id: 'morpho-robinhood', label: 'Robinhood Chain', chain: robinhood, morpho: '0x9D53d5E3bd5E8d4Cbfa6DB1ca238AEA02E651010' },
 ]
 export const isMorphoId = (id: string) => id.startsWith('morpho-')
 

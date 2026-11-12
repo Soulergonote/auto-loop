@@ -1,5 +1,5 @@
 import type { Chain } from 'viem'
-import { arbitrum, avalanche, base, bsc, hyperEvm, linea, mainnet, mantle, optimism, polygon, sonic, unichain } from 'viem/chains'
+import { arbitrum, avalanche, base, bsc, hyperEvm, linea, mainnet, mantle, optimism, polygon, robinhood, sonic, unichain } from 'viem/chains'
 
 /**
  * RPC per chain: VITE_RPC_URL_<chainId> if set (VITE_RPC_URL for Base, e.g. a local anvil fork), otherwise the
@@ -18,6 +18,7 @@ const PUBLICNODE: Record<number, string> = {
   [sonic.id]: 'https://sonic-rpc.publicnode.com',
   [unichain.id]: 'https://unichain-rpc.publicnode.com',
   [hyperEvm.id]: 'https://hyperliquid-rpc.publicnode.com',
+  [robinhood.id]: 'https://robinhood-rpc.publicnode.com',
 }
 
 export function rpcUrls(chain: Chain): string[] {

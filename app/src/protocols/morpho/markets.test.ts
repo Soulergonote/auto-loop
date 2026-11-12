@@ -48,6 +48,19 @@ describe('parseMarkets', () => {
     const idle = { ...(markets[0] as object), collateralAsset: null }
     expect(parseMarkets(1, [idle] as never)).toHaveLength(0)
   })
+
+  it('prices a collateral the API does not price from the oracle and the loan token', () => {
+    const m = markets.find((x) => x.marketId === RE_USD) as { collateralAsset: object; loanAsset: { decimals: number; price: object }; state: object }
+    // 1.03 USDC per PT (both 6 decimals): 1.03 x 1e36; USDC at 0.9998 USD
+    const unpriced = {
+      ...m,
+      collateralAsset: { ...m.collateralAsset, price: null },
+      loanAsset: { ...m.loanAsset, price: { usd: 0.9998 } },
+      state: { ...m.state, price: '1030000000000000000000000000000000000' },
+    }
+    expect(parseMarkets(1, [unpriced] as never)[0].collateralUsd).toBeCloseTo(1.03 * 0.9998, 9)
+    expect(parseMarkets(1, [{ ...unpriced, state: { ...m.state, price: null } }] as never)[0].collateralUsd).toBe(0)
+  })
 })
 
 describe('Morpho math', () => {

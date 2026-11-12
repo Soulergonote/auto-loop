@@ -72,6 +72,8 @@ type ApiMarket = {
   loanAsset: ApiAsset
   warnings?: { type: string; level: string }[] | null
   state?: {
+    /** oracle price, loan units per collateral unit x 1e36 */
+    price?: string | null
     borrowApy?: number | null
     rewards?: { borrowApr?: number | null }[] | null
     liquidityAssets?: number | string | null
@@ -80,6 +82,20 @@ type ApiMarket = {
     borrowAssetsUsd?: number | null
     utilization?: number | null
   } | null
+}
+
+/**
+ * USD price of the collateral: the API's, else the market's oracle price times the loan token's (the API prices neither
+ * vault shares like steakEURCV nor some PTs, which would otherwise drop out of the Scanner).
+ */
+function collateralUsdOf(m: ApiMarket): number {
+  const direct = m.collateralAsset?.price?.usd ?? 0
+  if (direct > 0) return direct
+  const loanUsd = m.loanAsset.price?.usd ?? 0
+  const price = m.state?.price
+  if (!loanUsd || !price || !m.collateralAsset) return 0
+  const v = (Number(price) / 1e36) * 10 ** (m.collateralAsset.decimals - m.loanAsset.decimals) * loanUsd
+  return Number.isFinite(v) && v > 0 ? v : 0
 }
 
 const token = (a: ApiAsset): Token => ({ address: getAddress(a.address), symbol: a.symbol, name: a.symbol, decimals: a.decimals })
@@ -106,7 +122,7 @@ export function parseMarkets(chainId: number, items: ApiMarket[]): MorphoMarket[
       listed: m.listed,
       collateral: token(m.collateralAsset),
       loan: token(m.loanAsset),
-      collateralUsd: m.collateralAsset.price?.usd ?? 0,
+      collateralUsd: collateralUsdOf(m),
       loanUsd: m.loanAsset.price?.usd ?? 0,
       collateralYield: plausible(m.collateralAsset.yield?.apr ?? undefined) ? { apy: aprToApy(m.collateralAsset.yield!.apr!), source: 'morpho' } : undefined,
       lltv: Number(params.lltv) / 1e18,
@@ -128,7 +144,7 @@ const MARKET_FIELDS = `marketId listed lltv irmAddress oracle { address type }
   collateralAsset { address symbol decimals price { usd } yield { apr } }
   loanAsset { address symbol decimals price { usd } }
   warnings { type level }
-  state { borrowApy rewards { borrowApr } liquidityAssets liquidityAssetsUsd collateralAssetsUsd borrowAssetsUsd utilization }`
+  state { price borrowApy rewards { borrowApr } liquidityAssets liquidityAssetsUsd collateralAssetsUsd borrowAssetsUsd utilization }`
 
 /** Unlisted markets are only fetched with at least this much supplied (most are empty or tests). */
 export const UNLISTED_MIN_SUPPLY_USD = 10_000
