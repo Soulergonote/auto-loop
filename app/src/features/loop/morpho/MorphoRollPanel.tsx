@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { type Hash } from 'viem'
 import { AGGREGATORS } from '../../../config'
 import { dropToLiquidation, morphoHf, morphoLeverage, morphoNetApy, morphoSides, readMorphoState, type MorphoMarket } from '../../../protocols/morpho/markets'
 import {
@@ -23,6 +22,8 @@ import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
 import { Banners, Card, Fold, LoopLayout, Metric, NA, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
 import type { MorphoCtx } from './MorphoView'
 import { SLIPPAGES, slippageNote, useSlippage } from '../../../domain/slippage'
+import { useTxAction } from '../shared/useTxAction'
+import { signBlocker } from '../shared/signing'
 
 /** Targets offered: at most this many, the best first. */
 const MAX_TARGETS = 30
@@ -65,8 +66,7 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
   const debt = user.debt
   const { slippage, setSlippage, auto: autoSlip } = useSlippage('pt')
   const [choice, setChoice] = useState<string>()
-  const [busy, setBusy] = useState<string>()
-  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[] }>()
+  const { busy, setBusy, result, run } = useTxAction()
 
   // PT infos of every candidate collateral with the same loan token (only PTs can be roll targets across collaterals)
   const candidates = useMemo(
@@ -165,19 +165,10 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
   })()
   const stale = quote.isFetching
   const canSign = !!executor && !!account && !!T && (same || (!!q && !q.simulated)) && !!preview && problems.length === 0 && !stale && !busy && hf !== undefined
-  const disabledReason = !executor
-    ? 'Contrat pas encore déployé'
-    : !account
-      ? 'Connecter le portefeuille'
-      : problems.length
-        ? 'Bloqué : voir le bandeau rouge'
-        : q?.simulated
-          ? 'Devis simulé'
-          : undefined
+  const disabledReason = signBlocker({ executor, account, simulated: q?.simulated, problems })
 
   async function onRoll() {
-    setResult(undefined)
-    try {
+    await run(async () => {
       let fresh = q
       if (quoteReq) {
         setBusy('Nouvelle cotation…')
@@ -189,11 +180,7 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
       const outcome = await readMorphoOutcome(net.chain.id, hash, p.executor, p.user)
       // the position now lives on the target market: the view switches to it and shows this result there
       ctx.onMoved(T!.id, { ok: true, text: 'Position déplacée.', hash, details: outcome && morphoOutcomeLines(outcome, C, L, T!.collateral) })
-    } catch (e) {
-      setResult({ ok: false, text: explainError(e) })
-    } finally {
-      setBusy(undefined)
-    }
+    })
   }
 
   const steps = ctx.batch

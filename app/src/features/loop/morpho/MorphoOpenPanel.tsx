@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { parseUnits, type Hash } from 'viem'
+import { parseUnits } from 'viem'
 import { AGGREGATORS, QUOTE_MODE } from '../../../config'
 import {
   collateralInLoan,
@@ -17,30 +17,18 @@ import { useDebounced } from '../../../ui/useDebounced'
 import { getQuote, quoteLabel } from '../../../services/quotes/quotes'
 import { daysToMaturity, isExpired } from '../../../protocols/pendle/pt'
 import { roundSignificant, toBase } from '../../../domain/math'
-import { GAS_UNITS_PT, HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../../../domain/economics'
-import { explainError } from '../../../chain/tx'
-import { fmtLltv, fmtBps, fmtAmount, fmtDate, fmtDays, fmtDollars, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
+import { GAS_UNITS_PT, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../../../domain/economics'
+import { fmtLltv, fmtBps, fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
 import { isCorrelated } from '../../../domain/pairs'
 import { exitIssues, exitSellAmount } from '../../../domain/exitCheck'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
 import { RiskPanel } from '../shared/RiskPanel'
-import {
-  Banners,
-  Card,
-  Fold,
-  LeverageSlider,
-  LoopLayout,
-  Metric,
-  NA,
-  QuoteCompare,
-  Segmented,
-  Steps,
-  Summary,
-  TxResult,
-  aggregatorLabel,
-} from '../../../ui/primitives'
+import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
 import type { MorphoCtx } from './MorphoView'
-import { SLIPPAGES, pairKind, slippageNote, useSlippage } from '../../../domain/slippage'
+import { pairKind, slippageNote, useSlippage } from '../../../domain/slippage'
+import { useTxAction } from '../shared/useTxAction'
+import { signBlocker } from '../shared/signing'
+import { CapitalField, SlippageHorizonFields, YieldMetrics } from '../shared/OpenFields'
 
 /** The slider stops at this health factor: Morpho liquidates at 1, with no LTV margin below the LLTV like Aave's. */
 const SLIDER_MIN_HF = 1.02
@@ -65,8 +53,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
     auto: autoSlip,
   } = useSlippage(pairKind({ symbol: C.symbol, usd: M.collateralUsd }, { symbol: L.symbol, usd: M.loanUsd }, { pt: !!pt }))
   const [horizonText, setHorizon] = useState('90')
-  const [busy, setBusy] = useState<string>()
-  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[] }>()
+  const { busy, setBusy, result, setResult, run } = useTxAction()
 
   const ptDays = pt ? daysToMaturity(pt) : undefined
   const ptExpired = !!pt && isExpired(pt)
@@ -266,21 +253,10 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
 
   const stale = initial !== debouncedInitial || quote.isFetching
   const canSign = !!executor && !!account && !!q && !q.simulated && !!preview && problems.length === 0 && !stale && !busy && !exitPending
-  const disabledReason = !executor
-    ? 'Contrat pas encore déployé'
-    : !account
-      ? 'Connecter le portefeuille'
-      : q?.simulated
-        ? 'Devis simulé'
-        : problems.length
-          ? 'Bloqué : voir le bandeau rouge'
-          : exitPending
-            ? 'Vérification de la sortie…'
-            : undefined
+  const disabledReason = signBlocker({ executor, account, simulated: q?.simulated, problems, checkingExit: exitPending })
 
   async function onOpen() {
-    setResult(undefined)
-    try {
+    await run(async () => {
       setBusy('Nouvelle cotation…')
       const fresh = await getQuote(quoteReq!)
       if (fresh.simulated) throw new Error('Plus de devis réel disponible')
@@ -298,11 +274,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
       const outcome = await readMorphoOutcome(net.chain.id, hash, p.executor, p.user)
       setResult({ ok: true, text: augment ? 'Position augmentée.' : 'Position ouverte.', hash, details: outcome && morphoOutcomeLines(outcome, C, L) })
       ctx.onDone()
-    } catch (e) {
-      setResult({ ok: false, text: explainError(e) })
-    } finally {
-      setBusy(undefined)
-    }
+    })
   }
 
   const authorized = !!user?.authorized
@@ -390,16 +362,13 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
           </p>
         )}
         <div className="grid2">
-          <div className="field">
-            <span>
-              Capital
-              {capBalance !== undefined && (
-                <button className="link" onClick={() => setAmountText(fmtAmount(capBalance, K.decimals, 8).replace(/\s/g, '').replace(',', '.'))}>
-                  solde {fmtAmount(capBalance, K.decimals)}
-                </button>
-              )}
-            </span>
-            <div className="inputrow">
+          <CapitalField
+            label="Capital"
+            balance={capBalance}
+            decimals={K.decimals}
+            amountText={amountText}
+            setAmountText={setAmountText}
+            tokenSelect={
               <select
                 aria-label="Token du capital"
                 value={capitalIsLoan ? 'loan' : 'collateral'}
@@ -411,10 +380,9 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
                 <option value="collateral">{C.symbol}</option>
                 <option value="loan">{L.symbol}</option>
               </select>
-              <input aria-label="Montant du capital" inputMode="decimal" value={amountText} onChange={(e) => setAmountText(e.target.value)} />
-            </div>
-            {initial !== undefined && <span className="muted small">≈ {fmtUsd(toBase(initial, capSide))}</span>}
-          </div>
+            }
+            usd={initial !== undefined ? fmtUsd(toBase(initial, capSide)) : undefined}
+          />
           <LeverageSlider
             value={lev}
             min={sliderMin}
@@ -436,51 +404,19 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
             value={q ? `${fmtAmount(capColl + q.buyAmount, C.decimals)} ${ptShortSymbol(C.symbol)}` : undefined}
             sub={q && `dont ${fmtAmount(q.buyAmount, C.decimals)} via ${quoteLabel(q)}`}
           />
-          {pt ? (
-            <>
-              <Metric
-                label="APY fixe"
-                value={fixedApy !== undefined ? fmtPct(fixedApy) : ptExpired ? '—' : undefined}
-                sub={ptExpired ? 'PT échu' : `jusqu’au ${fmtDate(pt.expiry)}`}
-                tone={apyTone(fixedApy)}
-              />
-              <Metric
-                label="Échéance"
-                value={ptExpired ? 'échu' : fmtDays(Math.floor(ptDays!))}
-                sub={
-                  ptExpired
-                    ? 'à fermer ou changer de marché'
-                    : horizonYield !== undefined
-                      ? `${fmtDate(pt.expiry)} · APY coûts compris ${fmtPct(horizonYield)}`
-                      : fmtDate(pt.expiry)
-                }
-                tone={ptExpired ? 'bad' : ptDays! < 14 ? 'warn' : undefined}
-              />
-            </>
-          ) : (
-            <>
-              <Metric
-                label="Rentable après"
-                value={
-                  unreal || (costs && breakEven === undefined)
-                    ? NA
-                    : breakEven === undefined
-                      ? undefined
-                      : Number.isFinite(breakEven)
-                        ? fmtDays(Math.max(1, Math.ceil(breakEven)))
-                        : 'jamais'
-                }
-                sub="coûts d’entrée et de sortie payés"
-                tone={breakEven !== undefined && !unreal ? (!Number.isFinite(breakEven) ? 'bad' : breakEven > horizon ? 'warn' : undefined) : undefined}
-              />
-              <Metric
-                label={`Gain sur ${fmtDays(horizon)}`}
-                value={unreal || (costs && horizonGain === undefined) ? NA : horizonGain !== undefined ? fmtDollars(horizonGain) : undefined}
-                sub={horizonYield !== undefined && !unreal ? `${fmtPct(horizonYield)} par an, coûts compris` : 'coûts compris'}
-                tone={apyTone(horizonYield)}
-              />
-            </>
-          )}
+          <YieldMetrics
+            pt={pt}
+            ptExpired={ptExpired}
+            ptDays={ptDays}
+            fixedApy={fixedApy}
+            expiredHint="à fermer ou changer de marché"
+            horizon={horizon}
+            horizonYield={horizonYield}
+            horizonGain={horizonGain}
+            breakEven={breakEven}
+            hasCosts={!!costs}
+            unreal={unreal}
+          />
         </div>
 
         <Banners problems={problems} warnings={warnings} />
@@ -490,18 +426,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
           value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)}${pt ? '' : ` · ${fmtDays(horizon)}`}`}
         >
           {ctx.common}
-          <div className="grid2">
-            <div className="field">
-              <span>Slippage max</span>
-              <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
-            </div>
-            {!pt && (
-              <div className="field">
-                <span>Durée prévue</span>
-                <Segmented value={horizonText} onChange={setHorizon} options={HORIZONS.map((h) => ({ value: String(h), label: fmtDays(h) }))} />
-              </div>
-            )}
-          </div>
+          <SlippageHorizonFields slippage={slippage} setSlippage={setSlippage} pt={!!pt} horizonText={horizonText} setHorizon={setHorizon} />
         </Fold>
 
         {hf !== undefined && loopLev !== undefined && (

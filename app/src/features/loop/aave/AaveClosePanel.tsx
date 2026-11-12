@@ -34,6 +34,7 @@ import {
   aggregatorLabel,
 } from '../../../ui/primitives'
 import { SLIPPAGES, type SlippageBps, pairKind, reserveAsset, slippageNote, useSlippage } from '../../../domain/slippage'
+import { signBlocker } from '../shared/signing'
 
 type Props = {
   reserves: Reserves
@@ -324,13 +325,7 @@ function ClosePanelInner(p: {
     : undefined
 
   const canSign = !!market.executor && !!account && !!q && !q.simulated && problems.length === 0 && !quote.isFetching && !busy && lev === debouncedLev
-  const disabledReason = !market.executor
-    ? 'Contrat pas encore déployé'
-    : q?.simulated
-      ? 'Devis simulé'
-      : problems.length
-        ? 'Bloqué : voir le bandeau rouge'
-        : undefined
+  const disabledReason = signBlocker({ executor: market.executor, simulated: q?.simulated, problems })
 
   async function onClose() {
     setResult(undefined)

@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useGasPrice } from 'wagmi'
-import { parseUnits, type Address, type Hash } from 'viem'
+import { parseUnits, type Address } from 'viem'
 import { AGGREGATORS, QUOTE_MODE, type AggregatorChoice, type Token } from '../../../config'
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../../../services/merkl'
 import { CampaignTable } from '../shared/CampaignTable'
@@ -25,35 +25,23 @@ import {
   EMPTY_ACCOUNT,
   NO_POSITION,
 } from '../../../domain/math'
-import { GAS_UNITS_PT, HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../../../domain/economics'
+import { GAS_UNITS_PT, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../../../domain/economics'
 import { encodeCall, executeOpen, openCall, type OpenPlan } from '../../../protocols/aave/execute'
-import { explainError } from '../../../chain/tx'
 import { executeOpenBatch } from '../../../protocols/aave/batch'
 import { useAtomicBatch } from '../../../chain/batch'
 import { capitalKind, useWalletTokens } from '../../../chain/walletTokens'
 import { outcomeLines, readOutcome } from '../../../chain/outcome'
-import { fmtBps, fmtAmount, fmtDate, fmtDays, fmtDollars, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
+import { fmtBps, fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
 import { isCorrelated } from '../../../domain/pairs'
 import { useQuery } from '@tanstack/react-query'
 import { exitIssues, exitSellAmount, utilization } from '../../../domain/exitCheck'
 import { snapshotQuery } from '../../../protocols/aave/snapshot'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
-import {
-  Banners,
-  Card,
-  Fold,
-  LeverageSlider,
-  LoopLayout,
-  QuoteCompare,
-  Metric,
-  NA,
-  Segmented,
-  Steps,
-  Summary,
-  TxResult,
-  aggregatorLabel,
-} from '../../../ui/primitives'
-import { SLIPPAGES, pairKind, reserveAsset, slippageNote, useSlippage } from '../../../domain/slippage'
+import { Banners, Card, Fold, LeverageSlider, LoopLayout, QuoteCompare, Metric, NA, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
+import { pairKind, reserveAsset, slippageNote, useSlippage } from '../../../domain/slippage'
+import { useTxAction } from '../shared/useTxAction'
+import { signBlocker } from '../shared/signing'
+import { CapitalField, SlippageHorizonFields, YieldMetrics } from '../shared/OpenFields'
 
 type Props = {
   reserves: Reserves
@@ -117,8 +105,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
   const gasPrice = useGasPrice({ chainId: market.chain.id, query: { refetchInterval: 30_000 } })
   // a wallet that sends atomic batches: eMode, approval, delegation, open and allowances back in one confirmation
   const batch = useAtomicBatch(market.chain.id, account) === true
-  const [busy, setBusy] = useState<string>()
-  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[] }>()
+  const { busy, setBusy, result, setResult, run } = useTxAction()
 
   // an existing position on the pair is levered further: the slider then sets the leverage of the whole position
   const position = user ? pairPosition(user, C.side, D.side) : NO_POSITION
@@ -461,21 +448,10 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
     problems.length === 0 &&
     !stale &&
     !busy
-  const disabledReason = !executor
-    ? 'Contrat pas encore déployé'
-    : !account
-      ? 'Connecter le portefeuille'
-      : q?.simulated || cq?.simulated
-        ? 'Devis simulé'
-        : problems.length
-          ? 'Bloqué : voir le bandeau rouge'
-          : exitPending
-            ? 'Vérification de la sortie…'
-            : undefined
+  const disabledReason = signBlocker({ executor, account, simulated: q?.simulated || cq?.simulated, problems, checkingExit: exitPending })
 
   async function onOpen() {
-    setResult(undefined)
-    try {
+    await run(async () => {
       setBusy('Nouvelle cotation…')
       // quotes expire within a few blocks: always re-quote right before signing (same debt, same capital)
       const [fresh, freshCapital] = await Promise.all([getQuote(quoteReq!), capitalReq ? getQuote(capitalReq) : undefined])
@@ -489,11 +465,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
       setResult({ ok: true, text: augment ? 'Position augmentée.' : 'Position ouverte.', hash, details })
       onDone()
       void wallet.refetch()
-    } catch (e) {
-      setResult({ ok: false, text: explainError(e) })
-    } finally {
-      setBusy(undefined)
-    }
+    })
   }
 
   const emodeLabel = reserves.emode ? reserves.emode.label : 'sans eMode'
@@ -586,17 +558,14 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
           </p>
         )}
         <div className="grid2">
-          <div className="field">
-            <span>
-              {capitalOptions.length > 1 ? 'Capital' : `Capital en ${C.token.symbol}`}
-              {capBalance !== undefined && (
-                <button className="link" onClick={() => setAmountText(fmtAmount(capBalance, K.decimals, 8).replace(/\s/g, '').replace(',', '.'))}>
-                  solde {fmtAmount(capBalance, K.decimals)}
-                </button>
-              )}
-            </span>
-            <div className="inputrow">
-              {capitalOptions.length > 1 && (
+          <CapitalField
+            label={capitalOptions.length > 1 ? 'Capital' : `Capital en ${C.token.symbol}`}
+            balance={capBalance}
+            decimals={K.decimals}
+            amountText={amountText}
+            setAmountText={setAmountText}
+            tokenSelect={
+              capitalOptions.length > 1 && (
                 <select
                   aria-label="Token du capital"
                   value={K.address}
@@ -611,11 +580,10 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
                     </option>
                   ))}
                 </select>
-              )}
-              <input aria-label="Montant du capital" inputMode="decimal" value={amountText} onChange={(e) => setAmountText(e.target.value)} />
-            </div>
-            {initial !== undefined && <span className="muted small">≈ {fmtUsd(toBase(initial, capSide))}</span>}
-          </div>
+              )
+            }
+            usd={initial !== undefined ? fmtUsd(toBase(initial, capSide)) : undefined}
+          />
           <LeverageSlider
             value={lev}
             min={sliderMin}
@@ -652,51 +620,19 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
                   : `dont ${fmtAmount(q.buyAmount, C.token.decimals)} via ${quoteLabel(q)}`)
             }
           />
-          {pt ? (
-            <>
-              <Metric
-                label="APY fixe"
-                value={fixedApy !== undefined ? fmtPct(fixedApy) : ptExpired ? '—' : undefined}
-                sub={ptExpired ? 'PT échu' : `jusqu’au ${fmtDate(pt.expiry)}`}
-                tone={apyTone(fixedApy)}
-              />
-              <Metric
-                label="Échéance"
-                value={ptExpired ? 'échu' : fmtDays(Math.floor(ptDays!))}
-                sub={
-                  ptExpired
-                    ? 'à fermer ou renouveler'
-                    : horizonYield !== undefined
-                      ? `${fmtDate(pt.expiry)} · APY coûts compris ${fmtPct(horizonYield)}`
-                      : fmtDate(pt.expiry)
-                }
-                tone={ptExpired ? 'bad' : ptDays! < 14 ? 'warn' : undefined}
-              />
-            </>
-          ) : (
-            <>
-              <Metric
-                label="Rentable après"
-                value={
-                  unreal || (costs && breakEven === undefined)
-                    ? NA
-                    : breakEven === undefined
-                      ? undefined
-                      : Number.isFinite(breakEven)
-                        ? fmtDays(Math.max(1, Math.ceil(breakEven)))
-                        : 'jamais'
-                }
-                sub="coûts d’entrée et de sortie payés"
-                tone={breakEven !== undefined && !unreal ? (!Number.isFinite(breakEven) ? 'bad' : breakEven > horizon ? 'warn' : undefined) : undefined}
-              />
-              <Metric
-                label={`Gain sur ${fmtDays(horizon)}`}
-                value={unreal || (costs && horizonGain === undefined) ? NA : horizonGain !== undefined ? fmtDollars(horizonGain) : undefined}
-                sub={horizonYield !== undefined && !unreal ? `${fmtPct(horizonYield)} par an, coûts compris` : 'coûts compris'}
-                tone={apyTone(horizonYield)}
-              />
-            </>
-          )}
+          <YieldMetrics
+            pt={pt}
+            ptExpired={ptExpired}
+            ptDays={ptDays}
+            fixedApy={fixedApy}
+            expiredHint="à fermer ou renouveler"
+            horizon={horizon}
+            horizonYield={horizonYield}
+            horizonGain={horizonGain}
+            breakEven={breakEven}
+            hasCosts={!!costs}
+            unreal={unreal}
+          />
         </div>
 
         <Banners problems={problems} warnings={warnings} />
@@ -706,18 +642,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
           value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)}${pt ? '' : ` · ${fmtDays(horizon)}`} · ${emodeLabel}`}
         >
           {common}
-          <div className="grid2">
-            <div className="field">
-              <span>Slippage max</span>
-              <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
-            </div>
-            {!pt && (
-              <div className="field">
-                <span>Durée prévue</span>
-                <Segmented value={horizonText} onChange={setHorizon} options={HORIZONS.map((h) => ({ value: String(h), label: fmtDays(h) }))} />
-              </div>
-            )}
-          </div>
+          <SlippageHorizonFields slippage={slippage} setSlippage={setSlippage} pt={!!pt} horizonText={horizonText} setHorizon={setHorizon} />
           {eligible.length > 0 && (
             <label className="field">
               <span>eMode</span>

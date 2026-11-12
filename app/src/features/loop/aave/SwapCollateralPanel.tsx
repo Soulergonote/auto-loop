@@ -10,7 +10,6 @@ import { getQuote, quoteLabel } from '../../../services/quotes/quotes'
 import { flashLoanOwed, pairPosition, positionLeverage, roundSignificant, toBase } from '../../../domain/math'
 import { GAS_UNITS, GAS_UNITS_PT, swapCostBase, swapLoss, swapLossProblem } from '../../../domain/economics'
 import { encodeCall, executeSwapCollateral, swapCollateralCall } from '../../../protocols/aave/execute'
-import { explainError } from '../../../chain/tx'
 import { executeSwapCollateralBatch } from '../../../protocols/aave/batch'
 import { useAtomicBatch } from '../../../chain/batch'
 import {
@@ -29,6 +28,8 @@ import { isCorrelated } from '../../../domain/pairs'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
 import { Banners, Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
 import { SLIPPAGES, pairKind, reserveAsset, slippageNote, useSlippage } from '../../../domain/slippage'
+import { useTxAction } from '../shared/useTxAction'
+import { signBlocker } from '../shared/signing'
 
 const PARTS = ['25', '50', '100'] as const
 
@@ -84,8 +85,7 @@ export function SwapCollateralPanel({
   const T: Reserve | undefined = T0 && { ...T0, supplyRewardApr: headlineRewards(campaigns, T0).supply }
   const [part, setPart] = useState<(typeof PARTS)[number]>('100')
   const { slippage, setSlippage, auto: autoSlip } = useSlippage(T ? pairKind(reserveAsset(C), reserveAsset(T), { pt: !!(C.pt || T.pt) }) : 'other')
-  const [busy, setBusy] = useState<string>()
-  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; to?: Token; details?: string[] }>()
+  const { busy, setBusy, result, setResult, run } = useTxAction<{ ok: boolean; text: string; hash?: Hash; to?: Token; details?: string[] }>()
   const batch = useAtomicBatch(market.chain.id, account) === true
   const gasPrice = useGasPrice({ chainId: market.chain.id, query: { refetchInterval: 30_000 } })
 
@@ -219,19 +219,10 @@ export function SwapCollateralPanel({
   const empty = user.aTokenBalance === 0n
   const twoStep = renew && noFlash && !!onTwoStep
   const canSign = !twoStep && !empty && !!market.executor && !!q && !q.simulated && !!preview && problems.length === 0 && !quote.isFetching && !busy
-  const disabledReason = empty
-    ? `Aucun ${C.token.symbol} en collatéral`
-    : !market.executor
-      ? 'Contrat pas encore déployé'
-      : q?.simulated
-        ? 'Devis simulé'
-        : problems.length
-          ? 'Bloqué : voir le bandeau rouge'
-          : undefined
+  const disabledReason = empty ? `Aucun ${C.token.symbol} en collatéral` : signBlocker({ executor: market.executor, simulated: q?.simulated, problems })
 
   async function onSwap() {
-    setResult(undefined)
-    try {
+    await run(async () => {
       setBusy('Nouvelle cotation…')
       const fresh = await getQuote(quoteReq!)
       if (fresh.simulated) throw new Error('Plus de devis réel disponible')
@@ -243,11 +234,7 @@ export function SwapCollateralPanel({
       const details = outcome && outcomeLines(outcome, [C.token, D.token, T!.token], { supplied: expected })
       setResult({ ok: true, text: renew ? `PT renouvelé : ${T!.token.symbol}.` : `Collatéral changé : ${T!.token.symbol}.`, hash, to: T!.token, details })
       onDone()
-    } catch (e) {
-      setResult({ ok: false, text: explainError(e) })
-    } finally {
-      setBusy(undefined)
-    }
+    })
   }
 
   const needsPermit = user.aTokenAllowance < aTokensToApprove({ full, fromAmount })

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { type Hash } from 'viem'
 import { AGGREGATORS } from '../../../config'
 import { collateralInLoan, dropToLiquidation, morphoHf, morphoLeverage, repayForMorphoLeverage } from '../../../protocols/morpho/markets'
 import {
@@ -17,7 +16,6 @@ import { getQuote, quoteLabel } from '../../../services/quotes/quotes'
 import { daysToMaturity, isExpired } from '../../../protocols/pendle/pt'
 import { collateralToSellForRepay, roundSignificant, toBase } from '../../../domain/math'
 import { swapLoss, swapLossProblem } from '../../../domain/economics'
-import { explainError } from '../../../chain/tx'
 import { fmtBps, fmtAmount, fmtDate, fmtHf, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
 import { isCorrelated } from '../../../domain/pairs'
 import { hfThresholds, hfTone } from '../../../ui/tone'
@@ -38,6 +36,8 @@ import {
 } from '../../../ui/primitives'
 import type { MorphoCtx } from './MorphoView'
 import { SLIPPAGES, pairKind, slippageNote, useSlippage } from '../../../domain/slippage'
+import { useTxAction } from '../shared/useTxAction'
+import { signBlocker } from '../shared/signing'
 
 export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
   const { net, market: M, state, pt, sides, account } = ctx
@@ -54,8 +54,7 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
     setSlippage,
     auto: autoSlip,
   } = useSlippage(pairKind({ symbol: C.symbol, usd: M.collateralUsd }, { symbol: L.symbol, usd: M.loanUsd }, { pt: !!pt }))
-  const [busy, setBusy] = useState<string>()
-  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[] }>()
+  const { busy, setBusy, result, setResult, run } = useTxAction()
 
   const ptExpired = !!pt && isExpired(pt)
   const currentLev = coll > 0n ? morphoLeverage(coll, debt, state.price) : 1
@@ -180,19 +179,10 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
   })()
   const stale = quote.isFetching || target !== debouncedTarget
   const canSign = !!executor && !!account && (toSell === 0n || (!!q && !q.simulated)) && !!preview && problems.length === 0 && !stale && !busy
-  const disabledReason = !executor
-    ? 'Contrat pas encore déployé'
-    : !account
-      ? 'Connecter le portefeuille'
-      : q?.simulated
-        ? 'Devis simulé'
-        : problems.length
-          ? 'Bloqué : voir le bandeau rouge'
-          : undefined
+  const disabledReason = signBlocker({ executor, account, simulated: q?.simulated, problems })
 
   async function onClose() {
-    setResult(undefined)
-    try {
+    await run(async () => {
       let fresh = q
       if (quoteReq) {
         setBusy('Nouvelle cotation…')
@@ -205,11 +195,7 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
       const outcome = await readMorphoOutcome(net.chain.id, hash, p.executor, p.user)
       setResult({ ok: true, text: full ? 'Position fermée.' : 'Position réduite.', hash, details: outcome && morphoOutcomeLines(outcome, C, L) })
       ctx.onDone()
-    } catch (e) {
-      setResult({ ok: false, text: explainError(e) })
-    } finally {
-      setBusy(undefined)
-    }
+    })
   }
 
   const authorized = !!user?.authorized

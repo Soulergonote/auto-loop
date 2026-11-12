@@ -10,7 +10,6 @@ import { snapshotQuery } from '../../../protocols/aave/snapshot'
 import { useQuote } from '../../../services/quotes/useQuote'
 import { getQuote, type Quote } from '../../../services/quotes/quotes'
 import { extraDebtForTarget, pairPosition, positionLeverage, project, roundSignificant, toBase, type Side } from '../../../domain/math'
-import { explainError } from '../../../chain/tx'
 import {
   claimRewards,
   rewardAction,
@@ -28,6 +27,7 @@ import { hfThresholds, hfTone } from '../../../ui/tone'
 import { fmtBps, fmtAmount, fmtDollars, fmtHf, fmtPct, fmtX } from '../../../ui/format'
 import { Banners, Card, Fold, QuoteCompare, LoopLayout, Notice, Segmented, Skel, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
 import { SLIPPAGES, slippageNote, useSlippage } from '../../../domain/slippage'
+import { useTxAction } from '../shared/useTxAction'
 
 /** same choices and default as the open and close panels (0,01 %, Azerty's choice) */
 
@@ -81,8 +81,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
   const [frozen, setFrozen] = useState<Planned[]>()
   const [done, setDone] = useState<string[]>([])
   const [capital, setCapital] = useState(0n)
-  const [busy, setBusy] = useState<string>()
-  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash }>()
+  const { busy, setBusy, result, setResult, run } = useTxAction<{ ok: boolean; text: string; hash?: Hash }>()
   // leverage to return to: the position's before the rewards are added (frozen at the claim in the step flow,
   // which can deposit collateral aTokens)
   const liveLev = (() => {
@@ -282,8 +281,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
 
   async function runBatch() {
     if (!account) return
-    setResult(undefined)
-    try {
+    await run(async () => {
       const { calls, capital: cap } = await freshBatch()
       const hash = await sendBatch(chainId, account, calls, setBusy)
       setResult({
@@ -293,11 +291,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
       })
       refetch()
       onDone()
-    } catch (e) {
-      setResult({ ok: false, text: explainError(e) })
-    } finally {
-      setBusy(undefined)
-    }
+    })
   }
 
   // step by step: the current step's quote
@@ -306,9 +300,8 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
 
   async function runStep() {
     if (!account) return
-    setResult(undefined)
     const step = current
-    try {
+    await run(async () => {
       if (step.id === 'claim') {
         const rewards = plan.map((p) => p.reward)
         const hash = await claimRewards(chainId, account, rewards, setBusy)
@@ -335,11 +328,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
         return
       }
       setDone((d) => [...d, step.id])
-    } catch (e) {
-      setResult({ ok: false, text: explainError(e) })
-    } finally {
-      setBusy(undefined)
-    }
+    })
   }
 
   // collateral the step flow brings, at oracle prices for what is still to swap
