@@ -18,6 +18,11 @@ const kyberAbi = parseAbi([
   `function swapSimpleMode(address caller, ${kyberDesc} desc, bytes executorData, bytes clientData)`,
 ])
 
+/** 1inch AggregationRouterV6 generic swap: dstReceiver 0 means msg.sender. */
+const oneinchAbi = parseAbi([
+  'function swap(address executor, (address srcToken, address dstToken, address srcReceiver, address dstReceiver, uint256 amount, uint256 minReturnAmount, uint256 flags) desc, bytes data)',
+])
+
 export type SwapTerms = {
   sell: Address
   buy: Address
@@ -29,7 +34,7 @@ export type SwapTerms = {
   fee: bigint
 }
 
-/** The terms encoded in a Velora or KyberSwap calldata; undefined for any other method (refused by the caller). */
+/** The terms encoded in a Velora, KyberSwap or 1inch calldata; undefined for any other method (refused by the caller). */
 export function swapTerms(aggregator: string, data: Hex, sender: Address): SwapTerms | undefined {
   try {
     if (aggregator === 'velora') {
@@ -56,6 +61,20 @@ export function swapTerms(aggregator: string, data: Hex, sender: Address): SwapT
         minOut: d.minReturnAmount,
         recipient: getAddress(d.dstReceiver),
         fee: d.feeAmounts.reduce((a, b) => a + b, 0n),
+      }
+    }
+    if (aggregator === 'oneinch') {
+      const { args } = decodeFunctionData({ abi: oneinchAbi, data })
+      const d = args[1]
+      return {
+        sell: getAddress(d.srcToken),
+        buy: getAddress(d.dstToken),
+        amount: d.amount,
+        pulled: d.amount,
+        minOut: d.minReturnAmount,
+        recipient: d.dstReceiver === zeroAddress ? getAddress(sender) : getAddress(d.dstReceiver),
+        // no integrator fee field in the call: a fee would only show as a lower dstAmount, and none is asked
+        fee: 0n,
       }
     }
   } catch {

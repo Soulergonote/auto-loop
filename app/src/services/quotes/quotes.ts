@@ -4,16 +4,20 @@ import {
   KYBER_CHAIN_SLUGS,
   KYBER_CLIENT_ID,
   KYBER_INCLUDED_SOURCES,
+  ONEINCH_API_KEY,
   QUOTE_MODE,
   VELORA_EXCLUDE_DEXS,
   VELORA_INCLUDE_DEXS,
   VELORA_PARTNER,
   aggregatorsFor,
   pendleChain,
+  routerOf,
   type AggregatorChoice,
   type AggregatorId,
   type Token,
 } from '../../config'
+import { getPublicClient } from '@wagmi/core'
+import { wagmiConfig } from '../../chain/wagmi'
 import { applySlippage, oracleSwapOut, type Side } from '../../domain/math'
 import {
   PENDLE_ROUTER_ADDRESS,
@@ -111,10 +115,50 @@ export async function getQuote(req: QuoteRequest, signal?: AbortSignal): Promise
   return singleQuote(req as SingleRequest, signal)
 }
 
+const allowedCache = new Map<string, Promise<boolean>>()
+
+/**
+ * Whether the taker can call this aggregator's router. Only an optional aggregator (1inch) is checked: an executor
+ * deployed before it was added does not whitelist it. A taker without code (the user's wallet, or the fork-test
+ * address of a contract still to deploy, which will whitelist it) can call any router.
+ */
+function takerAllows(chainId: number, taker: Address, id: AggregatorId): Promise<boolean> {
+  if (!AGGREGATORS[id].optional) return Promise.resolve(true)
+  const router = routerOf(id, chainId)
+  const key = `${chainId}:${taker.toLowerCase()}:${router}`
+  let p = allowedCache.get(key)
+  if (!p) {
+    p = (async () => {
+      const client = getPublicClient(wagmiConfig, { chainId })
+      if (!client) return false
+      const code = await client.getCode({ address: taker })
+      if (!code || code === '0x') return true
+      return client.readContract({
+        address: taker,
+        abi: [{ type: 'function', name: 'isRouterAllowed', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'bool' }] }],
+        functionName: 'isRouterAllowed',
+        args: [router],
+      })
+    })().catch(() => {
+      allowedCache.delete(key)
+      return false
+    })
+    allowedCache.set(key, p)
+  }
+  return p
+}
+
+/** The aggregators that can quote this request: they cover the chain and the executor may call their router. */
+async function usableAggregators(req: QuoteRequest): Promise<AggregatorId[]> {
+  const ids = aggregatorsFor(req.chainId)
+  const ok = await Promise.all(ids.map((id) => takerAllows(req.chainId, req.taker, id)))
+  return ids.filter((_, i) => ok[i])
+}
+
 /** A live quote between two non-PT tokens, never simulated: the leg of a route has no oracle price of its own. */
 async function liveLeg(req: QuoteRequest, signal?: AbortSignal): Promise<Quote> {
   if (req.aggregator !== 'best') return liveQuote(req as SingleRequest, signal)
-  const ids = aggregatorsFor(req.chainId)
+  const ids = await usableAggregators(req)
   const settled = await Promise.allSettled(ids.map((aggregator) => liveQuote({ ...req, aggregator }, signal)))
   const quotes = settled.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
   if (quotes.length) return quotes.reduce((a, b) => (b.buyAmount > a.buyAmount ? b : a))
@@ -212,7 +256,7 @@ async function pendleRoute(req: QuoteRequest, ps: PtInfo | undefined, pb: PtInfo
 
 /** Asks every aggregator that quotes on the chain in parallel and keeps the one that gives the most. */
 async function bestQuote(req: QuoteRequest, signal?: AbortSignal): Promise<Quote> {
-  const ids = aggregatorsFor(req.chainId)
+  const ids = QUOTE_MODE === 'mock' ? aggregatorsFor(req.chainId) : await usableAggregators(req)
   if (ids.length === 0) throw new QuoteError('aucun agrégateur ne cote sur ce réseau')
   if (QUOTE_MODE === 'mock') return simulatedQuote({ ...req, aggregator: ids[0] })
   const settled = await Promise.allSettled(ids.map((aggregator) => liveQuote({ ...req, aggregator }, signal)))
@@ -242,7 +286,7 @@ export function simulatedQuote(req: SingleRequest, fallbackReason?: string): Quo
   const buyAmount = oracleSwapOut(req.sellAmount, req.oracle.sell, req.oracle.buy, SIMULATED_COST_BPS)
   return {
     aggregator: req.aggregator,
-    router: AGGREGATORS[req.aggregator].router,
+    router: routerOf(req.aggregator, req.chainId),
     data: '0x',
     sellAmount: req.sellAmount,
     buyAmount,
@@ -254,8 +298,11 @@ export function simulatedQuote(req: SingleRequest, fallbackReason?: string): Quo
 }
 
 async function liveQuote(req: SingleRequest, signal?: AbortSignal): Promise<Quote> {
+  if (!(await takerAllows(req.chainId, req.taker, req.aggregator))) {
+    throw new QuoteError(`${AGGREGATORS[req.aggregator].label} n’est pas autorisé dans ce contrat (déployé avant son ajout)`)
+  }
   const raw = await LIVE[req.aggregator](req, signal)
-  const expected = AGGREGATORS[req.aggregator].router
+  const expected = routerOf(req.aggregator, req.chainId)
   if (!isAddress(raw.to) || getAddress(raw.to) !== expected) {
     throw new QuoteError(`${AGGREGATORS[req.aggregator].label} renvoie un routeur inattendu (${raw.to})`)
   }
@@ -278,6 +325,18 @@ async function liveQuote(req: SingleRequest, signal?: AbortSignal): Promise<Quot
 /** Velora's public API allows any origin (CORS *), so the browser calls it directly: no server needed. */
 const VELORA_API = 'https://api.paraswap.io'
 const KYBER_API = 'https://aggregator-api.kyberswap.com'
+/** 1inch's API also allows any origin; it needs the key, and the free plan takes about one request per second. */
+const ONEINCH_API = 'https://api.1inch.dev/swap/v6.0'
+/** AggregationRouterV6 swap(executor, desc, data): the generic method, the one whose terms can be read back. */
+const ONEINCH_SWAP = '0x07ed2379'
+
+let oneinchSlot = Promise.resolve()
+/** Spaces the 1inch calls 1.1 s apart (free plan: 1 request/s, more answers 429). */
+function oneinchTurn(): Promise<void> {
+  const turn = oneinchSlot
+  oneinchSlot = turn.then(() => new Promise((r) => setTimeout(r, 1100)))
+  return turn
+}
 
 type RawQuote = { to: string; data: string; value?: string; buyAmount: string }
 
@@ -343,6 +402,28 @@ const LIVE: Record<AggregatorId, (req: QuoteRequest, signal?: AbortSignal) => Pr
     const tx = built?.data
     if (!tx?.data) throw new QuoteError(`KyberSwap : construction refusée${built?.message ? ` (${built.message})` : ''}`)
     return { to: tx.routerAddress, data: tx.data, value: tx.transactionValue, buyAmount: tx.amountOut ?? summary.amountOut }
+  },
+
+  // 1inch Swap API v6.0, one call. No fee unless the integrator asks for one (no fee/referrer sent). disableEstimate:
+  // the executor does not hold the tokens yet when quoting.
+  async oneinch(req, signal) {
+    if (!ONEINCH_API_KEY) throw new QuoteError('1inch : pas de clé API dans ce build')
+    const q = new URLSearchParams({
+      src: req.sell.address,
+      dst: req.buy.address,
+      amount: req.sellAmount.toString(),
+      from: req.taker,
+      origin: req.taker,
+      slippage: (Number(req.slippageBps) / 100).toString(),
+      disableEstimate: 'true',
+      allowPartialFill: 'false',
+    })
+    await oneinchTurn()
+    if (signal?.aborted) throw new QuoteError('annulé')
+    const body = await fetchJson(`${ONEINCH_API}/${req.chainId}/swap?${q}`, { headers: { Authorization: `Bearer ${ONEINCH_API_KEY}` }, signal })
+    if (!body?.tx?.data) throw new QuoteError('1inch : pas de route')
+    if (String(body.tx.data).slice(0, 10).toLowerCase() !== ONEINCH_SWAP) throw new QuoteError('1inch : méthode de swap inattendue')
+    return { to: body.tx.to, data: body.tx.data, value: body.tx.value, buyAmount: body.dstAmount }
   },
 
   // Velora (ParaSwap) v6.2: price route, then transaction build with ignoreChecks (taker has no balance yet).

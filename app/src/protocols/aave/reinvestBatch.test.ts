@@ -53,6 +53,20 @@ describe('swapTerms', () => {
       fee: 0n,
     })
   })
+  it('reads 1inch calldata (generic swap, output to the sender)', () => {
+    const t = swapTerms('oneinch', f.oneinch as Hex, USER)!
+    expect({ ...t, minOut: undefined }).toEqual({
+      sell: MORPHO.address,
+      buy: WETH.address,
+      amount: AMOUNT,
+      pulled: AMOUNT,
+      minOut: undefined,
+      recipient: USER,
+      fee: 0n,
+    })
+    // 1 % slippage on the 0.04571… WETH quoted
+    expect(t.minOut).toBe((45719292387524939n * 99n) / 100n)
+  })
   it('refuses an unknown method', () => {
     expect(swapTerms('velora', '0x12345678', USER)).toBeUndefined()
     expect(walletSwapProblem('velora', '0x095ea7b3' as Hex, { sell: MORPHO.address, buy: WETH.address, amount: AMOUNT, user: USER, minOut: 1n })).toBe(

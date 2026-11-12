@@ -1,6 +1,6 @@
 # Auto-loop : interface
 
-Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 ou Morpho Blue (voir plus bas) en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Plasma, Linea, Sonic, Monad et MegaETH, via le contrat `LeverageExecutorV2` (`../contracts` ; un contrat v1 déjà déployé reste reconnu et utilisé). On choisit la paire collatéral / dette et le levier ; le swap passe par Velora ou KyberSwap selon la chaîne (0x et 1inch sont codés mais pas proposés) ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
+Petite application web pour ouvrir ou fermer une position à levier sur Aave v3 ou Morpho Blue (voir plus bas) en **une transaction**, sur Ethereum (marchés Core et Prime), Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Plasma, Linea, Sonic, Monad et MegaETH, via le contrat `LeverageExecutorV2` (`../contracts` ; un contrat v1 déjà déployé reste reconnu et utilisé). On choisit la paire collatéral / dette et le levier ; le swap passe par Velora, KyberSwap ou 1inch selon la chaîne ; l’interface calcule l’emprunt, demande un devis avec le contrat comme taker, affiche le health factor projeté, puis fait signer.
 
 Stack : Vite + React + TypeScript, wagmi 2 / viem 2.
 
@@ -44,6 +44,8 @@ Les règles d’interface (agencement, couleurs, typographie, composants, ton, f
 ## Marchés
 
 Liste dans `src/config/aave.ts` (`MARKETS`), adresses des pools tirées de `@bgd-labs/aave-address-book`. Les actifs de chaque marché sont lus sur la chaîne (`getReservesList`), donc un nouvel actif listé par Aave apparaît sans changer le code. Chaque agrégateur n'est proposé que sur ses chaînes (`chains` dans `AGGREGATORS`) : Velora ne couvre ni Mantle, ni Plasma, ni Linea, ni Monad, ni MegaETH, ni HyperEVM, KyberSwap prend alors le relais. MegaETH (ajouté le 11/11/2026) : pool de l'address book Aave, RPC injoignable depuis l'environnement de dev, donc non relu sur la chaîne avant mise en ligne. KyberSwap est appelé sans clé (en-tête `x-client-id: auto-loop`) ; un devis qui contient des frais (`extraFee`) est refusé.
+
+**1inch** (remis le 12/11/2026) : Swap API v6.0, sur tous les réseaux de l'app sauf Plasma et MegaETH (l'API y répond 404). Routeur AggregationRouterV6, à une autre adresse sur HyperEVM et Arc (lue sur `approve/spender`, code vérifié sur chaque chaîne). L'API demande une clé : `VITE_ONEINCH_API_KEY`, injectée au build depuis le secret GitHub `ONEINCH_API_KEY` du dépôt. Elle est donc lisible dans le site publié : c'est une clé gratuite dont le seul risque est le quota (la régénérer sur le portail 1inch si elle est abusée). Sans clé, 1inch n'est pas proposé. Les appels sont espacés de 1,1 s (offre gratuite : 1 requête/s). Aucun frais demandé ; seule la méthode générique `swap` est acceptée, et son calldata est relu pour les échanges depuis le portefeuille. Les nouveaux contrats autorisent le routeur 1inch ; un contrat déployé avant reste valide, et l'app ne cote simplement pas 1inch pour lui (lecture de `isRouterAllowed`). Ajouter 1inch a changé l'adresse CREATE2 des contrats partagés sur ses réseaux.
 
 ## Rewards Merkl
 
@@ -105,7 +107,7 @@ Onglet « Réinvestir » de la Boucle (et bouton « Réinvestir » d'une positio
 3. « Augmenter la position » : l'onglet Ouvrir / augmenter s'ouvre avec ce capital et le levier qu'avait la position.
 
 **En un clic** (portefeuille qui envoie un lot atomique, EIP-5792 `wallet_sendCalls` avec `forceAtomic` : MetaMask en compte intelligent, Ambire ; position à reprendre sur la paire ; eMode du compte compatible) : toutes les étapes partent en une confirmation, toutes passent ou aucune (`src/protocols/aave/batch.ts`). Garde-fous :
-- le calldata de chaque échange est relu avant signature (`src/services/quotes/swapCalldata.ts`, Velora et KyberSwap) : mêmes tokens, montant vendu exact (et jamais plus tiré par le routeur), sortie payée au portefeuille, aucun frais, minimum au moins celui de l'app ; sinon le devis est refusé. Ce contrôle vaut aussi pour le mode étape par étape ;
+- le calldata de chaque échange est relu avant signature (`src/services/quotes/swapCalldata.ts`, Velora, KyberSwap et 1inch) : mêmes tokens, montant vendu exact (et jamais plus tiré par le routeur), sortie payée au portefeuille, aucun frais, minimum au moins celui de l'app ; sinon le devis est refusé. Ce contrôle vaut aussi pour le mode étape par étape ;
 - le capital remis au contrat est la somme de ces minimums : si un échange rend moins, le contrat ne peut pas prendre le capital et tout le lot est annulé ;
 - chaque autorisation (routeur, contrat, délégation de crédit) est du montant exact et revient à sa valeur d'avant juste après usage (0 le plus souvent) ; pour les tokens type USDT, passage par 0 ;
 - devis, autorisations et levier recalculés au clic ; LTV projetée au pire cas vérifiée ; simulation du lot (`eth_simulateV1`) quand le RPC la permet, le portefeuille simule de son côté ;
@@ -146,7 +148,7 @@ Avant chaque signature : nouvelle cotation (un devis expire en quelques blocs), 
 
 ## Velora
 
-Seul agrégateur actif pour l’instant. Chaque appel (`/prices` et `/transactions`) passe `partner=auto-loop` : sans ce paramètre, l’API publique ajoute 1 bp de frais « anon ». L’interface refuse un devis si `partnerFee` n’est pas nul ou si le calldata Augustus v6.2 encode des frais (champ `partnerAndFee`, vérifié sur de vrais devis : 1 bp sans `partner`, 0 avec). Le montant affiché est `destAmountAfterFee` quand Velora le fournit.
+Chaque appel (`/prices` et `/transactions`) passe `partner=auto-loop` : sans ce paramètre, l’API publique ajoute 1 bp de frais « anon ». L’interface refuse un devis si `partnerFee` n’est pas nul ou si le calldata Augustus v6.2 encode des frais (champ `partnerAndFee`, vérifié sur de vrais devis : 1 bp sans `partner`, 0 avec). Le montant affiché est `destAmountAfterFee` quand Velora le fournit.
 
 ## Test de bout en bout sur fork de Base
 
@@ -194,7 +196,7 @@ Chaque dossier de `src/` a un rôle unique ; les dépendances vont de haut en ba
 | `protocols/aave/` | Lecture du marché (`useMarket.ts`, `snapshot.ts`, `rateHistory.ts`), plans et envoi des transactions (`execute.ts`, `batch.ts`, `signatures.ts`, `swapCollateral.ts`), réinvestissement Merkl (`reinvest*.ts`). |
 | `protocols/morpho/` | Marchés (API vérifiée on-chain, `markets.ts`), appels du contrat Morpho (`execute.ts`). |
 | `protocols/pendle/` | PT : marchés, devis RouterStatic, calldata du routeur, échéances (`pt.ts`). |
-| `services/` | Données tierces : devis Velora / KyberSwap (`quotes/`), Merkl, rendement propre des tokens (`yield/`). |
+| `services/` | Données tierces : devis Velora / KyberSwap / 1inch (`quotes/`), Merkl, rendement propre des tokens (`yield/`). |
 | `domain/` | Calculs purs, sans réseau : levier et health factor (`math.ts`), coûts et seuil de rentabilité (`economics.ts`), courbes de taux (`irm.ts`), slippage, contrôle de sortie, familles d'actifs (`pairs.ts`). |
 | `chain/` | Portefeuille et contrats : ABI, config wagmi, déploiement CREATE2, lots EIP-5792 (`batch.ts`), erreurs lisibles (`tx.ts`), soldes du portefeuille, lecture du résultat d'une transaction. |
 | `ui/` | Composants de la charte (`primitives.tsx`, `Picker`, bouton de résumé `gate.tsx`), formats (`format.ts`) et couleurs (`tone.ts`). |

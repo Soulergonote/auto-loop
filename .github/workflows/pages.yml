@@ -33,6 +33,9 @@ jobs:
       - run: npm run format:check
       - run: npm test
       - run: npm run build
+        env:
+          # public by design: it ends up in the bundle (free key, only its quota at stake)
+          VITE_ONEINCH_API_KEY: ${{ secrets.ONEINCH_API_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: app/dist

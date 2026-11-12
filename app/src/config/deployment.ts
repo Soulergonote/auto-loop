@@ -1,5 +1,5 @@
 import { getAddress, type Address } from 'viem'
-import { AGGREGATORS, aggregatorsFor, type AggregatorId } from './aggregators'
+import { AGGREGATORS, routerOf, supportsChain, type AggregatorId } from './aggregators'
 import { MORPHO_BLUE } from './morpho'
 import { PENDLE_ROUTER, pendleChain } from './pendle'
 
@@ -9,10 +9,15 @@ export function executorLenders(chainId: number): { kind: number; lender: Addres
   return m ? [{ kind: 1, lender: getAddress(m) }] : []
 }
 
-/** Routers a new executor whitelists on a chain (fixed for good): the aggregators that quote there, and Pendle's where PT loops are offered. */
+/**
+ * Routers a new executor whitelists on a chain (fixed for good): every aggregator that quotes there, whether or not
+ * this build can quote with it (the list, hence the shared contract's address, must not depend on an API key), and
+ * Pendle's where PT loops are offered.
+ */
 export function executorRouters(chainId: number): { id: AggregatorId | 'pendle'; label: string; router: Address }[] {
   const seen = new Set<string>()
-  const aggregators = aggregatorsFor(chainId).map((id) => ({ id, label: AGGREGATORS[id].label, router: getAddress(AGGREGATORS[id].router) }))
+  const ids = (Object.keys(AGGREGATORS) as AggregatorId[]).filter((id) => supportsChain(id, chainId))
+  const aggregators = ids.map((id) => ({ id, label: AGGREGATORS[id].label, router: routerOf(id, chainId) }))
   const pendle = pendleChain(chainId) ? [{ id: 'pendle' as const, label: 'Pendle', router: getAddress(PENDLE_ROUTER) }] : []
   return [...aggregators, ...pendle].filter((r) => !seen.has(r.router) && !!seen.add(r.router))
 }

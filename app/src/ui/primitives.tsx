@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type ReactNode } from 'react'
-import { AGGREGATORS, supportsChain, type AggregatorChoice, type AggregatorId, type Market } from '../config'
+import { AGGREGATORS, aggregatorsFor, type AggregatorChoice, type Market } from '../config'
 import type { Quote } from '../services/quotes/quotes'
 import { fmtAmount, fmtBps, fmtDollars, fmtX } from './format'
 import { extraWorstCaseUsd, isSlippageFailure, nextSlippage, type SlippageBps } from '../domain/slippage'
@@ -265,7 +265,7 @@ export function useSlow(pending: boolean, ms = 15_000): boolean {
 
 /** Aggregator choice: "Meilleur prix" plus the aggregators that quote on this chain, nothing else. */
 export function AggregatorPicker({ chainId, value, onChange }: { chainId: number; value: AggregatorChoice; onChange: (a: AggregatorChoice) => void }) {
-  const usable = (Object.keys(AGGREGATORS) as AggregatorId[]).filter((id) => supportsChain(id, chainId))
+  const usable = aggregatorsFor(chainId)
   return (
     <div className="field">
       <span>Agrégateur</span>

@@ -2,7 +2,7 @@
 
 Deux versions cohabitent : `LeverageExecutorV2` (v2, voir [la section v2](#v2--leverageexecutorv2)), que l'app déploie depuis le 08/11/2026, et `LeverageExecutor` (v1, déployée par Azerty sur Plasma), que l'app reconnaît et utilise toujours là où elle est déjà déployée.
 
-`LeverageExecutor` ouvre et ferme une position à levier sur Aave v3 en **une seule transaction**, avec un swap via un agrégateur (Velora, KyberSwap). Conception : voir `../docs/architecture.md`.
+`LeverageExecutor` ouvre et ferme une position à levier sur Aave v3 en **une seule transaction**, avec un swap via un agrégateur (Velora, KyberSwap, 1inch). Conception : voir `../docs/architecture.md`.
 
 ## Contenu
 

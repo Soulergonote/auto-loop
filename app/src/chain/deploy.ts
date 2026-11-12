@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { wagmiConfig } from './wagmi'
 import { executorAbi, executorAbiV1, morphoExecutorAbi } from './abi'
 import { EXECUTOR_BYTECODE_MORPHO, EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../generated/executorBytecode'
-import { executorLenders, executorRouters, type Market, type MorphoNet } from '../config'
+import { AGGREGATORS, executorLenders, executorRouters, type Market, type MorphoNet } from '../config'
 
 export type ExecutorVersion = 1 | 2
 /** What the code check found: the contract version, and whether Pendle's router is whitelisted (PT loops). */
@@ -24,7 +24,8 @@ function deployDataV1(market: Market) {
 /**
  * Checks that `address` runs exactly the audited-in-tests LeverageExecutor for this market, and says which version:
  * its code must equal what the constructor produces for this Aave pool (dry-run of the deployment, same compiler
- * output as the tests), and every aggregator router (and, for v2, the Morpho lender) of the market must be registered.
+ * output as the tests), and every aggregator router (and, for v2, the Morpho lender) of the market must be registered,
+ * except an optional one (1inch, added later): an older executor lacks it and is just never quoted through it.
  * Code equality also proves there is no owner or admin function. A v1 executor (deployed before v2) is still accepted:
  * positions live in the user's Aave account, so either version manages them. Pendle's router is checked on its own:
  * an executor deployed before PT loops lacks it and stays usable for every other pair.
@@ -51,7 +52,7 @@ export async function verifyExecutor(market: Market, address: Address): Promise<
   for (const r of executorRouters(market.chain.id)) {
     const ok = await client.readContract({ address, abi, functionName: 'isRouterAllowed', args: [r.router] })
     if (r.id === 'pendle') pendle = ok && version === 2
-    else if (!ok) throw new Error(`le routeur ${r.label} n’est pas autorisé dans ce contrat`)
+    else if (!ok && !AGGREGATORS[r.id].optional) throw new Error(`le routeur ${r.label} n’est pas autorisé dans ce contrat`)
   }
   if (version === 2)
     for (const l of executorLenders(market.chain.id)) {
@@ -155,7 +156,7 @@ export async function verifyMorphoExecutor(net: MorphoNet, address: Address): Pr
   if (!expected?.data || expected.data.toLowerCase() !== code.toLowerCase()) throw new Error('le code de ce contrat n’est pas celui d’Auto-loop pour Morpho')
   for (const r of executorRouters(net.chain.id)) {
     const ok = await client.readContract({ address, abi: morphoExecutorAbi, functionName: 'isRouterAllowed', args: [r.router] })
-    if (!ok) throw new Error(`le routeur ${r.label} n’est pas autorisé dans ce contrat`)
+    if (!ok && (r.id === 'pendle' || !AGGREGATORS[r.id].optional)) throw new Error(`le routeur ${r.label} n’est pas autorisé dans ce contrat`)
   }
   return true
 }
