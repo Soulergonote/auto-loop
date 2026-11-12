@@ -92,7 +92,8 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
   const [claimedLev, setClaimedLev] = useState<number>()
   const targetLev = frozen ? claimedLev : liveLev
 
-  const all = snapshot.data?.reserves ?? []
+  const snapReserves = snapshot.data?.reserves
+  const all = useMemo(() => snapReserves ?? [], [snapReserves])
   const plan: Planned[] = frozen ?? claimables.map((reward) => ({ reward, action: rewardAction(reward, all, C.token.address) }))
   const steps = useMemo((): Step[] => {
     const out: Step[] = [{ id: 'claim' }]

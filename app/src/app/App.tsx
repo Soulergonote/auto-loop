@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAccount } from 'wagmi'
 import { type Address } from 'viem'
 import {
@@ -119,13 +119,15 @@ export function App() {
           : { ...declared, executor: undefined },
     [declared, check.data],
   )
-  function setLocalExecutor(id: string, a?: Address) {
-    const next = { ...localExecutors }
-    if (a) next[id] = a
-    else delete next[id]
-    setLocalExecutors(next)
-    storeExecutors(next)
-  }
+  const setLocalExecutor = useCallback((id: string, a?: Address) => {
+    setLocalExecutors((prev) => {
+      const next = { ...prev }
+      if (a) next[id] = a
+      else delete next[id]
+      storeExecutors(next)
+      return next
+    })
+  }, [])
   // Morpho Blue: a network of the selector whose id starts with morpho-; the executor is checked the same way
   const morpho = isMorphoId(marketId)
   const declaredMorpho = useMemo(() => getMorphoNet(marketId, localExecutors), [marketId, localExecutors])
@@ -140,12 +142,13 @@ export function App() {
   useEffect(() => {
     if (!morpho && !declared.executor && sharedAave.data) setLocalExecutor(declared.id, sharedAave.data)
     if (morpho && !declaredMorpho.executor && sharedMorpho.data) setLocalExecutor(declaredMorpho.id, sharedMorpho.data)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [morpho, declared.id, declared.executor, declaredMorpho.id, declaredMorpho.executor, sharedAave.data, sharedMorpho.data])
+  }, [morpho, declared.id, declared.executor, declaredMorpho.id, declaredMorpho.executor, sharedAave.data, sharedMorpho.data, setLocalExecutor])
   const isShared = (m: Market) => !!m.executor && m.executor === sharedExecutorAddress(m)
   const isSharedMorpho = !!morphoNet.executor && morphoNet.executor === sharedMorphoExecutorAddress(morphoNet)
 
   // what the summary's single button walks through before the screen's own action (charte v2, rule 2)
+  const { isPending: checkPending, isError: checkError } = check
+  const { isPending: morphoCheckPending, isError: morphoCheckError } = morphoCheck
   const gate = useMemo<Gate | undefined>(() => {
     if (DEMO) return undefined
     const statusOf = (executor: Address | undefined, c: { isPending: boolean; isError: boolean }): Gate['executor'] =>
@@ -154,18 +157,21 @@ export function App() {
       return {
         chain: declaredMorpho.chain,
         label: declaredMorpho.label,
-        executor: executorRouters(declaredMorpho.chain.id).length === 0 ? 'none' : statusOf(declaredMorpho.executor, morphoCheck),
+        executor:
+          executorRouters(declaredMorpho.chain.id).length === 0
+            ? 'none'
+            : statusOf(declaredMorpho.executor, { isPending: morphoCheckPending, isError: morphoCheckError }),
         deploy: (onStep) => deployMorphoExecutor(declaredMorpho, onStep),
         onDeployed: (a) => setLocalExecutor(declaredMorpho.id, a),
       }
     return {
       chain: declared.chain,
       label: declared.label,
-      executor: executorRouters(declared.chain.id).length === 0 ? 'none' : statusOf(declared.executor, check),
+      executor: executorRouters(declared.chain.id).length === 0 ? 'none' : statusOf(declared.executor, { isPending: checkPending, isError: checkError }),
       deploy: (onStep) => deployExecutor(declared, onStep),
       onDeployed: (a) => setLocalExecutor(declared.id, a),
     }
-  }, [morpho, declared, declaredMorpho, check.isPending, check.isError, morphoCheck.isPending, morphoCheck.isError, localExecutors])
+  }, [morpho, declared, declaredMorpho, checkPending, checkError, morphoCheckPending, morphoCheckError, setLocalExecutor])
   const [morphoSeed, setMorphoSeed] = useState<MorphoSeed>()
   function openMorpho(m: MorphoMarket, tab?: MorphoTab, leverage?: number) {
     const net = MORPHO_NETWORKS.find((n) => n.chain.id === m.chainId)
@@ -256,7 +262,8 @@ export function App() {
 
   // nothing picked on this network yet: the last pair opened there in this browser, else the scanner's best
   // correlated pair (positive yield, room to loop) at the scanner's target health factor, else WETH / USDC
-  const remembered = useMemo(() => (morpho ? undefined : savedPair(market.id)), [morpho, market.id, picked])
+  // read at every render: a pair just picked is saved, and must count at once
+  const remembered = morpho ? undefined : savedPair(market.id)
   const wantBest = !morpho && !DEMO && view === 'loop' && !remembered && picked?.market !== market.id && !linked.current
   const bestSnapshot = useQuery({ ...snapshotQuery(market), enabled: wantBest })
   const bestCampaigns = useQuery({ ...merklQuery(market.chain.id), enabled: wantBest })

@@ -50,20 +50,25 @@ export function Picker({
   const grid = { gridTemplateColumns: `minmax(0, 1fr)${cols ? ` repeat(${cols}, minmax(72px, auto))` : ''}` }
   const searchable = options.length > 6
 
+  // reset on each opening only
+  const toggle = () => {
+    if (!open) {
+      setQuery('')
+      setActive(
+        Math.max(
+          0,
+          options.findIndex((o) => o.value === value),
+        ),
+      )
+    }
+    setOpen(!open)
+  }
   useEffect(() => {
     if (!open) return
-    setQuery('')
-    setActive(
-      Math.max(
-        0,
-        options.findIndex((o) => o.value === value),
-      ),
-    )
     search.current?.focus()
     const close = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false)
     document.addEventListener('mousedown', close)
     return () => document.removeEventListener('mousedown', close)
-    // reset on each opening only
   }, [open])
 
   const pick = (o: PickerOption | undefined) => {
@@ -85,7 +90,7 @@ export function Picker({
   return (
     <div className="field picker" ref={root} onKeyDown={open ? onKey : undefined}>
       <span id={`${id}-l`}>{label}</span>
-      <button type="button" className="picker-btn" aria-haspopup="listbox" aria-expanded={open} aria-labelledby={`${id}-l`} onClick={() => setOpen(!open)}>
+      <button type="button" className="picker-btn" aria-haspopup="listbox" aria-expanded={open} aria-labelledby={`${id}-l`} onClick={toggle}>
         <span className="picker-value">{display ?? current?.label ?? '—'}</span>
         <span className="picker-caret" aria-hidden="true">
           ▾

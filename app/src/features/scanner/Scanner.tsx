@@ -1,8 +1,9 @@
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import type { Address } from 'viem'
 import { MARKETS, MORPHO_NETWORKS, aggregatorsFor, getMarket, networkName, type Market } from '../../config'
 import { merklQuery } from '../../services/merkl'
+import { withData } from '../../services/queryData'
 import { snapshotQuery } from '../../protocols/aave/snapshot'
 import { scanMarket, type ScanFlag } from './aaveScan'
 import { groupLines, spreadOf } from './scanGroups'
@@ -170,38 +171,45 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
     () => (protocol === 'morpho' ? [] : SCANNABLE.filter((m) => chain === 'all' || m.chain.id === chain)).map((m) => getMarket(m.id)),
     [protocol, chain],
   )
-  const morphoNets = protocol === 'aave' ? [] : SCANNABLE_MORPHO.filter((n) => chain === 'all' || n.chain.id === chain)
-  const snapshots = useQueries({ queries: markets.map((m) => snapshotQuery(m)) })
-  const morphoLists = useQueries({ queries: morphoNets.map((n) => morphoMarketsQuery(n.chain.id, false)) })
+  const morphoNets = useMemo(() => (protocol === 'aave' ? [] : SCANNABLE_MORPHO.filter((n) => chain === 'all' || n.chain.id === chain)), [protocol, chain])
+  // `.data` of each keeps its identity until some data really changes: the rows below are recomputed only then
+  const { queries: snapshots, data: snapshotData } = useQueries({ queries: markets.map((m) => snapshotQuery(m)), combine: withData })
+  const { queries: morphoLists, data: morphoListData } = useQueries({
+    queries: morphoNets.map((n) => morphoMarketsQuery(n.chain.id, false)),
+    combine: withData,
+  })
   // a PT's yield is its Pendle implied APY: read for the PT collaterals of each network's listed markets
-  const ptTokens = morphoLists.map((q) => [...new Set((q.data ?? []).filter((m) => /^PT-/i.test(m.collateral.symbol)).map((m) => m.collateral.address))])
-  const morphoPts = useQueries({ queries: morphoNets.map((n, i) => ptInfosQuery(n.chain.id, ptTokens[i])) })
+  const ptTokens = morphoListData.map((list) => [...new Set((list ?? []).filter((m) => /^PT-/i.test(m.collateral.symbol)).map((m) => m.collateral.address))])
+  const { data: morphoPts } = useQueries({ queries: morphoNets.map((n, i) => ptInfosQuery(n.chain.id, ptTokens[i])), combine: withData })
   // one Merkl query per chain (Ethereum Core and Prime share it)
-  const chainIds = [...new Set(markets.map((m) => m.chain.id))]
-  const merkl = useQueries({ queries: chainIds.map((id) => merklQuery(id)) })
+  const chainIds = useMemo(() => [...new Set(markets.map((m) => m.chain.id))], [markets])
+  const { queries: merkl, data: merklData } = useQueries({ queries: chainIds.map((id) => merklQuery(id)), combine: withData })
   const targetHf = Number(hfText)
   const label = (id: string) => MARKETS.find((m) => m.id === id)?.label ?? id
 
-  /** the amount's figures for a scanned row */
-  const sized = (r: { apy: number; apyBefore?: number; leverage: number }, capacityUsd: number, kind: PairKind) => {
-    if (amountUsd === undefined) return { gainUsd: 0, fits: true }
-    return {
-      apyBefore: r.apyBefore,
-      gainUsd: gainPerYearUsd(r.apy, amountUsd),
-      paybackDays: paybackDays(estimatedRoundTripUsd(kind, r.leverage, amountUsd), r.apy, amountUsd),
-      fits: capacityUsd >= amountUsd,
-    }
-  }
+  // the parent's handlers are new at every render: the rows call the latest ones without being rebuilt for them
+  const picks = useRef({ onPick, onPickMorpho })
+  useEffect(() => {
+    picks.current = { onPick, onPickMorpho }
+  })
 
-  // recomputed when a snapshot, a Morpho list or a campaign list arrives (the query arrays are new objects at every render)
-  const version = [...snapshots, ...merkl, ...morphoLists, ...morphoPts].map((q) => q.dataUpdatedAt).join()
   const rows = useMemo(() => {
+    /** the amount's figures for a scanned row */
+    const sized = (r: { apy: number; apyBefore?: number; leverage: number }, capacityUsd: number, kind: PairKind) => {
+      if (amountUsd === undefined) return { gainUsd: 0, fits: true }
+      return {
+        apyBefore: r.apyBefore,
+        gainUsd: gainPerYearUsd(r.apy, amountUsd),
+        paybackDays: paybackDays(estimatedRoundTripUsd(kind, r.leverage, amountUsd), r.apy, amountUsd),
+        fits: capacityUsd >= amountUsd,
+      }
+    }
     const out: Line[] = []
-    for (const q of snapshots) {
-      if (!q.data) continue
-      const campaigns = merkl[chainIds.indexOf(q.data.market.chain.id)]?.data
+    for (const snapshot of snapshotData) {
+      if (!snapshot) continue
+      const campaigns = merklData[chainIds.indexOf(snapshot.market.chain.id)]
       const equityBase = amountUsd !== undefined ? BigInt(Math.round(amountUsd)) * 10n ** 8n : undefined
-      for (const r of scanMarket(q.data, campaigns, { targetHf, minCapacityBase: LOW_CAPACITY, equityBase }))
+      for (const r of scanMarket(snapshot, campaigns, { targetHf, minCapacityBase: LOW_CAPACITY, equityBase }))
         out.push({
           key: `${r.marketId}-${r.collateral.token.address}-${r.debt.token.address}`,
           group: `${r.marketId}-${r.collateral.token.address}-${r.debt.token.address}`,
@@ -232,7 +240,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           correlated: r.correlated,
           nativeUnknown: r.flags.includes('nativeUnknown'),
           open: () =>
-            onPick({
+            picks.current.onPick({
               marketId: r.marketId,
               collateral: r.collateral.token.address,
               debt: r.debt.token.address,
@@ -243,9 +251,9 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
         })
     }
     morphoNets.forEach((n, i) => {
-      const list = morphoLists[i].data
+      const list = morphoListData[i]
       if (!list) return
-      for (const r of scanMorpho(list, { targetHf, pts: morphoPts[i].data, lowCapacityUsd: LOW_CAPACITY_USD, equityUsd: amountUsd }))
+      for (const r of scanMorpho(list, { targetHf, pts: morphoPts[i], lowCapacityUsd: LOW_CAPACITY_USD, equityUsd: amountUsd }))
         out.push({
           key: `morpho-${n.chain.id}-${r.market.id}`,
           group: `morpho-${n.chain.id}-${r.market.collateral.address}-${r.market.loan.address}`,
@@ -275,11 +283,11 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           stable: r.stable,
           correlated: r.correlated,
           nativeUnknown: r.flags.includes('nativeUnknown'),
-          open: () => onPickMorpho(r.market, 'open', r.leverage),
+          open: () => picks.current.onPickMorpho(r.market, 'open', r.leverage),
         })
     })
     return out.sort((a, b) => b.apy - a.apy)
-  }, [version, targetHf, amountUsd])
+  }, [snapshotData, merklData, chainIds, morphoNets, morphoListData, morphoPts, targetHf, amountUsd])
 
   const words = search
     .trim()

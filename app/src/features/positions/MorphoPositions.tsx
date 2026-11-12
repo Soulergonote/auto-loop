@@ -15,6 +15,7 @@ import {
   type MorphoState,
 } from '../../protocols/morpho/markets'
 import { toBase } from '../../domain/math'
+import { withData } from '../../services/queryData'
 import { daysToMaturity, isExpired, needsRenewal, ptInfosQuery, type PtInfo } from '../../protocols/pendle/pt'
 import { isCorrelated } from '../../domain/pairs'
 import { apyTone, hfTone } from '../../ui/tone'
@@ -51,7 +52,8 @@ export function MorphoPositions({
     retry: 1,
   })
   const listed = useQueries({ queries: MORPHO_NETWORKS.map((n) => morphoMarketsQuery(n.chain.id, false)) })
-  const held = useQueries({
+  // `.data` of each keeps its identity until some data really changes: what is derived below is recomputed only then
+  const { queries: held, data: heldData } = useQueries({
     queries: MORPHO_NETWORKS.map((n, i) => ({
       queryKey: ['morpho-held', n.chain.id, user, listed[i].dataUpdatedAt],
       queryFn: () => readHeldMarkets(n.chain.id, n.morpho, listed[i].data!, user),
@@ -59,6 +61,7 @@ export function MorphoPositions({
       staleTime: 60_000,
       retry: 1,
     })),
+    combine: withData,
   })
   const list = {
     isPending: api.isPending && held.every((q) => q.isPending),
@@ -71,37 +74,42 @@ export function MorphoPositions({
   }
   const markets = useMemo(() => {
     const byId = new Map<string, MorphoMarket>()
-    for (const m of [...held.flatMap((q) => q.data ?? []), ...(api.data ?? [])]) byId.set(`${m.chainId}:${m.id}`, m)
+    for (const m of [...heldData.flatMap((d) => d ?? []), ...(api.data ?? [])]) byId.set(`${m.chainId}:${m.id}`, m)
     return [...byId.values()]
-  }, [api.dataUpdatedAt, ...held.map((q) => q.dataUpdatedAt)])
-  const states = useQueries({
+  }, [api.data, heldData])
+  const { queries: states, data: stateData } = useQueries({
     queries: markets.map((m) => ({
       queryKey: ['morpho-state', m.chainId, m.id, user, undefined],
       queryFn: () => readMorphoState(m.chainId, MORPHO_NETWORKS.find((n) => n.chain.id === m.chainId)!.morpho, m, user),
       refetchInterval: 60_000,
       retry: 1,
     })),
+    combine: withData,
   })
-  const ptChains = [...new Set(markets.map((m) => m.chainId))]
-  const pts = useQueries({
+  const ptChains = useMemo(() => [...new Set(markets.map((m) => m.chainId))], [markets])
+  const { data: ptData } = useQueries({
     queries: ptChains.map((id) =>
       ptInfosQuery(
         id,
         markets.filter((m) => m.chainId === id).map((m) => m.collateral.address),
       ),
     ),
+    combine: withData,
   })
 
-  const rows: Row[] = markets.flatMap((market, i) => {
-    const state = states[i].data
-    if (!state?.user) return []
-    const sides = morphoSides(market, state.price)
-    if (toBase(state.user.collateral, sides.collateral) < DUST_USD && state.user.debt === 0n) return []
-    const pt = pts[ptChains.indexOf(market.chainId)]?.data?.get(market.collateral.address.toLowerCase())
-    return [{ market, state, pt }]
-  })
+  const rows = useMemo(
+    () =>
+      markets.flatMap((market, i): Row[] => {
+        const state = stateData[i]
+        if (!state?.user) return []
+        const sides = morphoSides(market, state.price)
+        if (toBase(state.user.collateral, sides.collateral) < DUST_USD && state.user.debt === 0n) return []
+        const pt = ptData[ptChains.indexOf(market.chainId)]?.get(market.collateral.address.toLowerCase())
+        return [{ market, state, pt }]
+      }),
+    [markets, stateData, ptData, ptChains],
+  )
   const pending = list.isPending || states.some((s) => s.isPending)
-  const totalsKey = [pending, ...markets.map((m) => m.id), ...states.map((q) => q.dataUpdatedAt), ...pts.map((q) => q.dataUpdatedAt)].join()
   const totals = useMemo<MorphoTotals>(() => {
     let equity = 0n
     let weightedApy = 0
@@ -114,8 +122,7 @@ export function MorphoPositions({
         lowest = { hf: f.hf, correlated: f.correlated, label: `Morpho · ${MORPHO_NETWORKS.find((n) => n.chain.id === r.market.chainId)!.label}` }
     }
     return { equity, weightedApy, lowest, count: rows.length, pending }
-    // rows are rebuilt at every render: their content is keyed by the markets and the queries' update times
-  }, [totalsKey])
+  }, [rows, pending])
   useEffect(() => onTotals(totals), [totals, onTotals])
   // a revert (the market's oracle, typically a PT feed after maturity) is not an RPC outage: retrying does not help
   const reverted = (e: unknown) => e instanceof BaseError && !!e.walk((c) => c instanceof ContractFunctionRevertedError)
