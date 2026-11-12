@@ -32,6 +32,9 @@ import { capitalKind, useWalletTokens } from '../lib/capital'
 import { outcomeLines, readOutcome } from '../lib/outcome'
 import { fmtBps, fmtAmount, fmtDate, fmtDays, fmtDollars, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
+import { useQuery } from '@tanstack/react-query'
+import { exitIssues, exitSellAmount, utilization } from '../lib/exitCheck'
+import { snapshotQuery } from '../lib/snapshot'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, QuoteCompare, Metric, NA, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 import { SLIPPAGES, pairKind, reserveAsset, slippageNote, useSlippage } from '../lib/slippage'
@@ -196,7 +199,38 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       : undefined
   const exitQuote = useQuote(exitReq)
   const exitBlocked = !!exitReq && (exitQuote.isError || !!exitQuote.data?.simulated)
-  const exitPending = !!exitReq && !exitQuote.data && !exitQuote.isError
+  // any other collateral: what a full close would sell to repay the whole debt is quoted against the debt asset
+  const plainExitSell = !pt && q ? exitSellAmount(position.debtBase + toBase(debtAmount, D.side), C.side) : 0n
+  const plainExitReq =
+    plainExitSell > 0n && QUOTE_MODE !== 'mock'
+      ? {
+          aggregator,
+          chainId: market.chain.id,
+          sell: C.token,
+          buy: D.token,
+          sellAmount: plainExitSell,
+          taker: market.quoteTaker,
+          slippageBps: BigInt(slippage),
+          oracle: { sell: C.side, buy: D.side },
+        }
+      : undefined
+  const plainExit = useQuote(plainExitReq)
+  const plainExitPending = !!plainExitReq && !plainExit.data && !plainExit.isError
+  // the collateral's Aave reserve almost all lent out: withdrawing it at close may have to wait
+  const snapshot = useQuery({ ...snapshotQuery(market), enabled: !pt })
+  const collSnap = snapshot.data?.reserves.find((r) => r.token.address === C.token.address)
+  const exit =
+    plainExitReq && !plainExitPending
+      ? exitIssues({
+          sell: C.token.symbol,
+          buy: D.token.symbol,
+          noRoute: plainExit.isError || !!plainExit.data?.simulated,
+          reason: plainExit.isError ? (plainExit.error as Error).message : plainExit.data?.fallbackReason,
+          loss: plainExit.data && !plainExit.data.simulated ? swapLoss(plainExit.data.sellAmount, C.side, plainExit.data.buyAmount, D.side) : undefined,
+          utilization: collSnap ? utilization(collSnap.totalSupplyBase, collSnap.totalDebtBase) : undefined,
+        })
+      : undefined
+  const exitPending = (!!exitReq && !exitQuote.data && !exitQuote.isError) || plainExitPending
 
   const account0 = user?.account ?? EMPTY_ACCOUNT
   const proj = q && capColl !== undefined ? project(account0, capColl + q.buyAmount, C.side, C.config.liquidationThresholdBps, debtAmount, D.side) : undefined
@@ -224,6 +258,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
     problems.push(
       `Sortie impossible : aucun agrégateur ne revend ${pt!.tokensOut.map((t) => t.symbol).join(' ou ')} (ce que rend ${C.token.symbol}) contre ${D.token.symbol} pour ce montant. La position ne pourrait être fermée ni avant ni après l’échéance.`,
     )
+  if (exit) problems.push(...exit.problems)
   if (pt && executor && market.executorVersion === 1) problems.push('Le contrat v1 ne fait qu’un swap : un PT demande le contrat v2.')
   else if (pt && executor && !market.executorPendle)
     problems.push('Ce contrat n’autorise pas le routeur Pendle : déployer le nouveau contrat (bandeau en haut).')
@@ -231,6 +266,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const warnings: string[] = []
   const lossIssue = q && swapLossProblem(swapLoss(q.sellAmount, D.side, q.buyAmount, C.side), D.token.symbol, C.token.symbol, q.simulated)
   if (lossIssue) (lossIssue.block ? problems : warnings).push(lossIssue.text)
+  if (exit) warnings.push(...exit.warnings)
   const capLossIssue = cq && swapLossProblem(swapLoss(cq.sellAmount, capSide, cq.buyAmount, C.side), K.symbol, C.token.symbol, cq.simulated)
   if (capLossIssue) (capLossIssue.block ? problems : warnings).push(capLossIssue.text)
   // an input the protocol would refuse: values derived from it would be meaningless, they show a dash

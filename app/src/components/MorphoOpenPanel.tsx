@@ -21,6 +21,7 @@ import { GAS_UNITS_PT, HORIZONS, breakEvenDays, horizonApy, loopCosts, swapCostB
 import { explainError } from '../lib/execute'
 import { fmtLltv, fmtBps, fmtAmount, fmtDate, fmtDays, fmtDollars, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../lib/format'
 import { isCorrelated } from '../lib/scan'
+import { exitIssues, exitSellAmount } from '../lib/exitCheck'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
 import { RiskPanel } from './RiskPanel'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
@@ -120,7 +121,37 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
       : undefined
   const exitQuote = useQuote(exitReq)
   const exitBlocked = !!exitReq && (exitQuote.isError || !!exitQuote.data?.simulated)
-  const exitPending = !!exitReq && !exitQuote.data && !exitQuote.isError
+  // any other collateral: what a full close would sell to repay the whole debt is quoted against the loan token
+  const plainExitSell = !pt && q ? exitSellAmount(toBase(debt0 + debtAmount, sides.loan), sides.collateral) : 0n
+  const plainExitReq =
+    plainExitSell > 0n && QUOTE_MODE !== 'mock'
+      ? {
+          aggregator: ctx.aggregator,
+          chainId: net.chain.id,
+          sell: C,
+          buy: L,
+          sellAmount: plainExitSell,
+          taker: net.quoteTaker,
+          slippageBps: BigInt(slippage),
+          oracle: { sell: sides.collateral, buy: sides.loan },
+        }
+      : undefined
+  const plainExit = useQuote(plainExitReq)
+  const plainExitPending = !!plainExitReq && !plainExit.data && !plainExit.isError
+  const exit =
+    plainExitReq && !plainExitPending
+      ? exitIssues({
+          sell: C.symbol,
+          buy: L.symbol,
+          noRoute: plainExit.isError || !!plainExit.data?.simulated,
+          reason: plainExit.isError ? (plainExit.error as Error).message : plainExit.data?.fallbackReason,
+          loss:
+            plainExit.data && !plainExit.data.simulated
+              ? swapLoss(plainExit.data.sellAmount, sides.collateral, plainExit.data.buyAmount, sides.loan)
+              : undefined,
+        })
+      : undefined
+  const exitPending = (!!exitReq && !exitQuote.data && !exitQuote.isError) || plainExitPending
 
   const newColl = q ? coll0 + capColl + q.buyAmount : undefined
   const newCollMin = q ? coll0 + capColl + q.minOut : undefined
@@ -151,9 +182,11 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
     problems.push(
       `Sortie impossible : aucun agrégateur ne revend ${pt!.tokensOut.map((t) => t.symbol).join(' ou ')} (ce que rend ${C.symbol}) contre ${L.symbol} pour ce montant. La position ne pourrait être fermée ni avant ni après l’échéance.`,
     )
+  if (exit) problems.push(...exit.problems)
   const warnings: string[] = []
   const lossIssue = q && swapLossProblem(swapLoss(q.sellAmount, sides.loan, q.buyAmount, sides.collateral), L.symbol, C.symbol, q.simulated)
   if (lossIssue) (lossIssue.block ? problems : warnings).push(lossIssue.text)
+  if (exit) warnings.push(...exit.warnings)
   // an input Morpho would refuse: values derived from it would be meaningless, they show a dash
   const unreal = (worstHf !== undefined && worstHf < 1) || debtAmount > state.liquidity || !!lossIssue?.block
   if (pt && ptDays !== undefined && !ptExpired && ptDays < 14)
