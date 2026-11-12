@@ -208,7 +208,7 @@ const anvil = async (method, params) =>
     await page.locator('summary', { hasText: 'Réglages' }).click()
     await page.getByRole('radio', { name: process.env.AGG }).click()
   }
-  // SLIP=0,5 : another slippage than the default (a frozen fork drifts from the live quotes)
+  // SLIP=1 : another slippage than the default (a frozen fork drifts from the live quotes)
   if (process.env.SLIP) {
     if (!process.env.AGG) await page.locator('summary', { hasText: 'Réglages' }).click()
     await page.getByRole('radio', { name: process.env.SLIP, exact: true }).click()

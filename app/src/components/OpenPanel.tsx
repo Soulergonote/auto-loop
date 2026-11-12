@@ -34,9 +34,7 @@ import { fmtBps, fmtAmount, fmtDate, fmtDays, fmtDollars, fmtHf, fmtPct, fmtPric
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, QuoteCompare, Metric, NA, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
-
-/** slippage choices in bps; 1 (0,01 %) by default, Azerty's choice: a tighter swap reverts sooner when the price moves */
-const SLIPPAGES = ['1', '10', '50', '100'] as const
+import { SLIPPAGES, pairKind, reserveAsset, slippageNote, useSlippage } from '../lib/slippage'
 
 type Props = {
   reserves: Reserves
@@ -87,7 +85,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
   const capBalance = kind === 'collateral' ? user?.collateralBalance : capitalPick?.balance
   const capAllowance = kind === 'collateral' ? (user?.collateralAllowance ?? 0n) : (capitalPick?.allowance ?? 0n)
   const [leverage, setLeverage] = useState(seed ? Math.floor(seed.leverage * 20) / 20 : 2)
-  const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
+  const { slippage, setSlippage, auto: autoSlip } = useSlippage(pairKind(reserveAsset(C), reserveAsset(D), { pt: !!C.pt }))
   const [horizonText, setHorizon] = useState('90')
   // a Pendle PT: its fixed yield runs until maturity, which is also the holding time the costs are spread over
   const pt = C.pt
@@ -520,7 +518,7 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
       }
       reason={busy ? undefined : disabledReason}
     >
-      <TxResult market={market} result={result} />
+      <TxResult market={market} result={result} retry={{ current: slippage, set: setSlippage, sellUsd: Number(soldBase) / 1e8 }} />
     </Summary>
   )
 
@@ -651,7 +649,10 @@ export function OpenPanel({ reserves: base, emodes, user, account, aggregator, o
 
         <Banners problems={problems} warnings={warnings} />
 
-        <Fold title="Réglages" value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${pt ? '' : ` · ${fmtDays(horizon)}`} · ${emodeLabel}`}>
+        <Fold
+          title="Réglages"
+          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)}${pt ? '' : ` · ${fmtDays(horizon)}`} · ${emodeLabel}`}
+        >
           {common}
           <div className="grid2">
             <div className="field">

@@ -18,8 +18,8 @@ import { outcomeLines, readOutcome } from '../lib/outcome'
 import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
 import { Banners, Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { SLIPPAGES, pairKind, reserveAsset, slippageNote, useSlippage } from '../lib/slippage'
 
-const SLIPPAGES = ['1', '10', '50', '100'] as const
 const PARTS = ['25', '50', '100'] as const
 
 type Props = {
@@ -73,7 +73,7 @@ export function SwapCollateralPanel({
   const T0 = targets.find((t) => t.token.address === targetChoice) ?? (renew ? targets[0] : (targets.find((t) => isCorrelated(t, C)) ?? targets[0]))
   const T: Reserve | undefined = T0 && { ...T0, supplyRewardApr: headlineRewards(campaigns, T0).supply }
   const [part, setPart] = useState<(typeof PARTS)[number]>('100')
-  const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
+  const { slippage, setSlippage, auto: autoSlip } = useSlippage(T ? pairKind(reserveAsset(C), reserveAsset(T), { pt: !!(C.pt || T.pt) }) : 'other')
   const [busy, setBusy] = useState<string>()
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; to?: Token; details?: string[] }>()
   const batch = useAtomicBatch(market.chain.id, account) === true
@@ -289,7 +289,7 @@ export function SwapCollateralPanel({
       }
       reason={busy ? undefined : disabledReason}
     >
-      <TxResult market={market} result={result} />
+      <TxResult market={market} result={result} retry={{ current: slippage, set: setSlippage }} />
       {result?.ok && result.to && (
         <button className="btn" onClick={() => onShowPair(result.to!)}>
           Afficher la paire {result.to.symbol} / {D.token.symbol}
@@ -396,7 +396,7 @@ export function SwapCollateralPanel({
 
         <Fold
           title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan Aave ${fmtPct(Number(reserves.premiumBps) / 10_000)}`}`}
+          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan Aave ${fmtPct(Number(reserves.premiumBps) / 10_000)}`}`}
         >
           {common}
           <div className="field">

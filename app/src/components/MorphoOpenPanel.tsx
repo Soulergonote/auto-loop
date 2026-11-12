@@ -25,9 +25,8 @@ import { apyTone, hfThresholds, hfTone } from '../lib/tone'
 import { RiskPanel } from './RiskPanel'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 import type { MorphoCtx } from './MorphoView'
+import { SLIPPAGES, pairKind, slippageNote, useSlippage } from '../lib/slippage'
 
-/** slippage choices in bps, as on Aave: 0,01 % by default */
-const SLIPPAGES = ['1', '10', '50', '100'] as const
 /** The slider stops at this health factor: Morpho liquidates at 1, with no LTV margin below the LLTV like Aave's. */
 const SLIDER_MIN_HF = 1.02
 const MAX_SLIDER = 15
@@ -45,7 +44,11 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
   const capAllowance = capitalIsLoan ? (user?.loanAllowance ?? 0n) : (user?.collateralAllowance ?? 0n)
   const [amountText, setAmountText] = useState('1000')
   const [leverage, setLeverage] = useState(seedLeverage ? Math.floor(seedLeverage * 20) / 20 : 3)
-  const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
+  const {
+    slippage,
+    setSlippage,
+    auto: autoSlip,
+  } = useSlippage(pairKind({ symbol: C.symbol, usd: M.collateralUsd }, { symbol: L.symbol, usd: M.loanUsd }, { pt: !!pt }))
   const [horizonText, setHorizon] = useState('90')
   const [busy, setBusy] = useState<string>()
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[] }>()
@@ -323,7 +326,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
       }
       reason={busy ? undefined : disabledReason}
     >
-      <TxResult market={net} result={result} />
+      <TxResult market={net} result={result} retry={{ current: slippage, set: setSlippage }} />
     </Summary>
   )
 
@@ -435,7 +438,10 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
 
         <Banners problems={problems} warnings={warnings} />
 
-        <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}${pt ? '' : ` · ${fmtDays(horizon)}`}`}>
+        <Fold
+          title="Réglages"
+          value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)}${pt ? '' : ` · ${fmtDays(horizon)}`}`}
+        >
           {ctx.common}
           <div className="grid2">
             <div className="field">

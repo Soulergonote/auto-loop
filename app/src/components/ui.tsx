@@ -1,7 +1,8 @@
 import { useEffect, useId, useState, type ReactNode } from 'react'
 import { AGGREGATORS, supportsChain, type AggregatorChoice, type AggregatorId, type Market } from '../config'
 import type { Quote } from '../lib/quotes'
-import { fmtAmount, fmtX } from '../lib/format'
+import { fmtAmount, fmtBps, fmtDollars, fmtX } from '../lib/format'
+import { extraWorstCaseUsd, isSlippageFailure, nextSlippage, type SlippageBps } from '../lib/slippage'
 import type { Tone } from '../lib/tone'
 import { useGateStep } from './gate'
 
@@ -294,8 +295,32 @@ export function TxLink({ market, hash }: { market: Pick<Market, 'chain'>; hash: 
 }
 
 /** Outcome of a transaction: a green line with the explorer link, or a red banner. */
-export function TxResult({ market, result }: { market: Pick<Market, 'chain'>; result?: { ok: boolean; text: string; hash?: string; details?: string[] } }) {
+/** a failed swap's minimum: offer the next wider slippage, with what it can cost at worst */
+export type SlippageRetry = { current: SlippageBps; set: (s: SlippageBps) => void; sellUsd?: number }
+
+export function TxResult({
+  market,
+  result,
+  retry,
+}: {
+  market: Pick<Market, 'chain'>
+  result?: { ok: boolean; text: string; hash?: string; details?: string[] }
+  retry?: SlippageRetry
+}) {
   if (!result) return null
+  const next = !result.ok && retry && isSlippageFailure(result.text) ? nextSlippage(retry.current) : undefined
+  if (next && retry) {
+    const extra = retry.sellUsd ? extraWorstCaseUsd(retry.sellUsd, retry.current, next) : undefined
+    return (
+      <Notice tone="bad">
+        {result.text}{' '}
+        <button type="button" className="btn small" onClick={() => retry.set(next)}>
+          Passer le slippage à {fmtBps(next)}
+        </button>{' '}
+        <span className="muted">{extra !== undefined ? `au pire ${fmtDollars(extra)} de moins reçus, ` : ''}nouveau devis puis signer à nouveau</span>
+      </Notice>
+    )
+  }
   return result.ok ? (
     <>
       <p className="success">

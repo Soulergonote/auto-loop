@@ -15,8 +15,7 @@ import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 import type { MorphoCtx } from './MorphoView'
-
-const SLIPPAGES = ['1', '10', '50', '100'] as const
+import { SLIPPAGES, pairKind, slippageNote, useSlippage } from '../lib/slippage'
 
 export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
   const { net, market: M, state, pt, sides, account } = ctx
@@ -28,7 +27,11 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
   const debt = user?.debt ?? 0n
   // target leverage of the position; 1 = close everything
   const [target, setTarget] = useState(1)
-  const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
+  const {
+    slippage,
+    setSlippage,
+    auto: autoSlip,
+  } = useSlippage(pairKind({ symbol: C.symbol, usd: M.collateralUsd }, { symbol: L.symbol, usd: M.loanUsd }, { pt: !!pt }))
   const [busy, setBusy] = useState<string>()
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[] }>()
 
@@ -229,7 +232,7 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
       }
       reason={busy ? undefined : disabledReason}
     >
-      <TxResult market={net} result={result} />
+      <TxResult market={net} result={result} retry={{ current: slippage, set: setSlippage }} />
     </Summary>
   )
 
@@ -259,7 +262,7 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
           <Metric label="Flash loan" value="gratuit" sub="Morpho Blue" />
         </div>
         <Banners problems={problems} warnings={warnings} />
-        <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}`}>
+        <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)}`}>
           {ctx.common}
           <div className="field">
             <span>Slippage max</span>

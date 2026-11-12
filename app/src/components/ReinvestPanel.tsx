@@ -17,9 +17,9 @@ import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
 import { fmtBps, fmtAmount, fmtDollars, fmtHf, fmtPct, fmtX } from '../lib/format'
 import { Banners, Card, Fold, QuoteCompare, LoopLayout, Notice, Segmented, Skel, Steps, Summary, TxResult, aggregatorLabel } from './ui'
+import { SLIPPAGES, slippageNote, useSlippage } from '../lib/slippage'
 
 /** same choices and default as the open and close panels (0,01 %, Azerty's choice) */
-const SLIPPAGES = ['1', '10', '50', '100'] as const
 
 type Props = {
   reserves: Reserves
@@ -66,7 +66,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
   const { claimables, ready, error, refetch } = useClaimables(chainId, account)
   const snapshot = useQuery(snapshotQuery(market))
   const batch = useAtomicBatch(chainId, account)
-  const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
+  const { slippage, setSlippage, auto: autoSlip } = useSlippage('other')
   // the plan is frozen at the claim: afterwards the API no longer lists what was just claimed
   const [frozen, setFrozen] = useState<Planned[]>()
   const [done, setDone] = useState<string[]>([])
@@ -446,7 +446,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
           }
           reason={busy ? undefined : reason}
         >
-          <TxResult market={market} result={result} />
+          <TxResult market={market} result={result} retry={{ current: slippage, set: setSlippage }} />
         </Summary>
       }
     >
@@ -486,7 +486,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
             </tbody>
           </table>
         )}
-        <Fold title="Réglages" value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}`}>
+        <Fold title="Réglages" value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)}`}>
           {common}
           <div className="field">
             <span>Slippage max</span>

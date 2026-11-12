@@ -14,8 +14,8 @@ import { isCorrelated } from '../lib/scan'
 import { apyTone, hfThresholds, hfTone } from '../lib/tone'
 import { Banners, Card, Fold, LoopLayout, Metric, NA, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
 import type { MorphoCtx } from './MorphoView'
+import { SLIPPAGES, slippageNote, useSlippage } from '../lib/slippage'
 
-const SLIPPAGES = ['1', '10', '50', '100'] as const
 /** Targets offered: at most this many, the best first. */
 const MAX_TARGETS = 30
 
@@ -55,7 +55,7 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
   const user = state.user!
   const coll = user.collateral
   const debt = user.debt
-  const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('10')
+  const { slippage, setSlippage, auto: autoSlip } = useSlippage('pt')
   const [choice, setChoice] = useState<string>()
   const [busy, setBusy] = useState<string>()
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[] }>()
@@ -246,7 +246,7 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
       }
       reason={busy ? undefined : disabledReason}
     >
-      <TxResult market={net} result={result} />
+      <TxResult market={net} result={result} retry={{ current: slippage, set: setSlippage }} />
     </Summary>
   )
 
@@ -284,7 +284,7 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
           <Metric label="Dette déplacée" value={`${fmtAmount(debt, L.decimals)} ${L.symbol}`} sub={lev2 !== undefined ? `levier ${fmtX(lev2)}` : undefined} />
         </div>
         <Banners problems={problems} warnings={warnings} />
-        <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}`}>
+        <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)}`}>
           {ctx.common}
           <div className="field">
             <span>Slippage max</span>

@@ -29,6 +29,8 @@ Le build ne dépend d'aucun serveur : le navigateur appelle directement l'API Ve
 
 Les règles d’interface (agencement, couleurs, typographie, composants, ton, formats des nombres) sont fixées dans la charte UI/UX du projet ; tout écran la suit. En pratique : l’écran Boucle a les choix à gauche et un résumé fixe à droite avec l’unique bouton principal (barre collée en bas sur mobile) ; les réglages rares (agrégateur, slippage, durée, eMode) sont dans un bloc « Réglages » replié ; les formats passent tous par `src/lib/format.ts` et les couleurs des valeurs par `src/lib/tone.ts` (seuils du health factor propres aux paires corrélées : rouge sous 1,03, ambre sous 1,08, contre 1,1 et 1,3 sinon).
 
+**Slippage** (`src/lib/slippage.ts`) : par défaut selon la paire, tant qu'on n'en choisit pas un dans « Réglages » (marqué « auto ») : 0,05 % entre deux stablecoins USD, 0,1 % entre actifs corrélés (wstETH / WETH), 0,3 % sinon et pour une route Pendle (PT), 0,3 % aussi pour la revente des rewards. Choix possibles : 0,01, 0,05, 0,1, 0,3 et 1 %. Quand une transaction échoue parce que le swap a rendu moins que son minimum, le message d'erreur propose le cran suivant, avec ce qu'il peut coûter au pire en dollars (ouvrir, fermer) ; l'app recote, puis il faut signer à nouveau.
+
 ## Marchés
 
 Liste dans `src/config.ts` (`MARKETS`), adresses des pools tirées de `@bgd-labs/aave-address-book`. Les actifs de chaque marché sont lus sur la chaîne (`getReservesList`), donc un nouvel actif listé par Aave apparaît sans changer le code. Chaque agrégateur n'est proposé que sur ses chaînes (`chains` dans `AGGREGATORS`) : Velora ne couvre ni Mantle, ni Plasma, ni Linea, ni Monad, ni MegaETH, ni HyperEVM, KyberSwap prend alors le relais. MegaETH (ajouté le 11/11/2026) : pool de l'address book Aave, RPC injoignable depuis l'environnement de dev, donc non relu sur la chaîne avant mise en ligne. KyberSwap est appelé sans clé (en-tête `x-client-id: auto-loop`) ; un devis qui contient des frais (`extraFee`) est refusé.
@@ -132,7 +134,7 @@ Seul agrégateur actif pour l’instant. Chaque appel (`/prices` et `/transactio
 
 ## Test de bout en bout sur fork de Base
 
-Depuis le 10/11/2026 l'app s'ouvre sur le Scanner (ou sur Positions quand un portefeuille se reconnecte) et chaque écran a son adresse (`#boucle`, `#scanner`, `#positions`) : `run.cjs` ouvre `#boucle`. Le contrat manquant se déploie par le bouton du résumé, qui enchaîne connexion, réseau, déploiement puis l'action de l'écran. Testé le 10/11/2026 sur fork : déploiement par ce bouton, ouverture 3x de 1 WETH, réduction à 2x et fermeture totale (`AGG=Velora SLIP=0,5`, le fork figé s'écarte des devis au slippage par défaut de 0,01 %).
+Depuis le 10/11/2026 l'app s'ouvre sur le Scanner (ou sur Positions quand un portefeuille se reconnecte) et chaque écran a son adresse (`#boucle`, `#scanner`, `#positions`) : `run.cjs` ouvre `#boucle`. Le contrat manquant se déploie par le bouton du résumé, qui enchaîne connexion, réseau, déploiement puis l'action de l'écran. Testé le 10/11/2026 sur fork : déploiement par ce bouton, ouverture 3x de 1 WETH, réduction à 2x et fermeture totale (`AGG=Velora SLIP=1`, le fork figé s'écarte des devis au slippage par défaut de 0,01 %).
 
 Testé le 01/11/2026 avec le contrat sans owner : déploiement par le bouton de l'app (`NO_DEPLOY=1 bash e2e/fork.sh`, puis `node e2e/run.cjs deploy d`), puis ouverture 3x et fermeture totale avec ce contrat (`EXECUTOR=0x… node e2e/run.cjs open o`). Une adresse qui n'est pas le contrat (ex. WETH) est refusée.
 

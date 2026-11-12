@@ -17,9 +17,7 @@ import { outcomeLines, readOutcome } from '../lib/outcome'
 import { isCorrelated } from '../lib/scan'
 import { hfThresholds, hfTone } from '../lib/tone'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, QuoteCompare, Metric, NA, Segmented, Steps, Summary, TxResult, aggregatorLabel } from './ui'
-
-/** slippage choices in bps; 1 (0,01 %) by default, Azerty's choice: a tighter swap reverts sooner when the price moves */
-const SLIPPAGES = ['1', '10', '50', '100'] as const
+import { SLIPPAGES, type SlippageBps, pairKind, reserveAsset, slippageNote, useSlippage } from '../lib/slippage'
 
 type Props = {
   reserves: Reserves
@@ -59,7 +57,7 @@ export function ClosePanel({ reserves, user, account, aggregator, onDone, common
   const { market, collateral: C, debt: D, premiumBps } = reserves
   // target leverage of the pair's position; 1 = close everything
   const [target, setTarget] = useState(1)
-  const [slippage, setSlippage] = useState<(typeof SLIPPAGES)[number]>('1')
+  const { slippage, setSlippage, auto: autoSlip } = useSlippage(pairKind(reserveAsset(C), reserveAsset(D), { pt: !!C.pt }))
   const [busy, setBusy] = useState<string>()
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[]; back?: { collateral: bigint; debt: bigint } }>()
 
@@ -119,6 +117,7 @@ export function ClosePanel({ reserves, user, account, aggregator, onDone, common
         setTarget,
         slippage,
         setSlippage,
+        autoSlip,
         busy,
         setBusy,
         result,
@@ -141,14 +140,15 @@ function ClosePanelInner(p: {
   head: ReactNode
   target: number
   setTarget: (x: number) => void
-  slippage: (typeof SLIPPAGES)[number]
-  setSlippage: (s: (typeof SLIPPAGES)[number]) => void
+  slippage: SlippageBps
+  setSlippage: (s: SlippageBps) => void
+  autoSlip: boolean
   busy?: string
   setBusy: (s?: string) => void
   result?: { ok: boolean; text: string; hash?: Hash; details?: string[] }
   setResult: (r?: { ok: boolean; text: string; hash?: Hash; details?: string[]; back?: { collateral: bigint; debt: bigint } }) => void
 }) {
-  const { market, C, D, user, account, aggregator, slippage, busy, setBusy, result, setResult } = p
+  const { market, C, D, user, account, aggregator, slippage, autoSlip, busy, setBusy, result, setResult } = p
   // a wallet that sends atomic batches: approval, close and approval back in one confirmation
   const batch = useAtomicBatch(market.chain.id, account) === true
   const position = pairPosition(user, C.side, D.side)
@@ -402,7 +402,7 @@ function ClosePanelInner(p: {
       }
       reason={busy ? undefined : disabledReason}
     >
-      <TxResult market={market} result={result} />
+      <TxResult market={market} result={result} retry={{ current: slippage, set: p.setSlippage, sellUsd: Number(toBase(toSell, C.side)) / 1e8 }} />
     </Summary>
   )
 
@@ -435,7 +435,7 @@ function ClosePanelInner(p: {
 
         <Fold
           title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan Aave ${fmtPct(Number(premiumBps) / 10_000)}`}`}
+          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan Aave ${fmtPct(Number(premiumBps) / 10_000)}`}`}
         >
           {p.common}
           {/* after maturity the PT is redeemed 1 for 1: no pool, nothing to slip */}
