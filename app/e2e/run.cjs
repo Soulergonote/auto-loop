@@ -211,7 +211,7 @@ const anvil = async (method, params) =>
   // SLIP=0,5 : another slippage than the default (a frozen fork drifts from the live quotes)
   if (process.env.SLIP) {
     if (!process.env.AGG) await page.locator('summary', { hasText: 'Réglages' }).click()
-    await page.getByRole('radio', { name: process.env.SLIP }).click()
+    await page.getByRole('radio', { name: process.env.SLIP, exact: true }).click()
   }
   if (mode === 'reduce') {
     await page.waitForTimeout(3000)
@@ -290,7 +290,7 @@ async function reinvest(page, browser) {
   }
   if (process.env.SLIP) {
     await page.locator('summary', { hasText: 'Réglages' }).click()
-    await page.getByRole('radio', { name: process.env.SLIP }).click()
+    await page.getByRole('radio', { name: process.env.SLIP, exact: true }).click()
   }
   if (process.env.OPEN_STEPS) await page.locator('summary', { hasText: 'Étapes' }).click()
   for (let step = 0; step < 8; step++) {

@@ -11,6 +11,10 @@
 # 25FEB2027 and 24JUN2027 listed against USDC and USDT, 20 000 USDC to the user (needs an archive RPC: FORK_URL=…).
 # NET=morpho: Ethereum (anvil --chain-id 1) for Morpho Blue, 20 000 USDC to the user, no executor (deployed from the app).
 # NET=base-pendle: Base (anvil --chain-id 8453) with PT-yUTY-17DEC2026 listed against USDC, 20 000 USDC to the user.
+# NET=plasma: Plasma (anvil --chain-id 9745), no executor (deployed from the app), 5000 USDe and 5000 USDT0 to the user,
+# taken from their aTokens (USDe/GHO is the pair used for real there). NET=monad: Monad (anvil --chain-id 143), same with
+# 5000 USDC and 1 WETH. On Monad, run vite with VITE_KYBER_INCLUDED_SOURCES=uniswapv3,uniswap-v4,pancake-v3,curve-stable-ng
+# (its prop AMMs and order books revert on a fork) and use SLIP='0,5 %' in run.cjs (the fork drifts from live quotes).
 # Optional: SOLC=/path/to/solc-0.8.27 when forge cannot download solc.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -47,6 +51,14 @@ elif [ "${NET:-base}" = morpho ]; then
   # to the user, taken from Aave's aUSDC
   POOL=0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2
   DEFAULT_FORK=https://ethereum-rpc.publicnode.com
+elif [ "${NET:-base}" = plasma ]; then
+  POOL=0x925a2A7214Ed92428B5b1B090F80b25700095e12
+  DEFAULT_FORK=https://rpc.plasma.to
+  FUNDS="0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34:5000000000000000000000 0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb:5000000000"
+elif [ "${NET:-base}" = monad ]; then
+  POOL=0x69a5F9AD4f96ebf0a0C792dD42a01cC5C0102fef
+  DEFAULT_FORK=https://rpc.monad.xyz
+  FUNDS="0x754704Bc059F8C67012fEd69BC8A327a5aafb603:5000000000 0xEE8c0E9f1BFFb4Eb878d8f15f368A02a35481242:1000000000000000000"
 else
   POOL=0xA238Dd80C259a72e81d7e4664a9801593F98d1c5
   ROUTERS="[0x6A000F20005980200259B80c5102003040001068,0x6131B5fae19EA4f9D964eAc0408E4408b66337b5]"
@@ -60,6 +72,17 @@ if [ "${NET:-base}" = morpho ]; then
   cast rpc --rpc-url $R anvil_setBalance $A 0xDE0B6B3A7640000 >/dev/null
   cast send --rpc-url $R --unlocked --from $A $USDC "transfer(address,uint256)" $U 20000000000 >/dev/null
   echo "fork block $(cast block-number --rpc-url $R), user $U: 20 000 USDC (Morpho Blue, executor to deploy from the app)"
+  exit 0
+fi
+if [ "${NET:-base}" = plasma ] || [ "${NET:-base}" = monad ]; then
+  for T in $FUNDS; do
+    A=$(cast call --rpc-url $R $POOL "getReserveAToken(address)(address)" ${T%%:*})
+    cast rpc --rpc-url $R anvil_impersonateAccount $A >/dev/null
+    cast rpc --rpc-url $R anvil_setBalance $A 0xDE0B6B3A7640000 >/dev/null
+    cast send --rpc-url $R --unlocked --from $A ${T%%:*} "transfer(address,uint256)" $U ${T##*:} >/dev/null
+  done
+  cast rpc --rpc-url $R anvil_setBalance $U 0x3635C9ADC5DEA00000 >/dev/null
+  echo "fork block $(cast block-number --rpc-url $R), user $U: $FUNDS (executor to deploy from the app)"
   exit 0
 fi
 cd "$HERE/../../contracts"

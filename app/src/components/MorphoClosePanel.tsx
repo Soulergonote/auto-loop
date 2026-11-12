@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { type Hash } from 'viem'
 import { AGGREGATORS } from '../config'
 import { collateralInLoan, dropToLiquidation, morphoHf, morphoLeverage, repayForMorphoLeverage } from '../lib/morpho'
@@ -42,7 +42,11 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
   // full: the whole debt (by shares at execution), collateral sold to cover it with a margin; a matured PT is all
   // redeemed (nothing to hold any more). Partial: the repayment that brings the leverage down, and what covers it.
   const repay = full ? debt : roundSignificant(repayForMorphoLeverage(value, debt, BigInt(Math.round(debouncedTarget * 10_000))), 5)
-  const needed = repay > 0n ? collateralToSellForRepay(repay, 0n, BigInt(slippage), sides.collateral, sides.loan) : 0n
+  // sized at the oracle's price, then corrected by the quote (effect below) until its minimum just covers the repayment:
+  // a swap's price impact (a PT sold on Pendle's market) can exceed the sizing margin
+  const [scale, setScale] = useState(1)
+  const sized = repay > 0n ? collateralToSellForRepay(repay, 0n, BigInt(slippage), sides.collateral, sides.loan) : 0n
+  const needed = (sized * BigInt(Math.round(scale * 1e6))) / 1_000_000n
   const sell = full && ptExpired ? coll : roundSignificant(needed > coll ? coll : needed, 6) + (needed > 0n ? 1n : 0n)
   const toSell = sell > coll ? coll : sell
   const withdraw = full ? coll : toSell
@@ -62,6 +66,14 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
       : undefined
   const quote = useQuote(quoteReq)
   const q = quote.data
+  // full close: the debt accrues until execution, keep a small margin over it
+  const required = full ? (repay * 10_005n) / 10_000n : repay
+  useEffect(() => {
+    if ((full && ptExpired) || !q || q.simulated || q.sellAmount !== toSell || q.minOut === 0n || required === 0n) return
+    const ratio = Number(required) / Number(q.minOut)
+    // short of the repayment, or selling more than 1 % too much: resize (0,1 % of room), at most the whole balance
+    if ((ratio > 1 && toSell < coll) || (ratio < 0.99 && !full)) setScale((x) => Math.min(x * ratio * 1.001, 10))
+  }, [q, toSell, required, full, ptExpired, coll])
 
   if (coll === 0n)
     return (
