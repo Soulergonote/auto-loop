@@ -18,7 +18,7 @@ import {
   type Hex,
 } from 'viem'
 import { arc } from 'viem/chains'
-import { morphoExecutorAbi } from '../src/abi'
+import { morphoExecutorAbi } from '../src/chain/abi'
 import { EXECUTOR_BYTECODE_MORPHO } from '../src/generated/executorBytecode'
 import { MORPHO_BLUE, executorRouters, AGGREGATORS } from '../src/config'
 

@@ -1,4 +1,4 @@
 src/generated
-src/lib/__fixtures__
+src/test/fixtures
 *.css
 dist

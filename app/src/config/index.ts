@@ -1,4 +1,4 @@
-/** App configuration, one file per subject; import from '../config'. */
+/** App configuration, one file per subject; import from the folder (`../config`). */
 export * from './aave'
 export * from './aggregators'
 export * from './deployment'

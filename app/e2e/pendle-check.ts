@@ -3,10 +3,10 @@
 //   EXECUTOR=0x… VITE_RPC_URL_1=http://127.0.0.1:8545 npx vite-node e2e/pendle-check.ts [pt] [eMode]
 import { createPublicClient, createWalletClient, http, maxUint256, parseUnits, type Address } from 'viem'
 import { mainnet } from 'viem/chains'
-import { getQuote } from '../src/lib/quotes'
-import { closeCall, encodeCall, openCall, type ClosePlan, type OpenPlan } from '../src/lib/execute'
-import { erc20Abi, debtTokenAbi, poolAbi } from '../src/abi'
-import { forgetPts, readPt } from '../src/lib/pendle'
+import { getQuote } from '../src/services/quotes/quotes'
+import { closeCall, encodeCall, openCall, type ClosePlan, type OpenPlan } from '../src/protocols/aave/execute'
+import { erc20Abi, debtTokenAbi, poolAbi } from '../src/chain/abi'
+import { forgetPts, readPt } from '../src/protocols/pendle/pt'
 
 const R = 'http://127.0.0.1:8545'
 const U: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
