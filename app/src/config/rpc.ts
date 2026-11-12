@@ -37,4 +37,6 @@ export const ARCHIVE_RPCS: Record<number, string[]> = {
   [mainnet.id]: ['https://eth.drpc.org', 'https://mainnet.gateway.tenderly.co', 'https://eth-mainnet.public.blastapi.io'],
   [base.id]: ['https://base.drpc.org', 'https://base.gateway.tenderly.co', 'https://mainnet.base.org'],
   [avalanche.id]: ['https://api.avax.network/ext/bc/C/rpc', 'https://avalanche-mainnet.gateway.tenderly.co'],
+  // the chain's own RPC keeps under a day of state; dRPC answers 30 days back (CORS *), checked 12 Nov 2026
+  [robinhood.id]: ['https://robinhood.drpc.org'],
 }

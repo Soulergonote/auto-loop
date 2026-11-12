@@ -68,7 +68,8 @@ describe('token yields', () => {
   })
 
   it('lists every vault with its bridged copies', () => {
-    for (const v of VAULTS) expect(tokenCopies(v.chainId, v.token).length).toBeGreaterThan(1)
+    // spUSDG lives on Robinhood Chain only
+    for (const v of VAULTS.filter((v) => v.chainId !== 4663)) expect(tokenCopies(v.chainId, v.token).length).toBeGreaterThan(1)
     // savUSD on Base takes the Avalanche vault's yield
     expect(pickTokenYield(8453, SAME_TOKEN.savUSD[8453], { vault: data([[43114, SAME_TOKEN.savUSD[43114], 0.078]]) })).toEqual({
       apy: 0.078,

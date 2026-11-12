@@ -36,6 +36,8 @@ export const VAULTS: { chainId: number; token: Address }[] = [
   { chainId: 1, token: '0x87b65C4aAFFA76881f9E96F3e7ED945ddFC3Cd7A' },
   // YO yoUSD (USDC), Base vault; the Ethereum vault at the same address keeps the same share price
   { chainId: 8453, token: '0x0000000f2eB9f69274678c76222B35eEc7588a65' },
+  // spUSDG (USDG savings vault), Robinhood Chain only; 3.8 % over 7 and 30 days on 12 Nov 2026
+  { chainId: 4663, token: '0xde770c84FE66E063336b31737cFE9790f18c4087' },
 ]
 
 /**
@@ -90,6 +92,8 @@ export const SAME_TOKEN: Record<string, Record<number, Address>> = {
   syrupUSDG: {
     1: '0x87b65C4aAFFA76881f9E96F3e7ED945ddFC3Cd7A',
     42161: '0xE1B0dC5A21b10f1634fBfbE9976fBA2Ee2e1c762',
+    // Robinhood Chain copy, same API price as the others (12 Nov 2026)
+    4663: '0x40858070814a57FdF33a613ae84fE0a8b4a874f7',
   },
   yoUSD: {
     8453: '0x0000000f2eB9f69274678c76222B35eEc7588a65',
