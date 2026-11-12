@@ -69,7 +69,7 @@ export function DeployPanel({
           <span>
             {upgrade === 'pendle'
               ? `Le contrat Auto-loop de ${market.label} n’autorise pas le routeur Pendle : il reste utilisable pour les autres paires. Une transaction déploie un contrat qui gère aussi les PT.`
-              : `Contrat Auto-loop v1 sur ${market.label} : il reste utilisable. La v2 ferme les positions sans prime de flash loan quand Morpho a la liquidité et corrige un défaut de la v1 (des aTokens envoyés au contrat peuvent bloquer les fermetures)${shared ? ' ; le contrat v2 commun de ce réseau est déjà déployé, la position reste sur le compte Aave' : ' ; une transaction la déploie, une fois pour tous les utilisateurs'}.`}
+              : `Contrat Auto-loop v1 sur ${market.label} : il reste utilisable. La v2 corrige un défaut de la v1 (des aTokens envoyés au contrat peuvent bloquer les fermetures)${market.chain.id in MORPHO_BLUE ? ' et ferme les positions sans prime de flash loan quand Morpho a la liquidité' : ''}${shared ? ' ; le contrat v2 commun de ce réseau est déjà déployé, la position reste sur le compte Aave' : ' ; une transaction la déploie, une fois pour tous les utilisateurs'}.`}
           </span>
           {shared ? (
             <button className="btn" onClick={() => onReady(shared)}>
