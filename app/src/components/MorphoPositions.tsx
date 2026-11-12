@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
-import type { Address } from 'viem'
+import { BaseError, ContractFunctionRevertedError, type Address } from 'viem'
 import { MORPHO_NETWORKS } from '../config'
 import {
   fetchPositionMarkets,
@@ -115,12 +115,15 @@ export function MorphoPositions({
     // rows are rebuilt at every render: their content is keyed by the markets and the queries' update times
   }, [totalsKey])
   useEffect(() => onTotals(totals), [totals, onTotals])
-  const failed = markets.filter((_, i) => states[i].isError)
+  // a revert (the market's oracle, typically a PT feed after maturity) is not an RPC outage: retrying does not help
+  const reverted = (e: unknown) => e instanceof BaseError && !!e.walk((c) => c instanceof ContractFunctionRevertedError)
+  const broken = markets.filter((_, i) => states[i].isError && reverted(states[i].error))
+  const failed = markets.filter((_, i) => states[i].isError && !reverted(states[i].error))
 
   if (!list.isPending && !list.isError && markets.length === 0) return null
   return (
     <>
-      {(list.isError || failed.length > 0 || (pending && rows.length === 0)) && (
+      {(list.isError || failed.length > 0 || broken.length > 0 || (pending && rows.length === 0)) && (
         <Card title="Morpho Blue">
           {pending && rows.length === 0 && !list.isError && <p className="muted">Lecture des positions Morpho Blue…</p>}
           {list.isError && (
@@ -129,6 +132,11 @@ export function MorphoPositions({
               <button className="btn" onClick={list.refetch}>
                 Réessayer
               </button>
+            </Notice>
+          )}
+          {broken.length > 0 && (
+            <Notice>
+              <span>Oracle du marché en échec (lecture du prix refusée) : {broken.map(morphoMarketName).join(', ')}. Position non affichée.</span>
             </Notice>
           )}
           {failed.length > 0 && (

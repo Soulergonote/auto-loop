@@ -200,7 +200,7 @@ export const MORPHO_NETWORKS: MorphoNetDef[] = [
   // 2026-11-11: chains where KyberSwap quotes and the Morpho API lists markets (BNB, Linea, Sonic, Etherlink, MegaETH: API refuses)
   { id: 'morpho-unichain', label: 'Unichain', chain: unichain, morpho: MORPHO_BLUE[130] },
   { id: 'morpho-hyperevm', label: 'HyperEVM', chain: hyperEvm, morpho: MORPHO_BLUE[999] },
-  // Monad: Morpho API + morpho-ts addresses.ts agree; RPC unreachable from the dev box, not read on chain
+  // Monad: Morpho API + morpho-ts addresses.ts agree; code and owner() read on chain 2026-11-12
   { id: 'morpho-monad', label: 'Monad', chain: monad, morpho: '0xD5D960E8C380B724a48AC59E2DfF1b2CB4a1eAee' },
 ]
 export const isMorphoId = (id: string) => id.startsWith('morpho-')
@@ -227,7 +227,7 @@ export function getMorphoNet(id: string, local: Record<string, Address> = {}): M
  * Pendle is offered on every app network where Pendle is deployed (addresses from pendle-core-v2-public/deployments,
  * read 2026-11-09): no Pendle on Avalanche, Polygon or Linea. Tested in the browser on Ethereum (2026-11-08) and Base
  * (2026-11-09) forks that list a live PT on Aave; the RouterStatic and PT oracle answer on Arbitrum, Base, BNB,
- * Optimism, Mantle and Sonic (Plasma and Monad unreachable from the test environment). New executors whitelist the
+ * Optimism, Mantle and Sonic, and on Plasma and Monad (read 2026-11-12, every listed market valid). New executors whitelist the
  * router; older ones keep working for every other pair.
  */
 export const PENDLE_ROUTER: Address = '0x888888888889758F76e7103c6CbF23ABbF58F946'
