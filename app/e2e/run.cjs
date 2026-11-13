@@ -15,6 +15,7 @@
 // refi (Morpho): « Refinancer », COLL=wstETH DEBT=USDC picks the market, TARGET=<start of the move's label> (Aave Ethereum
 // (Core) → Morpho, Morpho → Aave …); the account needs the pair on Aave (to Morpho) or on that market (to Aave).
 // EXECUTOR=0x… preloads an executor as if deployed from this browser (app built without VITE_EXECUTORS).
+// E2E_STRICT=1 (weekly workflow): exit code 1 when the action cannot be signed or does not end with a success.
 // Writes <prefix>-avant.png / <prefix>-apres.png and prints the notices. Needs playwright (NODE_PATH=$(npm root -g)).
 const { chromium } = require('playwright')
 const [, , mode, outPrefix] = process.argv
@@ -98,6 +99,13 @@ const anvil = async (method, params) =>
         }
         return j.result
       }
+      // like a real wallet: its own gas estimate plus a margin (anvil's bare estimate can fall short on routes whose
+      // gas use depends on gasleft(), and the transaction then runs out of gas)
+      const send = async (tx) => {
+        if (tx.gas) return rpc('eth_sendTransaction', [tx])
+        const est = BigInt(await rpc('eth_estimateGas', [tx]))
+        return rpc('eth_sendTransaction', [{ ...tx, gas: '0x' + ((est * 13n) / 10n).toString(16) }])
+      }
       window.__calls = []
       window.ethereum = {
         isMetaMask: true,
@@ -120,7 +128,7 @@ const anvil = async (method, params) =>
             const receipts = []
             let ok = true
             for (const c of calls) {
-              const hash = await rpc('eth_sendTransaction', [{ from: U, to: c.to, data: c.data, value: c.value }]).catch(() => null)
+              const hash = await send({ from: U, to: c.to, data: c.data, value: c.value }).catch(() => null)
               let r = null
               for (let i = 0; hash && !r && i < 120; i++) {
                 r = await rpc('eth_getTransactionReceipt', [hash])
@@ -144,6 +152,7 @@ const anvil = async (method, params) =>
             const b = window.__bundles?.[params[0]]
             return { version: '2.0.0', id: params[0], chainId: CHAIN_HEX, atomic: true, status: b.ok ? 200 : 500, receipts: b.receipts }
           }
+          if (method === 'eth_sendTransaction') return send(params[0])
           return rpc(method, params)
         },
       }
@@ -156,12 +165,17 @@ const anvil = async (method, params) =>
   await page.waitForSelector('.summary', { timeout: 30000 })
   if (mode === 'deploy') {
     // the summary's single button deploys the missing contract, then turns into the screen's own action
-    await page.locator('.summary button', { hasText: 'Déployer le contrat' }).click({ timeout: 60000 })
+    // the shared contract may already be on chain (the app then uses it by itself): nothing to deploy
+    await page
+      .locator('.summary button', { hasText: 'Déployer le contrat' })
+      .click({ timeout: 60000 })
+      .catch(() => console.log('no deploy button: shared contract already there?'))
     await page.waitForSelector('p:has-text("Contrat Auto-loop vérifié")', { timeout: 180000 }).catch(() => console.log('no verified line'))
     await page.screenshot({ path: `${outPrefix}-apres.png`, fullPage: true })
     console.log('verified line:', await page.locator('p:has-text("Contrat Auto-loop vérifié")').allTextContents())
     console.log('notices:', (await page.locator('.notice').allTextContents()).join(' | '))
     console.log('saved:', await page.evaluate(() => localStorage.getItem('auto-loop.executors')))
+    if (!(await page.locator('p:has-text("Contrat Auto-loop vérifié")').count())) fail('contrat non déployé ou non vérifié')
     return browser.close()
   }
   if (mode === 'reinvest') return reinvest(page, browser)
@@ -288,6 +302,7 @@ const anvil = async (method, params) =>
     await page.locator('summary', { hasText: 'Devis' }).click()
   }
   console.log('reason:', (await page.locator('.sum-reason').allTextContents()).join(' | '))
+  if (!(await btn.isEnabled())) fail(`bouton désactivé : ${await btn.getAttribute('title')}`)
   if (await btn.isEnabled()) {
     await btn.click()
     for (let i = 0; i < 60; i++) {
@@ -303,7 +318,10 @@ const anvil = async (method, params) =>
     }
     await page.screenshot({ path: `${outPrefix}-apres.png`, fullPage: true })
     console.log('wallet calls:', [...new Set(await page.evaluate(() => window.__calls))].join(','))
-    console.log('notices after:', (await page.locator('.notice, .success').allTextContents()).join(' | '))
+    const after = (await page.locator('.notice, .success').allTextContents()).join(' | ')
+    console.log('notices after:', after)
+    if (!/Position|Collatéral changé|Dette changée|PT renouvelé|réussi/i.test(after) || /échoué|Erreur|Revert/i.test(after))
+      fail('pas de succès après signature')
     console.log('real amounts:', (await page.locator('.outcome li').allTextContents()).join(' | '))
     const show = page.locator('button:has-text("Afficher la paire")')
     if (await show.count()) {
@@ -315,6 +333,11 @@ const anvil = async (method, params) =>
   }
   await browser.close()
 })()
+
+function fail(why) {
+  console.log('E2E FAIL:', why)
+  if (process.env.E2E_STRICT) process.exitCode = 1
+}
 
 async function reinvest(page, browser) {
   await page.getByRole('radio', { name: 'Réinvestir' }).click({ timeout: 60000 })

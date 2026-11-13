@@ -1,0 +1,121 @@
+name: Test hebdomadaire sur fork
+
+# Once a week (and on demand): the outside APIs the app reads still answer in the expected shape, and a real loop
+# opens and closes in the app on forks of Base and Plasma with live quotes (Velora, KyberSwap). A failure opens a
+# GitHub issue (or comments on the open one); the next success closes it. No secret needed.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-fork
+  cancel-in-progress: false
+
+jobs:
+  api:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node e2e/api-check.mjs
+
+  fork:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 1 WETH at 3x against USDC, the shared contract deployed from the app's button
+          - net: base
+            chain: 8453
+            hex: '0x2105'
+            fork: https://mainnet.base.org
+            env: 'PAIR=WETH/USDC AMOUNT=1 LEV=3'
+          # the pair used for real on Plasma: 1 000 USDe at 3x against GHO
+          - net: plasma
+            chain: 9745
+            hex: '0x2611'
+            fork: https://rpc.plasma.to
+            env: "PAIR=USDe/GHO AMOUNT=1000 LEV=3 SLIP='1 %'"
+    defaults:
+      run:
+        working-directory: app
+    env:
+      MARKET: ${{ matrix.net }}
+      CHAIN_HEX: ${{ matrix.hex }}
+      E2E_STRICT: '1'
+      WAIT: '20000'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+      - run: npm ci
+      # the browser driver of e2e/run.cjs (not an app dependency)
+      - run: npm install --no-save playwright@1.63.0 && npx playwright install --with-deps chromium
+      - name: Fork
+        run: |
+          anvil --fork-url ${{ matrix.fork }} --chain-id ${{ matrix.chain }} --port 8545 > anvil.log 2>&1 &
+          for i in $(seq 60); do cast block-number --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1 && break; sleep 2; done
+          NET=${{ matrix.net }} NO_DEPLOY=1 FORK_URL=${{ matrix.fork }} bash e2e/fork.sh
+      - name: App
+        run: |
+          VITE_RPC_URL_${{ matrix.chain }}=http://127.0.0.1:8545 npx vite --port 5173 --strictPort --base / > vite.log 2>&1 &
+          for i in $(seq 60); do curl -sf http://localhost:5173/ >/dev/null && break; sleep 2; done
+      - name: Déployer le contrat depuis l'app
+        run: |
+          node e2e/run.cjs deploy deploy | tee deploy.log
+          echo "EXECUTOR=$(grep -o '0x[0-9a-fA-F]\{40\}' deploy.log | tail -1)" >> "$GITHUB_ENV"
+      # one retry after a pause: aggregator APIs rate-limit by IP (KyberSwap answers 429), nothing was sent on a failure
+      # before signing
+      - name: Ouvrir
+        run: env ${{ matrix.env }} node e2e/run.cjs open open || (sleep 120 && env ${{ matrix.env }} node e2e/run.cjs open open2)
+      - name: Fermer
+        run: env ${{ matrix.env }} node e2e/run.cjs close close || (sleep 120 && env ${{ matrix.env }} node e2e/run.cjs close close2)
+      - if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: e2e-${{ matrix.net }}
+          path: |
+            app/*.png
+            app/*.log
+          retention-days: 14
+
+  report:
+    needs: [api, fork]
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+    steps:
+      - name: Ouvrir, commenter ou fermer le ticket
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FAILED: ${{ needs.api.result != 'success' || needs.fork.result != 'success' }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TITLE="Test hebdomadaire sur fork en échec"
+          OPEN=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
+          if [ "$FAILED" = true ]; then
+            BODY="Le test hebdomadaire a échoué (API : ${{ needs.api.result }}, forks : ${{ needs.fork.result }}). Détails et captures : $RUN"
+            if [ -n "$OPEN" ]; then gh issue comment "$OPEN" --body "$BODY"; else gh issue create --title "$TITLE" --body "$BODY"; fi
+          elif [ -n "$OPEN" ]; then
+            gh issue close "$OPEN" --comment "Le test hebdomadaire repasse : $RUN"
+          fi

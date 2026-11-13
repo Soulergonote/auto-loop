@@ -197,6 +197,15 @@ Testé le 08/11/2026 avec la v2 (`bash e2e/fork.sh` la déploie, `V1=1` déploie
 
 Limite propre au fork : le fork est figé au bloc du `fork.sh`, alors que Velora cote sur l’état réel du moment. Les DEX à prix d’oracle (Kipseli, Tessera, WooFiV2, metric-v1…) revertent alors systématiquement, d’où `VITE_VELORA_INCLUDE_DEXS` limité aux AMM classiques. Même ainsi, une route peut encore échouer à la simulation si le fork a trop vieilli : relancer `fork.sh`. Sur le vrai réseau ce décalage n’existe pas, et de toute façon la simulation avant signature bloque une transaction qui échouerait.
 
+## Test hebdomadaire sur fork
+
+`.github/workflows/weekly-fork.yml` (ajouté le 13/11/2026) tourne chaque lundi à 6 h UTC et à la demande (onglet Actions, « Run workflow »), sans secret :
+
+- `node e2e/api-check.mjs` appelle chaque API extérieure comme l'app le fait (Velora et KyberSwap : devis puis transaction, Pendle, Morpho, Merkl, DefiLlama prix et historique) et vérifie les champs lus ;
+- sur un fork de Base (1 WETH à 3x contre USDC) et un de Plasma (1 000 USDe à 3x contre GHO) : déploiement du contrat commun avec le bouton de l'app, ouverture puis fermeture avec de vrais devis, par `e2e/run.cjs` avec `E2E_STRICT=1` (code de sortie 1 si le bouton reste grisé ou si la transaction ne finit pas en succès). Un essai de plus après deux minutes, les agrégateurs limitant le débit par adresse IP.
+
+Un échec ouvre un ticket GitHub « Test hebdomadaire sur fork en échec » (ou le commente s'il est déjà ouvert), avec le lien vers le run et ses captures ; le premier succès suivant le ferme. Le portefeuille de test de `run.cjs` ajoute 30 % à l'estimation de gas, comme un vrai portefeuille : l'estimation nue d'anvil ne suffit pas toujours aux routes KyberSwap.
+
 ## Organisation du code
 
 Chaque dossier de `src/` a un rôle unique ; les dépendances vont de haut en bas (une fonctionnalité utilise les protocoles, jamais l'inverse).
