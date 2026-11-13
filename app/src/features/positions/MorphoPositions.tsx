@@ -23,6 +23,7 @@ import { fmtLltv, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtPct, fm
 import { Card, Fold, Metric, Notice } from '../../ui/primitives'
 import { morphoMarketName, type MorphoTab } from '../loop/morpho/MorphoView'
 import { PositionHistory } from './PositionHistory'
+import { HfProjection } from './HfProjection'
 import { HfTargetBlock } from './HfTarget'
 import { morphoHistory } from './history'
 
@@ -253,6 +254,15 @@ function MorphoPosition({
           }
         />
       </div>
+      {u.debt > 0n && (
+        <HfProjection
+          healthFactor={hf}
+          // a PT: its fixed yield until maturity (the market's oracle follows the PT towards par)
+          collateral={[{ value: Number(collUsd), apy: collateralApy, pt: pt && { daysLeft: daysToMaturity(pt) } }]}
+          debt={[{ value: Number(debtUsd), apy: borrowApy }]}
+          ptDaysLeft={pt && !isExpired(pt) ? ptDays : undefined}
+        />
+      )}
       {u.debt > 0n && (
         <HfTargetBlock
           id={`morpho:${m.chainId}:${m.id}`.toLowerCase()}

@@ -13,6 +13,7 @@ import { Card, Fold, Metric, Notice, useSlow } from '../../ui/primitives'
 import type { Pick } from '../scanner/Scanner'
 import { MorphoPositions, type MorphoTotals } from './MorphoPositions'
 import { PositionHistory } from './PositionHistory'
+import { HfProjection } from './HfProjection'
 import { HfTargetBlock } from './HfTarget'
 import { aaveHistory } from './history'
 import type { MorphoTab } from '../loop/morpho/MorphoView'
@@ -310,6 +311,18 @@ function MarketPosition({
           sub={`${fmtDollars((Number(s.equityBase) / 1e8) * (Number.isFinite(s.apy) ? s.apy : 0))} par an${s.nativeApy ? `, dont ${fmtPct(s.nativeApy)} ${pt ? 'fixe' : 'token'}` : ''}`}
         />
       </div>
+      {s.debtBase > 0n && (
+        <HfProjection
+          healthFactor={healthFactor}
+          collateral={holdings.map((h) => ({
+            value: Number(h.suppliedBase),
+            apy: h.reserve.supplyApy + (h.reserve.pt ? 0 : (h.reserve.native?.apy ?? 0)),
+            pt: h.reserve.pt && { daysLeft: daysToMaturity(h.reserve.pt), discount: h.reserve.pt.discount },
+          }))}
+          debt={holdings.map((h) => ({ value: Number(h.borrowedBase), apy: h.reserve.borrowApy + (h.reserve.native?.apy ?? 0) }))}
+          ptDaysLeft={pt && !isExpired(pt) ? ptDays : undefined}
+        />
+      )}
       {s.debtBase > 0n && (
         <HfTargetBlock
           id={`aave:${market.id}:${collateral.reserve.token.address}:${debt.reserve.token.address}`.toLowerCase()}

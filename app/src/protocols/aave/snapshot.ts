@@ -11,7 +11,7 @@ import type { Market, Token } from '../../config'
 import { decodeReserveConfig, rayAprToApy } from './reserveConfig'
 import { toBase } from '../../domain/math'
 import { readNativeYields } from '../../services/yield/nativeYield'
-import { ptYield, readPtInfos } from '../pendle/pt'
+import { ptYield, readFeedDiscount, readPtInfos, type PtInfo } from '../pendle/pt'
 import type { EModeCategory, Reserve } from './useMarket'
 import type { Holding } from '../../features/positions/positions'
 
@@ -102,7 +102,15 @@ export async function loadSnapshot(market: Market): Promise<Snapshot> {
     readPtInfos(
       chainId,
       base.map((b) => b.token.address),
-    ).catch(() => new Map()),
+    )
+      // the yearly discount of each PT's Aave price feed: how its price climbs to par (health factor projections)
+      .then(
+        async (pts) =>
+          new Map<string, PtInfo & { discount?: number }>(
+            await Promise.all([...pts].map(async ([k, pt]) => [k, { ...pt, discount: await readFeedDiscount(chainId, oracle, pt.pt) }] as const)),
+          ),
+      )
+      .catch(() => new Map<string, PtInfo & { discount?: number }>()),
     // rate curves (Aave v3.2+ strategy); a failed read only leaves the rates after the user's loop out
     readContracts(wagmiConfig, {
       contracts: base.map(
