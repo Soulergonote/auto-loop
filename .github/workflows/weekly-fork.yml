@@ -36,12 +36,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 1 WETH at 3x against USDC, the shared contract deployed from the app's button
+          # 1 WETH at 3x against USDC, the shared contract deployed from the app's button. Slippage 1 %: the fork stays at
+          # its block while the live quotes move (the first run failed at close at the auto 0.1 %)
           - net: base
             chain: 8453
             hex: '0x2105'
             fork: https://mainnet.base.org
-            env: 'PAIR=WETH/USDC AMOUNT=1 LEV=3'
+            env: "PAIR=WETH/USDC AMOUNT=1 LEV=3 SLIP='1 %'"
           # the pair used for real on Plasma: 1 000 USDe at 3x against GHO
           - net: plasma
             chain: 9745
