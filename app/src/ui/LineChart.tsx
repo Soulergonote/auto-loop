@@ -1,7 +1,7 @@
 import { useId, useState, type PointerEvent } from 'react'
 
 /**
- * One series over time, as a thin line (UI charter, I3): recessive grid, zero line when the series crosses it,
+ * One series (over time, or any x), as a thin line (UI charter, I3): recessive grid, zero line when the series crosses it,
  * crosshair and tooltip on hover or touch, values in a table for screen readers. Labels are HTML so they keep their
  * size at any width; the SVG stretches.
  */
@@ -11,20 +11,22 @@ type Props = {
   points: LinePoint[]
   /** formats a value (axis, tooltip) */
   format: (v: number) => string
-  /** formats a date (axis, tooltip) */
-  formatDate: (t: number) => string
+  /** formats an x value, a date for a time series (axis, tooltip) */
+  formatX: (t: number) => string
   /** tone class of a value in the tooltip (tone.ts) */
   tone?: (v: number) => string | undefined
   /** names the series for screen readers */
   label: string
+  /** x of a point kept marked when nothing is hovered (today on a curve of price moves) */
+  mark?: number
   /** a horizontal reference line (an average), drawn dashed */
-  reference?: { value: number; label: string }
+  reference?: { value: number; label: string; tone?: 'bad' }
 }
 
 const W = 600
 const H = 140
 
-export function LineChart({ points, format, formatDate, tone, label, reference }: Props) {
+export function LineChart({ points, format, formatX, tone, label, reference, mark }: Props) {
   const [hover, setHover] = useState<number>()
   const id = useId()
   if (points.length < 2) return null
@@ -43,7 +45,7 @@ export function LineChart({ points, format, formatDate, tone, label, reference }
   const y = (v: number) => H - ((v - lo) / (hi - lo)) * H
   const path = points.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join('')
   const pct = (v: number) => `${((y(v) / H) * 100).toFixed(2)}%`
-  const h = hover !== undefined ? points[hover] : undefined
+  const h = hover !== undefined ? points[hover] : mark !== undefined ? points.find((p) => p.t === mark) : undefined
 
   const onMove = (e: PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
@@ -60,7 +62,7 @@ export function LineChart({ points, format, formatDate, tone, label, reference }
           <line className="linechart-grid" x1={0} x2={W} y1={0.5} y2={0.5} />
           <line className="linechart-grid" x1={0} x2={W} y1={H - 0.5} y2={H - 0.5} />
           {crossesZero && <line className="linechart-zero" x1={0} x2={W} y1={y(0)} y2={y(0)} />}
-          {reference && <line className="linechart-ref" x1={0} x2={W} y1={y(reference.value)} y2={y(reference.value)} />}
+          {reference && <line className={`linechart-ref ${reference.tone ?? ''}`} x1={0} x2={W} y1={y(reference.value)} y2={y(reference.value)} />}
           <path className="linechart-line" d={path} />
           {h && <line className="linechart-cross" x1={x(h.t)} x2={x(h.t)} y1={0} y2={H} />}
         </svg>
@@ -78,18 +80,18 @@ export function LineChart({ points, format, formatDate, tone, label, reference }
         {h && <span className="linechart-dot" style={{ left: `${(x(h.t) / W) * 100}%`, top: pct(h.v) }} aria-hidden="true" />}
         {h && (
           <div className={`linechart-tip ${x(h.t) > W / 2 ? 'left' : ''}`} style={{ left: `${(x(h.t) / W) * 100}%` }}>
-            <span className="muted">{formatDate(h.t)}</span> <b className={tone?.(h.v)}>{format(h.v)}</b>
+            <span className="muted">{formatX(h.t)}</span> <b className={tone?.(h.v)}>{format(h.v)}</b>
           </div>
         )}
       </div>
       <div className="linechart-x small muted">
-        <span>{formatDate(t0)}</span>
+        <span>{formatX(t0)}</span>
         {reference && (
           <span>
-            <span className="linechart-key" aria-hidden="true" /> {reference.label}
+            <span className={`linechart-key ${reference.tone ?? ''}`} aria-hidden="true" /> {reference.label}
           </span>
         )}
-        <span>{formatDate(t1)}</span>
+        <span>{formatX(t1)}</span>
       </div>
       <figcaption id={`${id}-cap`} className="sr-only">
         {label}
@@ -98,7 +100,7 @@ export function LineChart({ points, format, formatDate, tone, label, reference }
         <tbody>
           {points.map((p) => (
             <tr key={p.t}>
-              <th scope="row">{formatDate(p.t)}</th>
+              <th scope="row">{formatX(p.t)}</th>
               <td>{format(p.v)}</td>
             </tr>
           ))}

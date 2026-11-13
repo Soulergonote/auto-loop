@@ -14,6 +14,7 @@ import type { Pick } from '../scanner/Scanner'
 import { MorphoPositions, type MorphoTotals } from './MorphoPositions'
 import { PositionHistory } from './PositionHistory'
 import { HfProjection } from './HfProjection'
+import { thresholdOf } from '../../domain/positionBar'
 import { HfTargetBlock } from './HfTarget'
 import { aaveHistory } from './history'
 import type { MorphoTab } from '../loop/morpho/MorphoView'
@@ -321,6 +322,7 @@ function MarketPosition({
           }))}
           debt={holdings.map((h) => ({ value: Number(h.borrowedBase), apy: h.reserve.borrowApy + (h.reserve.native?.apy ?? 0) }))}
           ptDaysLeft={pt && !isExpired(pt) ? ptDays : undefined}
+          bar={{ liquidationThreshold: thresholdOf(healthFactor, Number(s.equityBase + s.debtBase), Number(s.debtBase)), correlated }}
         />
       )}
       {s.debtBase > 0n && (

@@ -214,9 +214,12 @@ export function Summary({
   action,
   reason,
   children,
+  visual,
   needs = 'contract',
 }: {
   items: SummaryItem[]
+  /** a picture of the position under the values (PositionBar) */
+  visual?: ReactNode
   action: ReactNode
   reason?: string
   children?: ReactNode
@@ -242,6 +245,7 @@ export function Summary({
           </div>
         ))}
       </div>
+      {visual && <div className="sum-visual">{visual}</div>}
       <div className="sum-action">
         {action}
         {reason && <span className={`small sum-reason ${gate?.bad ? 'bad-text' : 'muted'}`}>{reason}</span>}

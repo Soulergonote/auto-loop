@@ -23,6 +23,8 @@ import { isCorrelated } from '../../../domain/pairs'
 import { exitIssues, exitSellAmount } from '../../../domain/exitCheck'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
 import { RiskPanel } from '../shared/RiskPanel'
+import { PositionBar } from '../../../ui/PositionBar'
+import { projectHealthFactor } from '../../../domain/projection'
 import { ApyHistory } from '../shared/ApyHistory'
 import { useMorphoBorrowSeries } from '../../../protocols/morpho/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
@@ -328,8 +330,27 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
           sub: `de ${ptShortSymbol(C.symbol)} face à ${L.symbol}`,
         }
 
+  // the position in one picture: today's projection, and its health factor in 90 days at today's rates
+  const debtUsd = M.loanUsd > 0 ? (Number(newDebt) / 10 ** L.decimals) * M.loanUsd : undefined
+  const bar =
+    hf !== undefined && !unreal && newDebt > 0n && Number.isFinite(hf) ? (
+      <PositionBar
+        healthFactor={hf}
+        liquidationThreshold={M.lltv}
+        correlated={correlated}
+        projectedHf={projectHealthFactor(
+          hf,
+          [{ value: 1, apy: collateralApy, pt: pt && ptDays !== undefined ? { daysLeft: ptDays } : undefined }],
+          [{ value: 1, apy: ctx.borrowApy }],
+          90,
+        )}
+        amounts={debtUsd !== undefined ? { collateral: (debtUsd * hf) / M.lltv, debt: debtUsd } : undefined}
+      />
+    ) : undefined
+
   const summary = (
     <Summary
+      visual={bar}
       items={[
         {
           label: 'Health factor',

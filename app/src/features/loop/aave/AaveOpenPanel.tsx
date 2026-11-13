@@ -5,6 +5,9 @@ import { protocolName, AGGREGATORS, QUOTE_MODE, type AggregatorChoice, type Toke
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../../../services/merkl'
 import { CampaignTable } from '../shared/CampaignTable'
 import { RiskPanel } from '../shared/RiskPanel'
+import { PositionBar } from '../../../ui/PositionBar'
+import { projectHealthFactor } from '../../../domain/projection'
+import { thresholdOf } from '../../../domain/positionBar'
 import { ApyHistory } from '../shared/ApyHistory'
 import { useAaveRateSeries } from '../../../protocols/aave/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
@@ -521,8 +524,32 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
     proj && Number.isFinite(proj.healthFactor) && !unreal ? fmtPrice(BigInt(Math.round(Number(C.price) * (1 - proj.dropToLiquidation)))) : proj ? NA : undefined
   const counted = yields.filter((y) => y.apy > 0).length
 
+  // the position in one picture: today's projection, and its health factor in 90 days at today's rates
+  const bar =
+    proj && !unreal && proj.debtBase > 0n && Number.isFinite(proj.healthFactor) ? (
+      <PositionBar
+        healthFactor={proj.healthFactor}
+        liquidationThreshold={thresholdOf(proj.healthFactor, Number(proj.collateralBase), Number(proj.debtBase))}
+        correlated={correlated}
+        projectedHf={projectHealthFactor(
+          proj.healthFactor,
+          [
+            {
+              value: Number(proj.collateralBase),
+              apy: C.supplyApy + (pt ? 0 : (cNative?.apy ?? 0)),
+              pt: pt && ptDays !== undefined ? { daysLeft: ptDays, discount: pt.discount } : undefined,
+            },
+          ],
+          [{ value: Number(proj.debtBase), apy: D.borrowApy + (D.native?.apy ?? 0) }],
+          90,
+        )}
+        amounts={{ collateral: Number(proj.collateralBase) / 1e8, debt: Number(proj.debtBase) / 1e8 }}
+      />
+    ) : undefined
+
   const summary = (
     <Summary
+      visual={bar}
       items={[
         {
           label: 'Health factor',

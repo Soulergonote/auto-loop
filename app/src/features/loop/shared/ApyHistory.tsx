@@ -59,7 +59,7 @@ export function ApyHistory({ borrow, supply, leverage, extra, pending, source }:
       <LineChart
         points={points}
         format={(v) => fmtPct(v, 1)}
-        formatDate={fmtDay}
+        formatX={fmtDay}
         tone={apyTone}
         label={`APY net de la boucle à ${fmtX(leverage)}, par jour, sur ${window} jours`}
         reference={{ value: stats.average, label: `moyenne ${fmtPct(stats.average, 1)}` }}

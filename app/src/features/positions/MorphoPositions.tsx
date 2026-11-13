@@ -261,6 +261,7 @@ function MorphoPosition({
           collateral={[{ value: Number(collUsd), apy: collateralApy, pt: pt && { daysLeft: daysToMaturity(pt) } }]}
           debt={[{ value: Number(debtUsd), apy: borrowApy }]}
           ptDaysLeft={pt && !isExpired(pt) ? ptDays : undefined}
+          bar={{ liquidationThreshold: m.lltv, correlated }}
         />
       )}
       {u.debt > 0n && (

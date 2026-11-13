@@ -337,3 +337,29 @@ tr.dim > td { opacity: 0.55; }
 .linechart-x { display: flex; justify-content: space-between; gap: 8px; margin: 4px 0 0 52px; }
 .linechart-key { display: inline-block; width: 14px; vertical-align: middle; border-top: 1px dashed var(--muted); }
 .linechart-range { max-width: 180px; }
+
+/* PositionBar (ui/PositionBar.tsx): collateral bar, debt coloured like the health factor, liquidation line, 90-day marker */
+.posbar { margin: 10px 0 2px; }
+.posbar-track { position: relative; height: 10px; border-radius: 5px; background: var(--border); overflow: visible; }
+.posbar-track > span { position: absolute; top: 0; bottom: 0; }
+.posbar-debt { left: 0; border-radius: 5px 0 0 5px; }
+.posbar .good { background: var(--good); }
+.posbar .warn { background: var(--warn); }
+.posbar .bad { background: var(--bad); }
+.posbar-margin { background: color-mix(in srgb, var(--good) 22%, var(--card)); }
+.posbar-rest { right: 0; border-radius: 0 5px 5px 0; background: repeating-linear-gradient(135deg, var(--border) 0 3px, var(--card) 3px 6px); }
+.posbar-liq { width: 2px; margin-left: -1px; top: -3px !important; bottom: -3px !important; background: var(--bad); border-radius: 1px; }
+.posbar-marker { width: 2px; margin-left: -1px; top: -4px !important; bottom: -4px !important; background: var(--text); border-radius: 1px; box-shadow: 0 0 0 1px var(--card); }
+.posbar-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
+.posbar-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; }
+.posbar-key-margin { background: color-mix(in srgb, var(--good) 22%, var(--card)); }
+.posbar-key-liq { width: 2px; background: var(--bad); }
+.posbar-key-marker { width: 2px; background: var(--text); }
+
+.sum-visual { margin: 4px 0 16px; }
+@media (max-width: 640px) {
+  .summary .sum-visual { display: none; }
+}
+.linechart-ref.bad { stroke: var(--bad); stroke-dasharray: none; }
+.linechart-key.bad { border-top: 2px solid var(--bad); }
+.hf-curve-title { margin: 12px 0 0; font-weight: 600; }

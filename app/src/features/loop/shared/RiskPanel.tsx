@@ -3,6 +3,8 @@ import { fmtHf, fmtPct } from '../../../ui/format'
 import { apyTone, hfTone } from '../../../ui/tone'
 import { WINDOWS, type Window } from '../../../protocols/aave/rateHistory'
 import { Fold } from '../../../ui/primitives'
+import { LineChart } from '../../../ui/LineChart'
+import { hfAtPriceMove } from '../../../domain/positionBar'
 import type { RiskSignal } from '../../../domain/riskSignals'
 import { RiskSignalList } from './RiskSignals'
 
@@ -29,6 +31,10 @@ type Props = {
   /** facts on the pair (domain/riskSignals.ts), shown first */
   signals?: RiskSignal[]
 }
+
+/** Price moves of the collateral against the debt on the curve: −20 % to +10 %, by 1 %. */
+const PRICE_MOVES = Array.from({ length: 31 }, (_, i) => (i - 20) / 100)
+const fmtMove = (m: number) => (Math.abs(m) < 1e-9 ? 'prix du jour' : `${m > 0 ? '+' : '−'}${Math.round(Math.abs(m) * 100)} %`)
 
 /** What would hurt the loop: a price move, a rate rise, or simply time while interest accrues. */
 export function RiskPanel({
@@ -134,6 +140,18 @@ export function RiskPanel({
           </tr>
         </tbody>
       </table>
+      <p className="small hf-curve-title">
+        Health factor selon le prix de {collateral} face à {debt}
+      </p>
+      <LineChart
+        points={PRICE_MOVES.map((m) => ({ t: m, v: hfAtPriceMove(healthFactor, m) }))}
+        format={fmtHf}
+        formatX={fmtMove}
+        tone={hfClass}
+        label={`Health factor selon le prix de ${collateral} face à ${debt}, de −20 % à +10 %`}
+        reference={{ value: 1, label: 'liquidation (HF 1)', tone: 'bad' }}
+        mark={0}
+      />
       <p className="muted small">
         Le health factor ne suit que les prix oracle d’Aave. Sur une paire de stablecoins, l’oracle peut ignorer une baisse du prix de marché : le risque est
         alors celui de l’émetteur du token.
