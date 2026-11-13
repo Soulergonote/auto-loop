@@ -2,7 +2,7 @@
 import { encodeFunctionData, type Hash } from 'viem'
 import { readContract } from '@wagmi/core'
 import { wagmiConfig } from '../../chain/wagmi'
-import { debtTokenAbi, erc20Abi, poolAbi } from '../../chain/abi'
+import { debtTokenAbi, erc20Abi, poolAbi, wrappedNativeAbi } from '../../chain/abi'
 import { aTokensToApprove, type SwapCollateralPlan } from './swapCollateral'
 import { capitalTokenOf, closeCall, encodeCall, openCall, swapCollateralCall, swapDebtCall, type ClosePlan, type OpenPlan } from './execute'
 import type { SwapDebtPlan } from './swapDebt'
@@ -10,7 +10,7 @@ import { type Progress } from '../../chain/tx'
 import { allowanceCalls, sendBatch, type BatchCall } from '../../chain/batch'
 
 /**
- * "Ouvrir" as one batch: eMode switch if needed, exact collateral approval, exact credit delegation, `open`, then
+ * "Ouvrir" as one batch: eMode switch if needed, the native capital wrapped if it is one, exact collateral approval, exact credit delegation, `open`, then
  * the approval and the delegation back to their previous values. Same contract call as the step flow.
  */
 export function openBatchCalls(p: OpenPlan, allowances: { collateral: bigint; borrow: bigint }): BatchCall[] {
@@ -34,8 +34,19 @@ export function openBatchCalls(p: OpenPlan, allowances: { collateral: bigint; bo
             label: p.eModeTarget === 0 ? 'Sortir de l’eMode sur le compte Aave' : 'Passer le compte Aave en eMode',
           },
         ]
+  const wrap: BatchCall[] = p.wrapNative
+    ? [
+        {
+          to: capitalTokenOf(p),
+          data: encodeFunctionData({ abi: wrappedNativeAbi, functionName: 'deposit' }),
+          value: p.wrapNative,
+          label: 'Convertir le token natif (montant exact)',
+        },
+      ]
+    : []
   return [
     ...emode,
+    ...wrap,
     ...col.before,
     ...del.before,
     { to: p.executor, data: open, label: p.capitalQuote ? 'Ouvrir : swap du capital, flash loan, swap et dépôt' : 'Ouvrir : flash loan, swap et dépôt' },

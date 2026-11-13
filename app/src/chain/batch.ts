@@ -6,7 +6,8 @@ import { wagmiConfig } from './wagmi'
 import { debtTokenAbi, erc20Abi } from './abi'
 import { type Progress } from './tx'
 
-export type BatchCall = { to: Address; data: Hex; label: string }
+/** `value`: native token sent with the call (wrapping the native capital) */
+export type BatchCall = { to: Address; data: Hex; label: string; value?: bigint }
 
 /** Exact approval before a use and the previous value back after it; nothing when the allowance already covers it. */
 export function allowanceCalls(
@@ -51,7 +52,12 @@ export async function sendBatch(chainId: number, user: Address, calls: BatchCall
   const failure = await simulate(chainId, user, calls)
   if (failure) throw new Error(failure)
   onStep('Confirmation dans le portefeuille…')
-  const { id } = await sendCalls(wagmiConfig, { chainId, account: user, forceAtomic: true, calls: calls.map(({ to, data }) => ({ to, data })) })
+  const { id } = await sendCalls(wagmiConfig, {
+    chainId,
+    account: user,
+    forceAtomic: true,
+    calls: calls.map(({ to, data, value }) => ({ to, data, ...(value ? { value } : {}) })),
+  })
   onStep('En attente d’inclusion…')
   const status = await waitForCallsStatus(wagmiConfig, { id, timeout: 10 * 60_000 })
   if (status.status !== 'success')
@@ -72,7 +78,7 @@ async function simulate(chainId: number, user: Address, calls: BatchCall[]): Pro
   let results: readonly { status: string; error?: Error }[]
   try {
     const client = getPublicClient(wagmiConfig, { chainId })!
-    results = (await client.simulateCalls({ account: user, calls: calls.map(({ to, data }) => ({ to, data })) })).results
+    results = (await client.simulateCalls({ account: user, calls: calls.map(({ to, data, value }) => ({ to, data, ...(value ? { value } : {}) })) })).results
   } catch {
     return undefined
   }

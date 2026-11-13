@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useGasPrice } from 'wagmi'
 import { parseUnits, type Address } from 'viem'
-import { protocolName, AGGREGATORS, QUOTE_MODE, type AggregatorChoice, type Token } from '../../../config'
+import { protocolName, wrappedNative, AGGREGATORS, QUOTE_MODE, type AggregatorChoice, type Token } from '../../../config'
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../../../services/merkl'
 import { CampaignTable } from '../shared/CampaignTable'
 import { RiskPanel } from '../shared/RiskPanel'
@@ -35,7 +35,7 @@ import { GAS_UNITS_PT, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapL
 import { encodeCall, executeOpen, openCall, type OpenPlan } from '../../../protocols/aave/execute'
 import { executeOpenBatch } from '../../../protocols/aave/batch'
 import { useAtomicBatch } from '../../../chain/batch'
-import { capitalKind, useWalletTokens } from '../../../chain/walletTokens'
+import { capitalKind, useWalletTokens, walletValue, type WalletToken } from '../../../chain/walletTokens'
 import { outcomeLines, readOutcome } from '../../../chain/outcome'
 import { fmtBps, fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
 import { isCorrelated } from '../../../domain/pairs'
@@ -68,6 +68,9 @@ type Props = {
   tokens?: Token[]
 }
 
+/** Value of a capital choice in the token select: the native token apart from its wrapped ERC-20. */
+const optionKey = (t: WalletToken) => (t.native ? 'native' : t.token.address)
+
 export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregator, onDone, seed, common, head, tokens }: Props) {
   const eligible = eligibleEModes(emodes, base.collateral, base.debt)
   // default: the account's current category when it fits the pair, otherwise the best one (highest LTV)
@@ -88,15 +91,18 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
   const [amountText, setAmountText] = useState(seed?.amount ?? '1')
   // capital in any token (contract v2): the collateral, the debt asset or another token the wallet holds
   const v2 = market.executorVersion !== 1
-  const wallet = useWalletTokens(market, tokens, C.token, D.token, account, v2)
+  const wallet = useWalletTokens(market, tokens, C.token, D.token, account, v2, wrappedNative(tokens, market.chain))
   const [capitalChoice, setCapitalChoice] = useState<string | undefined>(seed?.capital)
   const capitalOptions = v2 ? (wallet.data ?? []) : []
-  const capitalPick = capitalOptions.find((t) => t.token.address === capitalChoice)
+  const capitalPick = capitalOptions.find((t) => optionKey(t) === capitalChoice)
+  // the native token (ETH…): wrapped into its ERC-20 in the same batch, then used like it
+  const native = capitalPick?.native
   const K = capitalPick?.token ?? C.token
   const kind = capitalKind(K.address, C.token.address, D.token.address)
   const capSide = kind === 'collateral' ? C.side : kind === 'debt' ? D.side : capitalPick!.side
-  const capBalance = kind === 'collateral' ? user?.collateralBalance : capitalPick?.balance
-  const capAllowance = kind === 'collateral' ? (user?.collateralAllowance ?? 0n) : (capitalPick?.allowance ?? 0n)
+  const capBalance = native ? capitalPick.balance : kind === 'collateral' ? user?.collateralBalance : capitalPick?.balance
+  const capAllowance = native ? capitalPick.allowance : kind === 'collateral' ? (user?.collateralAllowance ?? 0n) : (capitalPick?.allowance ?? 0n)
+  const capSymbol = native?.symbol ?? K.symbol
   const [leverage, setLeverage] = useState(seed ? Math.floor(seed.leverage * 20) / 20 : 2)
   const { slippage, setSlippage, auto: autoSlip } = useSlippage(pairKind(reserveAsset(C), reserveAsset(D), { pt: !!C.pt }))
   const [horizonText, setHorizon] = useState('90')
@@ -260,7 +266,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
   else if (hasPosition && debtAmount === 0n && initial === debouncedInitial && BigInt(Math.round(lev * 10_000)) === debouncedLevBps)
     problems.push('Le levier visé ne dépasse pas le levier actuel. Pour le réduire : onglet « Fermer / réduire ».')
   // first cause first (charte v2): balance, then market state, liquidity, health factor, swap
-  if (user && initial && capBalance !== undefined && initial > capBalance) problems.push(`Solde ${K.symbol} insuffisant.`)
+  if (user && initial && capBalance !== undefined && initial > capBalance) problems.push(`Solde ${capSymbol} insuffisant.`)
   if (!C.config.active || C.config.paused || C.config.frozen) problems.push(`${C.token.symbol} est gelé ou en pause sur ${protocolName(market)}.`)
   if (!canBorrow(D, reserves.emode)) problems.push(`${D.token.symbol} ne peut pas être emprunté.`)
   if (!D.config.flashLoanEnabled) problems.push(`Flash loan désactivé sur ${D.token.symbol}.`)
@@ -425,6 +431,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
           variableDebtToken: D.variableDebtToken,
           initialCollateral: debouncedInitial ?? 0n,
           capitalToken: K.address,
+          wrapNative: native ? (debouncedInitial ?? 0n) : undefined,
           capitalQuote: capitalOverride,
           debtAmount,
           quote: quoteOverride,
@@ -499,6 +506,9 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
                 : `Passer le compte Aave en eMode « ${reserves.emode!.label} »${batch ? '' : ' (transaction, une fois)'}`,
           },
         ]
+      : []),
+    ...(native
+      ? [{ label: `Convertir ${fmtAmount(initial ?? 0n, K.decimals)} ${native.symbol} en ${K.symbol}${batch ? ' (montant exact)' : ' (transaction)'}` }]
       : []),
     ...(batch
       ? [
@@ -612,21 +622,26 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
               capitalOptions.length > 1 && (
                 <select
                   aria-label="Token du capital"
-                  value={K.address}
+                  value={capitalPick ? optionKey(capitalPick) : K.address}
                   onChange={(e) => {
                     setCapitalChoice(e.target.value)
                     setAmountText('')
                   }}
                 >
                   {capitalOptions.map((t) => (
-                    <option key={t.token.address} value={t.token.address}>
-                      {t.token.symbol}
+                    <option key={optionKey(t)} value={optionKey(t)}>
+                      {t.native?.symbol ?? t.token.symbol}
+                      {t.balance > 0n && walletValue(t) > 0n ? ` · ${fmtUsd(walletValue(t), true)}` : ''}
                     </option>
                   ))}
                 </select>
               )
             }
             usd={initial !== undefined ? fmtUsd(toBase(initial, capSide)) : undefined}
+            note={
+              native &&
+              `Converti en ${K.symbol} ${batch ? 'dans la même opération' : 'par une transaction juste avant'} ; le solde affiché garde 2 % des ${native.symbol} pour le gas.`
+            }
           />
           <LeverageSlider
             value={lev}

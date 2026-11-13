@@ -6,7 +6,16 @@ import { fmtAmount, fmtBps, fmtDate, fmtDays, fmtDollars, fmtPct } from '../../.
 import { Metric, NA, Segmented } from '../../../ui/primitives'
 import { apyTone } from '../../../ui/tone'
 
-/** Capital amount with the wallet balance as a shortcut, an optional token choice, and its value in dollars. */
+/** Shares of the wallet balance offered as one-tap amounts. */
+const SHARES = [25, 50, 100] as const
+
+/** An amount as the input expects it: no grouping spaces, a dot, at most 8 decimals. */
+const inputText = (amount: bigint, decimals: number) => fmtAmount(amount, decimals, 8).replace(/\s/g, '').replace(',', '.')
+
+/**
+ * Capital amount with the wallet balance as a shortcut (the whole balance, or 25 / 50 / 100 % of it), an optional token
+ * choice, and its value in dollars.
+ */
 export function CapitalField(p: {
   label: ReactNode
   balance?: bigint
@@ -17,14 +26,17 @@ export function CapitalField(p: {
   tokenSelect?: ReactNode
   /** value of the amount in dollars, once it parses */
   usd?: string
+  /** a line under the field (the gas reserve of a native capital) */
+  note?: string
 }) {
+  const balance = p.balance
   return (
     <div className="field">
       <span>
         {p.label}
-        {p.balance !== undefined && (
-          <button className="link" onClick={() => p.setAmountText(fmtAmount(p.balance!, p.decimals, 8).replace(/\s/g, '').replace(',', '.'))}>
-            solde {fmtAmount(p.balance, p.decimals)}
+        {balance !== undefined && (
+          <button className="link" onClick={() => p.setAmountText(inputText(balance, p.decimals))}>
+            solde {fmtAmount(balance, p.decimals)}
           </button>
         )}
       </span>
@@ -32,7 +44,17 @@ export function CapitalField(p: {
         {p.tokenSelect}
         <input aria-label="Montant du capital" inputMode="decimal" value={p.amountText} onChange={(e) => p.setAmountText(e.target.value)} />
       </div>
+      {balance !== undefined && balance > 0n && (
+        <div className="shares" role="group" aria-label="Part du solde">
+          {SHARES.map((share) => (
+            <button key={share} type="button" className="chip" onClick={() => p.setAmountText(inputText((balance * BigInt(share)) / 100n, p.decimals))}>
+              {share} %
+            </button>
+          ))}
+        </div>
+      )}
       {p.usd !== undefined && <span className="muted small">≈ {p.usd}</span>}
+      {p.note && <span className="muted small">{p.note}</span>}
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { encodeFunctionData, maxUint256, zeroAddress, type Address, type Hash, type Hex } from 'viem'
 import { simulateContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
 import { wagmiConfig } from '../../chain/wagmi'
-import { erc20Abi, executorAbi, executorAbiV1, poolAbi } from '../../chain/abi'
+import { erc20Abi, executorAbi, executorAbiV1, poolAbi, wrappedNativeAbi } from '../../chain/abi'
 import { quoteSteps, type Quote } from '../../services/quotes/quotes'
 import { signATokenPermit, signDelegation, type ExecutorSignature } from './signatures'
 import { aTokensToApprove, swapCollateralArgs, type SwapCollateralPlan } from './swapCollateral'
@@ -24,6 +24,8 @@ export type OpenPlan = {
   initialCollateral: bigint
   /** v2: token of the capital; the debt asset is sold with the borrowed amount, any other token is swapped first */
   capitalToken?: Address
+  /** native token to wrap into `capitalToken` (the chain's wrapped native) before the open: the capital itself */
+  wrapNative?: bigint
   /** v2: swap of the capital to the collateral, when the capital is neither the collateral nor the debt asset */
   capitalQuote?: Quote
   debtAmount: bigint
@@ -168,6 +170,15 @@ async function approve(chainId: number, token: Address, spender: Address, amount
   await waitForTransactionReceipt(wagmiConfig, { chainId, hash })
 }
 
+/** Wraps the native capital (ETH → WETH…) in its own transaction, before the approval (wallets without batches). */
+async function wrapNative(chainId: number, wrapped: Address, value: bigint, account: Address, onStep: Progress) {
+  onStep('Conversion du token natif en sa version ERC-20 (transaction)…')
+  const { request } = await simulateContract(wagmiConfig, { chainId, account, address: wrapped, abi: wrappedNativeAbi, functionName: 'deposit', value })
+  const hash = await writeContract(wagmiConfig, request)
+  const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId, hash })
+  if (receipt.status !== 'success') throw new Error('La conversion du token natif a échoué')
+}
+
 /** eMode is a setting of the user's own Aave account: only the user can change it, the executor cannot. */
 async function setEMode(p: OpenPlan, categoryId: number, onStep: Progress) {
   onStep(categoryId === 0 ? 'Sortie de l’eMode (transaction)…' : 'Activation de l’eMode (transaction)…')
@@ -189,6 +200,7 @@ export async function executeOpen(p: OpenPlan, onStep: Progress): Promise<Hash> 
   if (p.quote.simulated || p.capitalQuote?.simulated) throw new Error('Devis simulé : impossible à exécuter')
   openCall(p) // checks the plan before anything is signed
   if (p.eModeTarget !== undefined) await setEMode(p, p.eModeTarget, onStep)
+  if (p.wrapNative) await wrapNative(p.chainId, capitalTokenOf(p), p.wrapNative, p.user, onStep)
   if (p.initialCollateral > 0n && p.collateralAllowance < p.initialCollateral) {
     await approve(p.chainId, capitalTokenOf(p), p.executor, p.initialCollateral, p.user, onStep)
   }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { decodeFunctionData, getAddress } from 'viem'
 import { erc20Abi, executorAbi } from './abi'
-import { capitalKind, walletTokens, type WalletToken } from './walletTokens'
+import { capitalKind, walletTokens, spendableNative, type WalletToken } from './walletTokens'
 import { openArgs, openCall, type OpenPlan } from '../protocols/aave/execute'
 import { openBatchCalls } from '../protocols/aave/batch'
 import type { Quote } from '../services/quotes/quotes'
@@ -102,6 +102,13 @@ describe('open with the capital in another token (v2)', () => {
     expect((open.args[0] as { capitalToken: string }).capitalToken).toBe(WSTETH)
   })
 
+  it('native capital: wrapped first, with the exact value, then approved', () => {
+    const calls = openBatchCalls(plan({ capitalToken: WETH, initialCollateral: 10n ** 18n, wrapNative: 10n ** 18n }), { collateral: 0n, borrow: 0n })
+    expect(calls[0]).toMatchObject({ to: WETH, value: 10n ** 18n })
+    expect(calls[0].data.slice(0, 10)).toBe('0xd0e30db0')
+    expect(calls[1].to).toBe(WETH)
+    expect(calls.filter((c) => c.value).length).toBe(1)
+  })
   it('a simulated capital quote is never sent', () => {
     const cq = quote(5n * 10n ** 17n, { simulated: true })
     expect(() => openBatchCalls(plan({ capitalToken: WSTETH, initialCollateral: 5n * 10n ** 17n, capitalQuote: cq }), { collateral: 0n, borrow: 0n })).toThrow(
@@ -117,14 +124,27 @@ describe('walletTokens', () => {
     balance,
     allowance: 0n,
   })
-  it('lists the pair first, then the other tokens held, by symbol', () => {
+  it('lists the tokens held first, by value, then the pair tokens not held', () => {
     const list = walletTokens(
-      [t(a(5), 'cbBTC', 1n), t(USDC, 'USDC', 0n), t(a(6), 'AAVE', 0n), t(WSTETH, 'wstETH', 3n), t(WETH, 'WETH', 0n), t(a(7), 'X', 9n, 0n)],
+      [
+        t(a(5), 'cbBTC', 10n ** 18n, 5n),
+        t(USDC, 'USDC', 0n),
+        t(a(6), 'AAVE', 0n),
+        t(WSTETH, 'wstETH', 3n * 10n ** 18n, 4n),
+        t(WETH, 'WETH', 0n),
+        t(a(7), 'X', 9n, 0n),
+      ],
       WETH,
       USDC,
     )
-    expect(list.map((x) => x.token.symbol)).toEqual(['WETH', 'USDC', 'cbBTC', 'wstETH'])
+    expect(list.map((x) => x.token.symbol)).toEqual(['wstETH', 'cbBTC', 'WETH', 'USDC'])
   })
+  it('the native token is listed beside its wrapped token, by value', () => {
+    const weth = t(WETH, 'WETH', 10n ** 18n, 10n ** 8n)
+    const list = walletTokens([weth, { ...weth, balance: 5n * 10n ** 18n, native: { symbol: 'ETH' } }, t(USDC, 'USDC', 0n)], WETH, USDC)
+    expect(list.map((x) => (x.native ? x.native.symbol : x.token.symbol))).toEqual(['ETH', 'WETH', 'USDC'])
+  })
+  it('keeps 2 % of the native balance for gas', () => expect(spendableNative(100n)).toBe(98n))
 })
 
 describe('pairPosition', () => {

@@ -273,7 +273,11 @@ const anvil = async (method, params) =>
   if ((mode === 'open' || mode === 'increase') && process.env.CAPITAL) {
     const sel = page.locator('select[aria-label="Token du capital"]')
     await sel.waitFor({ timeout: 30000 })
-    await sel.selectOption({ label: process.env.CAPITAL })
+    // options read « WETH · 1,9 k $ » once held: match the symbol (ETH = the native token, wrapped in the same operation)
+    const label = await sel
+      .locator('option')
+      .evaluateAll((os, c) => os.map((o) => o.textContent.trim()).find((t) => t === c || t.startsWith(c + ' ·')), process.env.CAPITAL)
+    await sel.selectOption({ label })
   }
   if (mode === 'open') {
     await page.getByLabel('Montant du capital').fill(process.env.AMOUNT || '1')

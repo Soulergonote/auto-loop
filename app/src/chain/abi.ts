@@ -195,3 +195,6 @@ export const rateStrategyAbi = parseAbi([
   'struct InterestRateDataRay { uint16 optimalUsageRatio; uint32 baseVariableBorrowRate; uint32 variableRateSlope1; uint32 variableRateSlope2; }',
   'function getInterestRateDataBps(address reserve) view returns (InterestRateDataRay)',
 ])
+
+/** Wrapped native token (WETH, WXPL, WMON…): `deposit` wraps the value sent. */
+export const wrappedNativeAbi = parseAbi(['function deposit() payable'])
