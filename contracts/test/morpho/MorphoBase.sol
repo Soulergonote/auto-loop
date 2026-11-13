@@ -95,7 +95,7 @@ abstract contract MorphoBase is Test {
 
         address[] memory routers = new address[](1);
         routers[0] = address(router);
-        ex = new LeverageExecutorMorpho(morpho, routers);
+        ex = new LeverageExecutorMorpho(morpho, routers, new address[](0));
 
         pt1.mint(user, 10_000e18);
         usdc.mint(user, 10_000e6);

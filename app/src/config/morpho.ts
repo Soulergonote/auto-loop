@@ -73,6 +73,8 @@ export type MorphoNet = MorphoNetDef & {
   executorSource?: 'build' | 'wallet'
   /** taker sent to the aggregators: the contract holds the tokens during the swap */
   quoteTaker: Address
+  /** the executor can refinance Aave v3 <-> Morpho (`refinance`), known once its code is checked */
+  executorRefinance?: boolean
 }
 
 export function getMorphoNet(id: string, local: Record<string, Address> = {}): MorphoNet {

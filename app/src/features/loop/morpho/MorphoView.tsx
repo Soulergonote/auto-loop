@@ -16,8 +16,9 @@ import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, Tag, TxResult
 import { MorphoOpenPanel } from './MorphoOpenPanel'
 import { MorphoClosePanel } from './MorphoClosePanel'
 import { MorphoRollPanel } from './MorphoRollPanel'
+import { MorphoRefinancePanel, aaveMarketsOn } from './MorphoRefinancePanel'
 
-export type MorphoTab = 'open' | 'close' | 'roll'
+export type MorphoTab = 'open' | 'close' | 'roll' | 'refinance'
 /** How the Morpho screen opens: a market (from the scanner or the positions), its tab and leverage. */
 export type MorphoSeed = {
   market: MorphoMarket
@@ -52,6 +53,8 @@ export type MorphoCtx = {
   onDone: () => void
   /** after a market change: shows the new market, with the transaction's result above it */
   onMoved: (to: Hex, result: MovedResult) => void
+  /** another executor for the network (the up-to-date shared one) */
+  onExecutor: (a: Address) => void
 }
 type MovedResult = { ok: boolean; text: string; hash?: Hash; details?: string[] }
 
@@ -201,6 +204,8 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
   const collateralApy = pt ? (pt.expired ? 0 : (pt.impliedApy ?? 0)) : (market?.collateralYield?.apy ?? 0)
   const canRoll = hasPosition
   const rollLabel = pt && needsRenewal(pt) ? 'Renouveler' : 'Changer de marché'
+  // Aave <-> Morpho needs an Aave v3 pool on the network
+  const canRefinance = aaveMarketsOn(chainId).length > 0
 
   const head = (
     <>
@@ -375,6 +380,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
             { value: 'open', label: 'Ouvrir / augmenter' },
             { value: 'close', label: 'Fermer / réduire' },
             ...(canRoll || tab === 'roll' ? [{ value: 'roll' as const, label: rollLabel }] : []),
+            ...(canRefinance ? [{ value: 'refinance' as const, label: 'Refinancer' }] : []),
           ]}
         />
       </div>
@@ -420,9 +426,11 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
       setPicked(to)
       setTab('close')
     },
+    onExecutor,
   }
   const key = `${market.id}-${seed?.nonce ?? ''}`
   if (tab === 'roll' && hasPosition) return <MorphoRollPanel key={key} ctx={ctx} renew={rollLabel === 'Renouveler'} />
+  if (tab === 'refinance' && canRefinance) return <MorphoRefinancePanel key={key} ctx={ctx} />
   const mine = seed?.market.id === market.id ? seed : undefined
   if (tab === 'close') return <MorphoClosePanel key={key} ctx={ctx} seedTarget={mine?.target} />
   return <MorphoOpenPanel key={key} ctx={ctx} seedLeverage={mine?.leverage} seedAmount={mine?.amount} />

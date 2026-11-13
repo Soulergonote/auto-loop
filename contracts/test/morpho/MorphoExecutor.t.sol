@@ -231,7 +231,7 @@ contract MorphoAuthTest is MorphoBase {
         pt1.mint(address(attack), 1_000_000e18);
         address[] memory routers = new address[](1);
         routers[0] = address(attack);
-        LeverageExecutorMorpho ex2 = new LeverageExecutorMorpho(morpho, routers);
+        LeverageExecutorMorpho ex2 = new LeverageExecutorMorpho(morpho, routers, new address[](0));
         address eve = makeAddr("eve");
         // mid-swap, the route tries to borrow for the user (who authorized the executor for this transaction)
         attack.arm(address(morpho), abi.encodeCall(IMorpho.borrow, (m1, 1000e6, 0, user, eve)));
@@ -255,7 +255,7 @@ contract MorphoAuthTest is MorphoBase {
         pt1.mint(address(attack), 1_000_000e18);
         address[] memory routers = new address[](1);
         routers[0] = address(attack);
-        LeverageExecutorMorpho ex2 = new LeverageExecutorMorpho(morpho, routers);
+        LeverageExecutorMorpho ex2 = new LeverageExecutorMorpho(morpho, routers, new address[](0));
         LeverageExecutorMorpho.CloseParams memory c;
         c.market = m1;
         c.repayAmount = 1;
@@ -316,12 +316,12 @@ contract MorphoAuthTest is MorphoBase {
         address[] memory routers = new address[](1);
         routers[0] = address(morpho);
         vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InvalidRouter.selector, address(morpho)));
-        new LeverageExecutorMorpho(morpho, routers);
+        new LeverageExecutorMorpho(morpho, routers, new address[](0));
         routers[0] = makeAddr("eoa");
         vm.expectRevert(abi.encodeWithSelector(SwapExecutorBase.InvalidRouter.selector, routers[0]));
-        new LeverageExecutorMorpho(morpho, routers);
+        new LeverageExecutorMorpho(morpho, routers, new address[](0));
         vm.expectRevert(SwapExecutorBase.ZeroAddress.selector);
-        new LeverageExecutorMorpho(IMorpho(address(0)), new address[](0));
+        new LeverageExecutorMorpho(IMorpho(address(0)), new address[](0), new address[](0));
     }
 }
 

@@ -12,6 +12,8 @@
 //   MARKET=ethereum CHAIN_HEX=0x1 COLL=… node e2e/run.cjs renew ren   roll the PT into a later one (« Renouveler »)
 // Morpho Blue: MARKET=morpho-ethereum CHAIN_HEX=0x1 after NET=morpho fork.sh; deploy, then EXECUTOR=0x… with open
 // (COLL=PT-reUSD-10DEC2026 CAPITAL=USDC AMOUNT=1000), close, reduce and mroll (TARGET=PT-USD3 or an LLTV label).
+// refi (Morpho): « Refinancer », COLL=wstETH DEBT=USDC picks the market, TARGET=<start of the move's label> (Aave Ethereum
+// (Core) → Morpho, Morpho → Aave …); the account needs the pair on Aave (to Morpho) or on that market (to Aave).
 // EXECUTOR=0x… preloads an executor as if deployed from this browser (app built without VITE_EXECUTORS).
 // Writes <prefix>-avant.png / <prefix>-apres.png and prints the notices. Needs playwright (NODE_PATH=$(npm root -g)).
 const { chromium } = require('playwright')
@@ -199,7 +201,24 @@ const anvil = async (method, params) =>
     await page.keyboard.press('Enter')
     await page.waitForTimeout(5000)
   }
+  // DEBT=USDC (Morpho): the loan token of the market, after the collateral
+  if (process.env.DEBT) {
+    await page.locator('.picker:has-text("Dette") .picker-btn').first().click()
+    await page.getByLabel('Rechercher : Dette').fill(process.env.DEBT)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(5000)
+  }
   if (mode === 'roll2') return roll2(page, browser)
+  if (mode === 'refi') {
+    await page.getByRole('radio', { name: 'Refinancer' }).click({ timeout: 60000 })
+    await page.waitForTimeout(8000)
+    if (process.env.TARGET) {
+      const sel = page.locator('label:has-text("Déplacement") select')
+      const label = (await sel.locator('option').allTextContents()).find((t) => t.startsWith(process.env.TARGET))
+      console.log('target:', label)
+      await sel.selectOption({ label })
+    }
+  }
   // AGG=Velora|KyberSwap forces one aggregator instead of the best-price comparison
   if (mode.startsWith('close') || mode === 'reduce') await page.getByRole('radio', { name: 'Fermer / réduire' }).click()
   // swap (v2): TARGET=cbETH the new collateral, PART=50 % (default Tout)
@@ -275,7 +294,7 @@ const anvil = async (method, params) =>
       await page.waitForTimeout(1000)
       const t = await page.locator('main, .page').first().innerText()
       if (
-        /Position ouverte|Position augmentée|Position réduite|Position fermée|Collatéral changé|Dette changée|PT renouvelé|Position déplacée|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(
+        /Position ouverte|Position augmentée|Position réduite|Position fermée|Collatéral changé|Dette changée|PT renouvelé|Position déplacée|Position refinancée|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(
           t,
         ) &&
         i > 3

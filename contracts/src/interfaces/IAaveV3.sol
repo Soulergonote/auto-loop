@@ -40,6 +40,10 @@ interface IAaveV3Pool {
 
     function withdraw(address asset, uint256 amount, address to) external returns (uint256);
 
+    /// @dev on behalf of another address, needs its credit delegation on the variable debt token
+    function borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)
+        external;
+
     function repay(address asset, uint256 amount, uint256 interestRateMode, address onBehalfOf)
         external
         returns (uint256);

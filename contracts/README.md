@@ -151,13 +151,14 @@ Rapport complet : [Audit interne du contrat v2](https://claude.ai/artifact/61hHE
 
 ## Morpho Blue : `LeverageExecutorMorpho`
 
-Contrat séparé, sans propriétaire, pour boucler sur **n'importe quel marché Morpho Blue** (un collatéral, un actif prêté, un oracle, un IRM, une LLTV). Il reprend le moteur d'étapes de la v2 (`Step`, 1 à 4 étapes par swap, minimum par étape contrôlé par différence de soldes, routeurs en liste blanche figée au déploiement) et le prêt flash **gratuit** de Morpho lui-même. Constructeur : `(IMorpho morpho, address[] routers)` ; il refuse comme routeur Morpho, le contrat lui-même et toute adresse sans code.
+Contrat séparé, sans propriétaire, pour boucler sur **n'importe quel marché Morpho Blue** (un collatéral, un actif prêté, un oracle, un IRM, une LLTV). Il reprend le moteur d'étapes de la v2 (`Step`, 1 à 4 étapes par swap, minimum par étape contrôlé par différence de soldes, routeurs en liste blanche figée au déploiement) et le prêt flash **gratuit** de Morpho lui-même. Constructeur : `(IMorpho morpho, address[] routers, address[] aavePools)` ; il refuse comme routeur Morpho, le contrat lui-même, toute adresse sans code, un pool Aave de la liste et tout actif, aToken ou jeton de dette de ces pools.
 
 ### Fonctions
 
 - `open(OpenParams)` : flash loan de l'actif prêté → swap en collatéral → `supplyCollateral` pour l'utilisateur → `borrow` au nom de l'utilisateur → remboursement du prêt flash. Capital dans le collatéral, l'actif prêté (vendu avec la dette) ou un autre token (`capitalSteps`) ; `debtAmount = 0` fait un simple dépôt.
 - `close(CloseParams)` : `repayAmount` (`type(uint256).max` = toute la dette, remboursée par parts, intérêts courus compris), `collateralToWithdraw` (max = tout), `collateralToSell` ; flash loan de l'actif prêté seulement s'il y a une dette. Ce qui reste (collatéral non vendu, actif prêté en trop) revient à l'utilisateur.
 - `roll(RollParams)` : change de marché en une transaction (même actif prêté, autre id) : flash loan → remboursement sur l'ancien marché → retrait du collatéral → swap si le collatéral change (PT vers PT plus long) → dépôt et emprunt sur le nouveau. Pas besoin de prêt flash du PT.
+- `refinance(RefinanceParams)` (ajouté le 13/11/2026) : déplace la même position entre Aave v3 et Morpho, sans swap. Vers Morpho : flash loan Morpho de l'actif prêté → `repay` sur Aave pour l'utilisateur → transfert de ses aTokens du collatéral (approval ou permit) et `withdraw` → `supplyCollateral` et `borrow` du montant remboursé sur Morpho. Vers Aave : flash loan → remboursement sur Morpho → `withdrawCollateral` → `supply` et `borrow` sur Aave au nom de l'utilisateur (délégation de crédit). `debtAmount` et `collateralAmount` à `type(uint256).max` = tout (dette Aave lue dans la transaction, toutes les parts sur Morpho). Health factor minimum vérifié à l'arrivée (celui du marché Morpho, ou celui du compte Aave). Seuls les pools fixés au déploiement sont acceptés (`isAavePool`, sinon `PoolNotAllowed`). `refinanceWithAuth(params, AuthSigs, AaveSig)` applique d'abord, si sa date limite n'est pas 0, le permit de l'aToken ou la `delegationWithSig` du jeton de dette (un rejeu en avance ne fait qu'échouer cet essai, l'allocation est alors déjà là). Événement `Refinanced`. Le refinancement n'est pas dans `LeverageExecutorV2` : il le ferait passer au-dessus de 24 576 octets.
 - Chacune a une variante `…WithAuth(params, AuthSigs)` : deux signatures EIP-712 Morpho `setAuthorizationWithSig`, l'une qui autorise le contrat (nonce n), l'autre qui retire l'autorisation (nonce n + 1), consommées au début et à la fin du même appel. Sans signatures, l'appelant peut autoriser le contrat lui-même dans un lot atomique de son portefeuille (autoriser, appeler, retirer).
 - `Guard {minHealthFactor, deadline}` sur chaque appel ; `healthFactor(market, user)` en lecture (intérêts courus compris, même formule que Morpho).
 - Valeurs de retour et événements `PositionOpened`, `PositionClosed`, `PositionRolled`, `Swapped` (un par étape).
@@ -175,6 +176,7 @@ Contrat séparé, sans propriétaire, pour boucler sur **n'importe quel marché 
 ```bash
 forge test --match-path 'test/morpho/*'     # vraie logique Morpho Blue v1.0.0 (bytecode compilé du tag, BUSL-1.1, tests seulement)
 ETH_RPC_URL=https://ethereum-rpc.publicnode.com forge test --match-contract EthereumForkMorphoTest -vv
+ETH_RPC_URL=https://ethereum-rpc.publicnode.com forge test --match-contract EthereumForkRefinanceTest -vv
 ```
 
 ### Résultats (09/11/2026)
@@ -183,6 +185,12 @@ ETH_RPC_URL=https://ethereum-rpc.publicnode.com forge test --match-contract Ethe
 - **Fork Ethereum, 4/4** : le bytecode local est bien celui de Morpho déployé (aux immutables et métadonnées près) ; boucle x5 PT-reUSD-10DEC2026 / USDC (LLTV 91,5 %) depuis 1 000 USDC puis fermeture totale ; changement de marché PT-reUSD → PT-USD3-17DEC2026 ; déplacement de PT-USD3 entre deux marchés.
 - Gas (local, swap factice), médianes : `openWithAuth` ~415k, `closeWithAuth` ~381k, `rollWithAuth` ~494k. Taille : 15 995 octets (limite 24 576).
 - Bout en bout dans l'app sur fork d'Ethereum (09/11/2026) : déploiement depuis le bouton de l'app, ouverture x5 (signatures) et x4 (lot atomique EIP-5792), changement de marché vers PT-USD3, réduction à x2, fermeture totale ; après chaque appel, l'autorisation Morpho est retirée et l'approval remise à 0.
+
+### Refinancement (13/11/2026)
+
+- **11 tests locaux** (`test/morpho/MorphoRefinance.t.sol`, vrai Morpho Blue et pool Aave v3 de test) : Aave → Morpho en entier, en partie et par permit, Morpho → Aave, aller-retour, health factor minimum, pool hors liste, sans autorisation ni délégation, appelant seul concerné, constructeur.
+- **Fork Ethereum, 4/4** (`test/fork/EthereumForkRefinance.t.sol`, vrai pool Aave v3 Core et vrai Morpho) : 10 wstETH / 10 000 USDC d'Aave vers le marché Morpho wstETH / USDC (LLTV 86 %) puis retour un jour plus tard avec approvals ; aller par permit de l'aToken et signatures Morpho ; retour par `delegationWithSig` ; health factor minimum. Rien ne reste dans le contrat, l'autorisation Morpho est retirée.
+- Taille : 20 479 octets (limite 24 576). Le bytecode et le constructeur ont changé : l'adresse commune CREATE2 change, l'app reconnaît encore l'ancien contrat (`EXECUTOR_BYTECODE_MORPHO_0`) et propose de passer au nouveau pour refinancer.
 
 ### Limites connues (Morpho)
 

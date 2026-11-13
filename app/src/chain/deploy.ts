@@ -1,12 +1,12 @@
-import { encodeDeployData, getAddress, type Address, type Hex } from 'viem'
+import { encodeDeployData, getAddress, parseAbi, type Address, type Hex } from 'viem'
 import { CREATE2_PROXY, create2Address, create2Calldata } from './create2'
 import { deployContract, getPublicClient, sendTransaction, waitForTransactionReceipt } from '@wagmi/core'
 import { useQuery } from '@tanstack/react-query'
 import { wagmiConfig } from './wagmi'
 import { executorAbi, executorAbiV1, morphoExecutorAbi } from './abi'
 import { EXECUTOR_BYTECODE_MORPHO, EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../generated/executorBytecode'
-import { EXECUTOR_BYTECODE_V2_0 } from '../generated/executorBytecodeLegacy'
-import { AGGREGATORS, executorLenders, executorRouters, type Market, type MorphoNet } from '../config'
+import { EXECUTOR_BYTECODE_MORPHO_0, EXECUTOR_BYTECODE_V2_0 } from '../generated/executorBytecodeLegacy'
+import { AGGREGATORS, MARKETS, executorLenders, executorRouters, type Market, type MorphoNet } from '../config'
 
 export type ExecutorVersion = 1 | 2
 /**
@@ -153,25 +153,48 @@ export async function deployExecutor(market: Market, onStep: (s: string) => void
 // LeverageExecutorMorpho (one per chain, for every Morpho Blue market of that chain)
 // ---------------------------------------------------------------------------------------------------------------------
 
-const morphoArgs = (net: MorphoNet) => [net.morpho, executorRouters(net.chain.id).map((r) => r.router)] as const
+/** Aave pools of the chain a Morpho position can be refinanced from or to (fixed in the contract at deployment). */
+export const morphoAavePools = (chainId: number): Address[] => [...new Set(MARKETS.filter((m) => m.chain.id === chainId && !m.soon).map((m) => m.pool))]
+
+const morphoArgs = (net: MorphoNet) => [net.morpho, executorRouters(net.chain.id).map((r) => r.router), morphoAavePools(net.chain.id)] as const
+
+/** The Morpho executor as deployed before `refinance` (no Aave pools): still recognised for everything else. */
+const morphoInitCodeLegacy = (net: MorphoNet) =>
+  encodeDeployData({
+    abi: parseAbi(['constructor(address morpho, address[] routers)']),
+    bytecode: EXECUTOR_BYTECODE_MORPHO_0 as Hex,
+    args: [net.morpho, executorRouters(net.chain.id).map((r) => r.router)],
+  })
+
+/** What the code check found: whether the contract can refinance between Aave and Morpho (deployed from 2026-11-13). */
+export type MorphoExecutorCheck = { refinance: boolean }
 
 /**
  * Same check as `verifyExecutor` for the Morpho executor: code equal to the constructor's output for this chain's
- * Morpho Blue and routers (so no owner, no admin function, the right Morpho), and every router registered.
+ * Morpho Blue, routers and Aave pools (so no owner, no admin function, the right Morpho), and every router registered.
  */
-export async function verifyMorphoExecutor(net: MorphoNet, address: Address): Promise<true> {
+export async function verifyMorphoExecutor(net: MorphoNet, address: Address): Promise<MorphoExecutorCheck> {
   const client = getPublicClient(wagmiConfig, { chainId: net.chain.id })
   if (!client) throw new Error(`pas de connexion à ${net.chain.name}`)
   const code = await client.getCode({ address })
   if (!code || code === '0x') throw new Error(`aucun contrat à cette adresse sur ${net.chain.name}`)
-  const data = morphoInitCode(net)
-  const expected = await client.call({ data }).catch(() => undefined)
-  if (!expected?.data || expected.data.toLowerCase() !== code.toLowerCase()) throw new Error('le code de ce contrat n’est pas celui d’Auto-loop pour Morpho')
+  let refinance: boolean | undefined
+  for (const [data, current] of [
+    [morphoInitCode(net), true],
+    [morphoInitCodeLegacy(net), false],
+  ] as const) {
+    const expected = await client.call({ data }).catch(() => undefined)
+    if (expected?.data && expected.data.toLowerCase() === code.toLowerCase()) {
+      refinance = current
+      break
+    }
+  }
+  if (refinance === undefined) throw new Error('le code de ce contrat n’est pas celui d’Auto-loop pour Morpho')
   for (const r of executorRouters(net.chain.id)) {
     const ok = await client.readContract({ address, abi: morphoExecutorAbi, functionName: 'isRouterAllowed', args: [r.router] })
     if (!ok && (r.id === 'pendle' || !AGGREGATORS[r.id].optional)) throw new Error(`le routeur ${r.label} n’est pas autorisé dans ce contrat`)
   }
-  return true
+  return { refinance }
 }
 
 export function useMorphoExecutorCheck(net: MorphoNet) {

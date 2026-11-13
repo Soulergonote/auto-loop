@@ -125,9 +125,18 @@ const closeMorphoResult = '(uint256 debtRepaid, uint256 collateralWithdrawn, uin
 const rollMorphoResult = '(uint256 debtRepaid, uint256 collateralWithdrawn, uint256 collateralSupplied, uint256 debtBorrowed, uint256 healthFactor)'
 
 /** LeverageExecutorMorpho: the same swap steps against Morpho Blue markets, deployed by the app (one per chain). */
+/** LeverageExecutorMorpho.refinance: Aave v3 <-> Morpho, same pair, no swap */
+const refinanceMorpho = `(address pool, ${marketParams} market, bool toMorpho, uint256 debtAmount, uint256 collateralAmount, (uint256 minHealthFactor, uint256 deadline) guard)`
+const refinanceResult = '(uint256 debtMoved, uint256 collateralMoved, uint256 healthFactor)'
+
 export const morphoExecutorAbi = parseAbi([
-  'constructor(address morpho, address[] routers)',
+  'constructor(address morpho, address[] routers, address[] aavePools)',
   'function MORPHO() view returns (address)',
+  'function isAavePool(address) view returns (bool)',
+  `function refinance(${refinanceMorpho} p) returns (${refinanceResult})`,
+  `function refinanceWithAuth(${refinanceMorpho} p, ${authSigs} auth, (uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s) aaveSig) returns (${refinanceResult})`,
+  `event Refinanced(address indexed user, address indexed pool, bytes32 indexed marketId, bool toMorpho, ${refinanceResult} result)`,
+  'error PoolNotAllowed(address pool)',
   `function open(${openMorpho} p) returns (uint256 collateralSupplied, uint256 debtBorrowed, uint256 healthFactor)`,
   `function openWithAuth(${openMorpho} p, ${authSigs} auth) returns (uint256 collateralSupplied, uint256 debtBorrowed, uint256 healthFactor)`,
   `function close(${closeMorpho} p) returns (${closeMorphoResult})`,

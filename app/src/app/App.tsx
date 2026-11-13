@@ -132,7 +132,10 @@ export function App() {
   const morpho = isMorphoId(marketId)
   const declaredMorpho = useMemo(() => getMorphoNet(marketId, localExecutors), [marketId, localExecutors])
   const morphoCheck = useMorphoExecutorCheck(morpho ? declaredMorpho : { ...declaredMorpho, executor: undefined })
-  const morphoNet = useMemo(() => (morphoCheck.data ? declaredMorpho : { ...declaredMorpho, executor: undefined }), [declaredMorpho, morphoCheck.data])
+  const morphoNet = useMemo(
+    () => (morphoCheck.data ? { ...declaredMorpho, executorRefinance: morphoCheck.data.refinance } : { ...declaredMorpho, executor: undefined }),
+    [declaredMorpho, morphoCheck.data],
+  )
   // the shared executor of the network (CREATE2, same address for everyone): used as soon as someone deployed it
   const sharedAave = useSharedExecutor(
     declared,

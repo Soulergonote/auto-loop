@@ -10,6 +10,8 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {IMorpho, IMorphoOracle, MarketParams, Authorization, MorphoSignature} from "./interfaces/IMorpho.sol";
 import {IMorphoFlashLoanCallback} from "./interfaces/IFlashLenders.sol";
+import {IAaveV3Pool, ICreditDelegationToken} from "./interfaces/IAaveV3.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
 /// @title LeverageExecutorMorpho
 /// @notice Opens, closes and moves a leveraged Morpho Blue position in a single transaction, with the same swap
@@ -24,9 +26,15 @@ import {IMorphoFlashLoanCallback} from "./interfaces/IFlashLenders.sol";
 /// Roll (market A -> market B, same loan token, e.g. a Pendle PT rolled to a later maturity, or the same collateral
 ///   moved to a cheaper market): flash loan of L -> repay the caller's debt on A -> withdraw C_A -> [swap C_A ->
 ///   C_B] -> supply C_B on B -> borrow on B what the loan was -> give the loan back -> minimum health factor on B.
+/// Refinance (Aave v3 <-> Morpho, same collateral C and loan L, no swap; added 2026-11-13): flash loan of L ->
+///   repay the caller's debt on the source -> take the caller's collateral there (aC pulled and withdrawn on Aave,
+///   withdrawCollateral on Morpho) -> supply it on the target for the caller -> borrow there what was repaid, for
+///   the caller -> give the loan back -> minimum health factor on the target. Only Aave pools fixed at deployment.
 ///
 /// Prerequisites for the caller:
 ///   open:  capital.approve(executor, capitalAmount)
+///   refinance from Aave: aC.approve(executor, amount) (or a permit signature); to Aave: credit delegation of L
+///          to the executor (variableDebtL.approveDelegation, or a delegationWithSig signature)
 ///   all:   the executor authorized on Morpho (`setAuthorization`) — or, with the `*WithAuth` variants, two
 ///          signatures: one granting the authorization (nonce n) and one revoking it (nonce n + 1). The contract
 ///          applies the first, does the work and applies the second, and the call reverts if the executor is still
@@ -52,6 +60,9 @@ contract LeverageExecutorMorpho is IMorphoFlashLoanCallback, ReentrancyGuard, Sw
 
     IMorpho public immutable MORPHO;
 
+    /// @notice Aave v3 pools a position can be refinanced from or to, fixed at deployment.
+    mapping(address => bool) public isAavePool;
+
     /// @dev hash of the flash loan this contract is waiting for, 0 when none
     bytes32 private _pendingFlash;
     /// @dev amounts computed inside the flash loan callback, read back by the entry function
@@ -60,7 +71,8 @@ contract LeverageExecutorMorpho is IMorphoFlashLoanCallback, ReentrancyGuard, Sw
     enum Action {
         Open,
         Close,
-        Roll
+        Roll,
+        Refinance
     }
 
     /// @param minHealthFactor the call reverts if the caller's health factor ends below it (1e18 = 1.00; 0 = no
@@ -120,6 +132,37 @@ contract LeverageExecutorMorpho is IMorphoFlashLoanCallback, ReentrancyGuard, Sw
         Guard guard;
     }
 
+    /// @param pool             an Aave v3 pool whitelisted at deployment
+    /// @param market           the Morpho market: same collateral and loan token as the Aave position
+    /// @param toMorpho         true moves the position from Aave to Morpho, false from Morpho to Aave
+    /// @param debtAmount       debt moved; type(uint256).max moves the whole debt (by shares on Morpho)
+    /// @param collateralAmount collateral moved; type(uint256).max moves all of it
+    /// @param guard            minimum health factor where the position lands (Morpho's, or the Aave account's)
+    struct RefinanceParams {
+        address pool;
+        MarketParams market;
+        bool toMorpho;
+        uint256 debtAmount;
+        uint256 collateralAmount;
+        Guard guard;
+    }
+
+    /// @notice EIP-2612 style signature: the aToken permit (from Aave) or the debt token's delegationWithSig (to
+    /// Aave). A deadline of 0 means none.
+    struct AaveSig {
+        uint256 value;
+        uint256 deadline;
+        uint8 v;
+        bytes32 r;
+        bytes32 s;
+    }
+
+    struct RefinanceResult {
+        uint256 debtMoved;
+        uint256 collateralMoved;
+        uint256 healthFactor;
+    }
+
     struct CloseResult {
         uint256 debtRepaid;
         uint256 collateralWithdrawn;
@@ -147,6 +190,9 @@ contract LeverageExecutorMorpho is IMorphoFlashLoanCallback, ReentrancyGuard, Sw
     );
     event PositionClosed(address indexed user, bytes32 indexed marketId, CloseResult result);
     event PositionRolled(address indexed user, bytes32 indexed fromId, bytes32 indexed toId, RollResult result);
+    event Refinanced(
+        address indexed user, address indexed pool, bytes32 indexed marketId, bool toMorpho, RefinanceResult result
+    );
 
     error SameMarket();
     error LoanTokenMismatch();
@@ -159,19 +205,40 @@ contract LeverageExecutorMorpho is IMorphoFlashLoanCallback, ReentrancyGuard, Sw
     error SellExceedsWithdrawn(uint256 toSell, uint256 withdrawn);
     error InsufficientToRepayFlashLoan(uint256 balance, uint256 owed);
     error AuthorizationNotRevoked();
+    error PoolNotAllowed(address pool);
 
-    constructor(IMorpho morpho, address[] memory routers) {
+    constructor(IMorpho morpho, address[] memory routers, address[] memory aavePools) {
         if (address(morpho) == address(0) || address(morpho).code.length == 0) revert ZeroAddress();
         MORPHO = morpho;
+        for (uint256 i; i < aavePools.length; ++i) {
+            if (aavePools[i].code.length == 0) revert ZeroAddress();
+            isAavePool[aavePools[i]] = true;
+        }
         for (uint256 i; i < routers.length; ++i) {
             address router = routers[i];
-            // an EOA would make every swap a no-op call; Morpho and this contract must never be targets (a call to
-            // Morpho from here would act with the caller's authorization)
-            if (router == address(morpho) || router == address(this) || router.code.length == 0) {
+            // an EOA would make every swap a no-op call; Morpho, a pool and this contract must never be targets (a
+            // call to Morpho from here would act with the caller's authorization)
+            if (router == address(morpho) || router == address(this) || router.code.length == 0 || isAavePool[router]) {
                 revert InvalidRouter(router);
+            }
+            for (uint256 j; j < aavePools.length; ++j) {
+                if (_isAaveToken(IAaveV3Pool(aavePools[j]), router)) revert InvalidRouter(router);
             }
             _allowRouter(router);
         }
+    }
+
+    /// @dev true for an asset listed on `pool`, or one of its aTokens or variable debt tokens: a router call to one
+    /// of them could spend allowances users gave this contract (same check as LeverageExecutorV2)
+    function _isAaveToken(IAaveV3Pool pool, address router) private view returns (bool) {
+        if (pool.getReserveData(router).aTokenAddress != address(0)) return true;
+        (bool ok, bytes memory ret) = router.staticcall(abi.encodeWithSignature("UNDERLYING_ASSET_ADDRESS()"));
+        if (!ok || ret.length != 32) return false;
+        uint256 raw = abi.decode(ret, (uint256));
+        if (raw > type(uint160).max) return false;
+        // forge-lint: disable-next-line(unsafe-typecast)
+        IAaveV3Pool.ReserveDataLegacy memory r = pool.getReserveData(address(uint160(raw)));
+        return r.aTokenAddress == router || r.variableDebtTokenAddress == router;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -221,6 +288,41 @@ contract LeverageExecutorMorpho is IMorphoFlashLoanCallback, ReentrancyGuard, Sw
     {
         _grant(auth);
         r = _roll(p);
+        _revoke(auth);
+    }
+
+    function refinance(RefinanceParams calldata p) external nonReentrant returns (RefinanceResult memory) {
+        return _refinance(p);
+    }
+
+    /// @notice Same as `refinance`, with the Morpho authorization granted and revoked by signatures around the call,
+    /// and `aaveSig` applied first when its deadline is not 0.
+    function refinanceWithAuth(RefinanceParams calldata p, AuthSigs calldata auth, AaveSig calldata aaveSig)
+        external
+        nonReentrant
+        returns (RefinanceResult memory r)
+    {
+        if (aaveSig.deadline != 0) {
+            if (!isAavePool[p.pool]) revert PoolNotAllowed(p.pool);
+            IAaveV3Pool.ReserveDataLegacy memory d =
+                IAaveV3Pool(p.pool).getReserveData(p.toMorpho ? p.market.collateralToken : p.market.loanToken);
+            // a front-run of the signature only makes this call fail; the allowance is then already in place
+            if (p.toMorpho) {
+                try IERC20Permit(d.aTokenAddress)
+                    .permit(
+                        msg.sender, address(this), aaveSig.value, aaveSig.deadline, aaveSig.v, aaveSig.r, aaveSig.s
+                    ) {}
+                    catch {}
+            } else {
+                try ICreditDelegationToken(d.variableDebtTokenAddress)
+                    .delegationWithSig(
+                        msg.sender, address(this), aaveSig.value, aaveSig.deadline, aaveSig.v, aaveSig.r, aaveSig.s
+                    ) {}
+                    catch {}
+            }
+        }
+        _grant(auth);
+        r = _refinance(p);
         _revoke(auth);
     }
 
@@ -439,6 +541,92 @@ contract LeverageExecutorMorpho is IMorphoFlashLoanCallback, ReentrancyGuard, Sw
     }
 
     // ---------------------------------------------------------------------------------------------
+    // Refinance (Aave v3 <-> Morpho)
+    // ---------------------------------------------------------------------------------------------
+
+    function _refinance(RefinanceParams calldata cp) internal returns (RefinanceResult memory r) {
+        RefinanceParams memory p = cp;
+        _checkDeadline(p.guard.deadline);
+        if (!isAavePool[p.pool]) revert PoolNotAllowed(p.pool);
+        MarketParams memory m = p.market;
+        if (m.collateralToken == m.loanToken) revert SameAsset();
+        IAaveV3Pool pool = IAaveV3Pool(p.pool);
+
+        uint256 flashAmount;
+        uint256 repayShares;
+        if (!p.toMorpho) {
+            (flashAmount, repayShares) = _repayPlan(m, msg.sender, p.debtAmount);
+        } else if (p.debtAmount == type(uint256).max) {
+            // Aave refuses type(uint256).max when repaying on behalf of someone else: the exact current debt
+            flashAmount = IERC20(pool.getReserveData(m.loanToken).variableDebtTokenAddress).balanceOf(msg.sender);
+        } else {
+            flashAmount = p.debtAmount;
+        }
+        if (flashAmount == 0) revert ZeroAmount();
+
+        address aToken = pool.getReserveData(m.collateralToken).aTokenAddress;
+        address[] memory tokens = new address[](3);
+        tokens[0] = m.collateralToken;
+        tokens[1] = m.loanToken;
+        tokens[2] = aToken;
+        uint256[] memory before = _balances(tokens);
+
+        _flash(m.loanToken, flashAmount, abi.encode(Action.Refinance, msg.sender, abi.encode(p, repayShares)));
+        r.debtMoved = _out[0];
+        r.collateralMoved = _out[1];
+        delete _out;
+
+        _sweep(tokens, before, msg.sender);
+        if (p.toMorpho) {
+            r.healthFactor = _checkHealth(m, msg.sender, p.guard.minHealthFactor);
+        } else {
+            (,,,,, r.healthFactor) = pool.getUserAccountData(msg.sender);
+            if (r.healthFactor < p.guard.minHealthFactor) {
+                revert HealthFactorTooLow(r.healthFactor, p.guard.minHealthFactor);
+            }
+        }
+        emit Refinanced(msg.sender, p.pool, _id(m), p.toMorpho, r);
+    }
+
+    function _executeRefinance(address user, uint256 amount, uint256 repayShares, RefinanceParams memory p)
+        internal
+        returns (uint256 owed)
+    {
+        MarketParams memory m = p.market;
+        IAaveV3Pool pool = IAaveV3Pool(p.pool);
+        uint256 repaid;
+        uint256 moved;
+        if (p.toMorpho) {
+            // 1. repay the Aave debt (Aave may take less: the rest goes back with the sweep)
+            IERC20(m.loanToken).forceApprove(address(pool), amount);
+            repaid = pool.repay(m.loanToken, amount, 2, user);
+            IERC20(m.loanToken).forceApprove(address(pool), 0);
+            // 2. take the aTokens (Aave checks the account's health on a partial move) and withdraw them
+            address aToken = pool.getReserveData(m.collateralToken).aTokenAddress;
+            uint256 aAmount =
+                p.collateralAmount == type(uint256).max ? IERC20(aToken).balanceOf(user) : p.collateralAmount;
+            if (aAmount == 0) revert ZeroAmount();
+            IERC20(aToken).safeTransferFrom(user, address(this), aAmount);
+            moved = pool.withdraw(m.collateralToken, aAmount, address(this));
+            // 3. supply on Morpho for the user, 4. borrow what was repaid (Morpho checks the LLTV)
+            _supplyCollateral(m, moved, user);
+            MORPHO.borrow(m, repaid, 0, user, address(this));
+        } else {
+            // 1. repay the Morpho debt, 2. withdraw the collateral (Morpho checks a partial move)
+            repaid = _repay(m, amount, repayShares, user);
+            moved = _withdrawCollateral(m, p.collateralAmount, user);
+            // 3. supply on Aave for the user, 4. borrow what was repaid there (credit delegation; Aave checks)
+            IERC20(m.collateralToken).forceApprove(address(pool), moved);
+            pool.supply(m.collateralToken, moved, user, 0);
+            IERC20(m.collateralToken).forceApprove(address(pool), 0);
+            pool.borrow(m.loanToken, repaid, 2, 0, user);
+        }
+        _out[0] = repaid;
+        _out[1] = moved;
+        owed = amount;
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // Morpho helpers
     // ---------------------------------------------------------------------------------------------
 
@@ -570,9 +758,12 @@ contract LeverageExecutorMorpho is IMorphoFlashLoanCallback, ReentrancyGuard, Sw
         } else if (action == Action.Close) {
             (CloseParams memory p, uint256 repayShares) = abi.decode(params, (CloseParams, uint256));
             owed = _executeClose(user, assets, repayShares, p);
-        } else {
+        } else if (action == Action.Roll) {
             (RollParams memory p, uint256 repayShares) = abi.decode(params, (RollParams, uint256));
             owed = _executeRoll(user, assets, repayShares, p);
+        } else {
+            (RefinanceParams memory p, uint256 repayShares) = abi.decode(params, (RefinanceParams, uint256));
+            owed = _executeRefinance(user, assets, repayShares, p);
         }
         // Morpho pulls the loan back with transferFrom once this returns
         IERC20(token).forceApprove(msg.sender, owed);
@@ -632,5 +823,4 @@ contract LeverageExecutorMorpho is IMorphoFlashLoanCallback, ReentrancyGuard, Sw
             mstore(tokens, n)
         }
     }
-
 }

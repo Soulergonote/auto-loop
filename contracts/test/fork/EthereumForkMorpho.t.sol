@@ -64,7 +64,7 @@ contract EthereumForkMorphoTest is Test {
 
         address[] memory routers = new address[](1);
         routers[0] = address(router);
-        ex = new LeverageExecutorMorpho(MORPHO, routers);
+        ex = new LeverageExecutorMorpho(MORPHO, routers, new address[](0));
         deal(reUsd.loanToken, user, 10_000e6);
     }
 
