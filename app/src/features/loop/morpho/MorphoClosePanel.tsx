@@ -39,7 +39,7 @@ import { SLIPPAGES, pairKind, slippageNote, useSlippage } from '../../../domain/
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
 
-export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
+export function MorphoClosePanel({ ctx, seedTarget }: { ctx: MorphoCtx; seedTarget?: number }) {
   const { net, market: M, state, pt, sides, account } = ctx
   const C = M.collateral
   const L = M.loan
@@ -47,8 +47,8 @@ export function MorphoClosePanel({ ctx }: { ctx: MorphoCtx }) {
   const user = state.user
   const coll = user?.collateral ?? 0n
   const debt = user?.debt ?? 0n
-  // target leverage of the position; 1 = close everything
-  const [target, setTarget] = useState(1)
+  // target leverage of the position; 1 = close everything (a rebalance from Positions starts at its leverage)
+  const [target, setTarget] = useState(seedTarget ? Math.floor(seedTarget * 20) / 20 : 1)
   const {
     slippage,
     setSlippage,

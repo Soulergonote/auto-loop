@@ -174,6 +174,17 @@ const anvil = async (method, params) =>
     console.log('buttons:', (await page.locator('.card button').allTextContents()).join(' | '))
     return browser.close()
   }
+  // rebalance: Positions, first card, HF_TARGET=1,30 chosen in its « Health factor cible » fold, then « Ramener à »;
+  // the Boucle opens prefilled (« Fermer / réduire » or « Augmenter ») and the flow below signs it
+  if (mode === 'rebalance') {
+    await page.locator('nav >> text=Positions').first().click()
+    await page.locator('.card summary:has-text("Health factor cible")').first().click({ timeout: 120000 })
+    if (process.env.HF_TARGET) await page.locator('.card label:has-text("Cible") select').first().selectOption({ label: process.env.HF_TARGET })
+    await page.waitForTimeout(1000)
+    console.log('rebalance:', (await page.locator('.notice, .rebalance-up').allTextContents()).join(' | '))
+    await page.locator('.card button:has-text("Ramener à")').first().click({ timeout: 30000 })
+    await page.waitForTimeout(5000)
+  }
   // FROM_POSITIONS=1: the market comes from the Positions screen's first « Gérer » button (as a user would reach it)
   if (process.env.FROM_POSITIONS) {
     await page.locator('nav >> text=Positions').first().click()

@@ -25,7 +25,8 @@ export type Pick = {
   debt: Address
   emode: number
   leverage: number
-  tab?: 'reinvest' | 'renew'
+  /** the Boucle tab to open; « close » starts its slider at `leverage` (a rebalance from Positions) */
+  tab?: 'reinvest' | 'renew' | 'close'
   /** capital to fill in, collateral units as typed text (from the Scanner's amount) */
   amount?: string
 }

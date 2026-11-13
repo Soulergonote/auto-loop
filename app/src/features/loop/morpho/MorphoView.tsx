@@ -19,7 +19,16 @@ import { MorphoRollPanel } from './MorphoRollPanel'
 
 export type MorphoTab = 'open' | 'close' | 'roll'
 /** How the Morpho screen opens: a market (from the scanner or the positions), its tab and leverage. */
-export type MorphoSeed = { market: MorphoMarket; tab?: MorphoTab; leverage?: number; nonce: number }
+export type MorphoSeed = {
+  market: MorphoMarket
+  tab?: MorphoTab
+  leverage?: number
+  /** capital to fill in on « Ouvrir » ('0' raises the leverage of the position) */
+  amount?: string
+  /** leverage the « Fermer » slider starts at (a rebalance from Positions) */
+  target?: number
+  nonce: number
+}
 
 /** Everything a Morpho panel works from: the market as listed and as read on-chain, the user's position, the PT. */
 export type MorphoCtx = {
@@ -400,8 +409,9 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
   }
   const key = `${market.id}-${seed?.nonce ?? ''}`
   if (tab === 'roll' && hasPosition) return <MorphoRollPanel key={key} ctx={ctx} renew={rollLabel === 'Renouveler'} />
-  if (tab === 'close') return <MorphoClosePanel key={key} ctx={ctx} />
-  return <MorphoOpenPanel key={key} ctx={ctx} seedLeverage={seed?.market.id === market.id ? seed.leverage : undefined} />
+  const mine = seed?.market.id === market.id ? seed : undefined
+  if (tab === 'close') return <MorphoClosePanel key={key} ctx={ctx} seedTarget={mine?.target} />
+  return <MorphoOpenPanel key={key} ctx={ctx} seedLeverage={mine?.leverage} seedAmount={mine?.amount} />
 }
 
 /** Short name of a market for lists: collateral / loan, LLTV. */

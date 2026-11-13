@@ -173,11 +173,11 @@ export function App() {
     }
   }, [morpho, declared, declaredMorpho, checkPending, checkError, morphoCheckPending, morphoCheckError, setLocalExecutor])
   const [morphoSeed, setMorphoSeed] = useState<MorphoSeed>()
-  function openMorpho(m: MorphoMarket, tab?: MorphoTab, leverage?: number) {
+  function openMorpho(m: MorphoMarket, tab?: MorphoTab, leverage?: number, opts?: { amount?: string; target?: number }) {
     const net = MORPHO_NETWORKS.find((n) => n.chain.id === m.chainId)
     if (!net) return
     chooseMarket(net.id)
-    setMorphoSeed({ market: m, tab, leverage, nonce: Date.now() })
+    setMorphoSeed({ market: m, tab, leverage, amount: opts?.amount, target: opts?.target, nonce: Date.now() })
     setView('loop')
     window.scrollTo({ top: 0 })
   }

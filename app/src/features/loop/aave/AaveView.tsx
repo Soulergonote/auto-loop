@@ -281,6 +281,7 @@ export function AaveView({
   ) : (
     <AaveClosePanel
       reserves={withEMode(r, currentEMode)}
+      seedTarget={seed?.tab === 'close' ? seed.leverage : undefined}
       then={
         roll && {
           label: `Ouvrir ${roll.to.symbol} au même levier`,

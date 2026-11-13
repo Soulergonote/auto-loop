@@ -48,6 +48,8 @@ type Props = {
   head: ReactNode
   /** next step offered after a full close (a PT roll in two steps: open the new PT with the collateral given back) */
   then?: { label: string; run: (back: { collateral: bigint; debt: bigint }) => void }
+  /** leverage the slider starts at (a rebalance from Positions); full close by default */
+  seedTarget?: number
 }
 
 /** Summary while there is nothing to close: the button stays, disabled, with the reason. */
@@ -70,10 +72,10 @@ const idleSummary = (reason: string, children?: ReactNode) => (
   </Summary>
 )
 
-export function AaveClosePanel({ reserves, user, account, aggregator, onDone, common, head, then }: Props) {
+export function AaveClosePanel({ reserves, user, account, aggregator, onDone, common, head, then, seedTarget }: Props) {
   const { market, collateral: C, debt: D, premiumBps } = reserves
   // target leverage of the pair's position; 1 = close everything
-  const [target, setTarget] = useState(1)
+  const [target, setTarget] = useState(seedTarget ? Math.floor(seedTarget * 20) / 20 : 1)
   const { slippage, setSlippage, auto: autoSlip } = useSlippage(pairKind(reserveAsset(C), reserveAsset(D), { pt: !!C.pt }))
   const [busy, setBusy] = useState<string>()
   const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[]; back?: { collateral: bigint; debt: bigint } }>()

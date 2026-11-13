@@ -13,6 +13,7 @@ import { Card, Fold, Metric, Notice, useSlow } from '../../ui/primitives'
 import type { Pick } from '../scanner/Scanner'
 import { MorphoPositions, type MorphoTotals } from './MorphoPositions'
 import { PositionHistory } from './PositionHistory'
+import { HfTargetBlock } from './HfTarget'
 import { aaveHistory } from './history'
 import type { MorphoTab } from '../loop/morpho/MorphoView'
 import type { MorphoMarket } from '../../protocols/morpho/markets'
@@ -33,7 +34,7 @@ export function Positions({
 }: {
   account?: Address
   onManage: (p: Pick) => void
-  onManageMorpho: (m: MorphoMarket, tab?: MorphoTab, leverage?: number) => void
+  onManageMorpho: (m: MorphoMarket, tab?: MorphoTab, leverage?: number, opts?: { amount?: string; target?: number }) => void
   onScan: () => void
   /** called once the connected wallet is read on every network and holds nothing (arrival on the app) */
   onEmpty?: () => void
@@ -309,8 +310,22 @@ function MarketPosition({
           sub={`${fmtDollars((Number(s.equityBase) / 1e8) * (Number.isFinite(s.apy) ? s.apy : 0))} par an${s.nativeApy ? `, dont ${fmtPct(s.nativeApy)} ${pt ? 'fixe' : 'token'}` : ''}`}
         />
       </div>
-      {tone === 'bad' && (
-        <Notice tone="bad">Health factor {fmtHf(healthFactor)} : une petite baisse du collatéral ou la hausse des intérêts suffit à liquider.</Notice>
+      {s.debtBase > 0n && (
+        <HfTargetBlock
+          id={`aave:${market.id}:${collateral.reserve.token.address}:${debt.reserve.token.address}`.toLowerCase()}
+          position={{ collateralBase: s.collateralBase, debtBase: s.debtBase, healthFactor, correlated }}
+          onRebalance={(r) =>
+            onManage({
+              marketId: market.id,
+              collateral: collateral.reserve.token.address,
+              debt: debt.reserve.token.address,
+              emode: eModeCategory,
+              leverage: r.leverage,
+              // down: « Fermer / réduire » set to the target leverage; up: « Augmenter » without new capital
+              ...(r.direction === 'down' ? { tab: 'close' as const } : { amount: '0' }),
+            })
+          }
+        />
       )}
       {pt && isExpired(pt) && (
         <Notice tone="bad">

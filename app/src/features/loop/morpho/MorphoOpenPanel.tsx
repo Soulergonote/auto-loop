@@ -34,7 +34,7 @@ import { CapitalField, SlippageHorizonFields, YieldMetrics } from '../shared/Ope
 const SLIDER_MIN_HF = 1.02
 const MAX_SLIDER = 15
 
-export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLeverage?: number }) {
+export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: MorphoCtx; seedLeverage?: number; seedAmount?: string }) {
   const { net, market: M, state, pt, sides, account } = ctx
   const C = M.collateral
   const L = M.loan
@@ -45,7 +45,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage }: { ctx: MorphoCtx; seedLev
   const capSide = capitalIsLoan ? sides.loan : sides.collateral
   const capBalance = capitalIsLoan ? user?.loanBalance : user?.collateralBalance
   const capAllowance = capitalIsLoan ? (user?.loanAllowance ?? 0n) : (user?.collateralAllowance ?? 0n)
-  const [amountText, setAmountText] = useState('1000')
+  const [amountText, setAmountText] = useState(seedAmount ?? '1000')
   const [leverage, setLeverage] = useState(seedLeverage ? Math.floor(seedLeverage * 20) / 20 : 3)
   const {
     slippage,

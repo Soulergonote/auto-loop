@@ -23,6 +23,7 @@ import { fmtLltv, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtPct, fm
 import { Card, Fold, Metric, Notice } from '../../ui/primitives'
 import { morphoMarketName, type MorphoTab } from '../loop/morpho/MorphoView'
 import { PositionHistory } from './PositionHistory'
+import { HfTargetBlock } from './HfTarget'
 import { morphoHistory } from './history'
 
 const CHAIN_IDS = MORPHO_NETWORKS.map((n) => n.chain.id)
@@ -41,7 +42,7 @@ export function MorphoPositions({
   onTotals,
 }: {
   user: Address
-  onManage: (m: MorphoMarket, tab?: MorphoTab, leverage?: number) => void
+  onManage: (m: MorphoMarket, tab?: MorphoTab, leverage?: number, opts?: { amount?: string; target?: number }) => void
   onTotals: (t: MorphoTotals) => void
 }) {
   // the API's positions (unlisted markets included) plus an on-chain read of every listed market (just-opened positions)
@@ -190,7 +191,11 @@ function figures({ market: m, state, pt }: Row) {
 /** Totals of the Morpho positions, added to the Positions screen's own: net value (USD, 1e8), APY x value, lowest health factor. */
 export type MorphoTotals = { equity: bigint; weightedApy: number; lowest?: { hf: number; correlated: boolean; label: string }; count: number; pending: boolean }
 
-function MorphoPosition({ onManage, user, ...row }: Row & { user: Address; onManage: (m: MorphoMarket, tab?: MorphoTab, leverage?: number) => void }) {
+function MorphoPosition({
+  onManage,
+  user,
+  ...row
+}: Row & { user: Address; onManage: (m: MorphoMarket, tab?: MorphoTab, leverage?: number, opts?: { amount?: string; target?: number }) => void }) {
   const { market: m, state, pt } = row
   const u = state.user!
   const net = MORPHO_NETWORKS.find((n) => n.chain.id === m.chainId)!
@@ -248,7 +253,15 @@ function MorphoPosition({ onManage, user, ...row }: Row & { user: Address; onMan
           }
         />
       </div>
-      {tone === 'bad' && <Notice tone="bad">Health factor {fmtHf(hf)} : une petite baisse du collatéral ou la hausse des intérêts suffit à liquider.</Notice>}
+      {u.debt > 0n && (
+        <HfTargetBlock
+          id={`morpho:${m.chainId}:${m.id}`.toLowerCase()}
+          position={{ collateralBase: collUsd, debtBase: debtUsd, healthFactor: hf, correlated }}
+          onRebalance={(r) =>
+            r.direction === 'down' ? onManage(m, 'close', r.leverage, { target: r.leverage }) : onManage(m, 'open', r.leverage, { amount: '0' })
+          }
+        />
+      )}
       {pt && isExpired(pt) && (
         <Notice tone="bad">
           {m.collateral.symbol} est échu depuis le {fmtDate(pt.expiry)} : il ne rapporte plus rien et la dette continue de coûter. Renouveler ou fermer.
