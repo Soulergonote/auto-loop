@@ -5,6 +5,8 @@ import { protocolName, AGGREGATORS, QUOTE_MODE, type AggregatorChoice, type Toke
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../../../services/merkl'
 import { CampaignTable } from '../shared/CampaignTable'
 import { RiskPanel } from '../shared/RiskPanel'
+import { ApyHistory } from '../shared/ApyHistory'
+import { useAaveRateSeries } from '../../../protocols/aave/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
 import { canBorrow, eligibleEModes, withEMode, type EModeCategory, type Reserves, type UserState } from '../../../protocols/aave/useMarket'
 import { useQuote } from '../../../services/quotes/useQuote'
@@ -101,6 +103,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
   const ptExpired = !!pt && isExpired(pt)
   const horizon = ptDays !== undefined ? Math.max(1, Math.floor(ptDays)) : Number(horizonText)
   const averages = useRateAverages(market.chain.id, market.pool, [C.token.address, D.token.address]).data
+  const series = useAaveRateSeries(market.chain.id, market.pool, C.token.address, D.token.address)
   const avgC = averages?.get(C.token.address.toLowerCase())
   const avgD = averages?.get(D.token.address.toLowerCase())
   const gasPrice = useGasPrice({ chainId: market.chain.id, query: { refetchInterval: 30_000 } })
@@ -691,6 +694,17 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
                 ? { days: ptDays, healthFactor: hfAtMaturity(proj.healthFactor, pt.discount, D.borrowApy, ptDays) }
                 : undefined
             }
+          />
+        )}
+
+        {loopLev !== undefined && (
+          <ApyHistory
+            borrow={series.data?.borrow}
+            supply={series.data?.supply}
+            leverage={loopLev}
+            extra={nativeApy + rewardsApy}
+            pending={series.isPending && series.fetchStatus !== 'idle'}
+            source="API Aave"
           />
         )}
 

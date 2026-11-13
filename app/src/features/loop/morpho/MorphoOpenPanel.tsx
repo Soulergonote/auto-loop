@@ -23,6 +23,8 @@ import { isCorrelated } from '../../../domain/pairs'
 import { exitIssues, exitSellAmount } from '../../../domain/exitCheck'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
 import { RiskPanel } from '../shared/RiskPanel'
+import { ApyHistory } from '../shared/ApyHistory'
+import { useMorphoBorrowSeries } from '../../../protocols/morpho/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
 import type { MorphoCtx } from './MorphoView'
@@ -168,6 +170,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
   const loopLev = newColl !== undefined ? morphoLeverage(newColl, newDebt, state.price) : undefined
   const netBorrow = ctx.borrowApy - ctx.rewardsApr
   const apy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoNetApy(loopLev, collateralApy, netBorrow) : undefined
+  const series = useMorphoBorrowSeries(M.chainId, M.id, M.source !== 'chain')
   const correlated = isCorrelated({ price: sides.collateral.price, token: C }, { price: sides.loan.price, token: L })
   const signals = useRiskSignals({
     chainId: net.chain.id,
@@ -456,6 +459,16 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             correlated={correlated}
             apy={apy}
             signals={signals}
+          />
+        )}
+
+        {loopLev !== undefined && Number.isFinite(loopLev) && (
+          <ApyHistory
+            borrow={series.data}
+            leverage={loopLev}
+            extra={collateralApy * loopLev + ctx.rewardsApr * (loopLev - 1)}
+            pending={series.isPending && series.fetchStatus !== 'idle'}
+            source="API Morpho"
           />
         )}
 
