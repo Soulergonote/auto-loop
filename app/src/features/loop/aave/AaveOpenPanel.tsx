@@ -9,6 +9,7 @@ import { PositionBar } from '../../../ui/PositionBar'
 import { projectHealthFactor } from '../../../domain/projection'
 import { thresholdOf } from '../../../domain/positionBar'
 import { ApyHistory } from '../shared/ApyHistory'
+import { ApyBreakdown } from '../shared/ApyBreakdown'
 import { useAaveRateSeries } from '../../../protocols/aave/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
 import { canBorrow, eligibleEModes, withEMode, type EModeCategory, type Reserves, type UserState } from '../../../protocols/aave/useMarket'
@@ -736,6 +737,20 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
                 ? { days: ptDays, healthFactor: hfAtMaturity(proj.healthFactor, pt.discount, D.borrowApy, ptDays) }
                 : undefined
             }
+          />
+        )}
+
+        {loopLev !== undefined && !unreal && (
+          <ApyBreakdown
+            leverage={loopLev}
+            collateralYield={C.supplyApy + (cNative?.apy ?? 0)}
+            collateralLabel={pt ? `${ptShortSymbol(C.token.symbol)} (taux fixe)` : C.token.symbol}
+            rewards={rewardsApy}
+            rewardsLabel="Merkl"
+            borrowCost={D.borrowApy + (D.native?.apy ?? 0)}
+            debtLabel={D.token.symbol}
+            withCosts={horizonYield}
+            horizon={pt ? undefined : horizon}
           />
         )}
 

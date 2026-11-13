@@ -371,3 +371,22 @@ tr.dim > td { opacity: 0.55; }
 @media (max-width: 640px) {
   .chip { min-height: 32px; padding: 4px 14px; }
 }
+
+/* Waterfall (ui/Waterfall.tsx): APY step by step (J2) */
+.waterfall { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.waterfall th { text-align: left; font-weight: 400; padding: 4px 8px 4px 0; white-space: nowrap; width: 1%; }
+.waterfall td.num { text-align: right; padding: 4px 0 4px 8px; white-space: nowrap; width: 1%; }
+.waterfall tr.total th, .waterfall tr.total td.num { font-weight: 600; }
+.waterfall tr.total { border-top: 1px solid var(--border); }
+.waterfall-track { position: relative; height: 22px; }
+.waterfall-bar { position: absolute; top: 5px; height: 12px; border-radius: 3px; }
+.waterfall-bar.good { background: var(--good); }
+.waterfall-bar.bad { background: var(--bad); }
+.waterfall-bar.warn { background: var(--warn); }
+.waterfall-bar.up, .waterfall-bar.down { opacity: 0.75; }
+.waterfall-zero { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--muted); }
+.waterfall td.num.good { color: var(--good); }
+.waterfall td.num.bad { color: var(--bad); }
+@media (max-width: 640px) {
+  .waterfall th { white-space: normal; width: 30%; }
+}

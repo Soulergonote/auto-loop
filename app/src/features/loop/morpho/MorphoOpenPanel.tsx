@@ -26,6 +26,7 @@ import { RiskPanel } from '../shared/RiskPanel'
 import { PositionBar } from '../../../ui/PositionBar'
 import { projectHealthFactor } from '../../../domain/projection'
 import { ApyHistory } from '../shared/ApyHistory'
+import { ApyBreakdown } from '../shared/ApyBreakdown'
 import { useMorphoBorrowSeries } from '../../../protocols/morpho/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
@@ -480,6 +481,20 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             correlated={correlated}
             apy={apy}
             signals={signals}
+          />
+        )}
+
+        {loopLev !== undefined && Number.isFinite(loopLev) && !unreal && (
+          <ApyBreakdown
+            leverage={loopLev}
+            collateralYield={collateralApy}
+            collateralLabel={pt ? `${ptShortSymbol(C.symbol)} (taux fixe)` : C.symbol}
+            rewards={ctx.rewardsApr * (loopLev - 1)}
+            rewardsLabel="Récompenses d’emprunt"
+            borrowCost={ctx.borrowApy}
+            debtLabel={L.symbol}
+            withCosts={horizonYield}
+            horizon={pt ? undefined : horizon}
           />
         )}
 
