@@ -34,6 +34,8 @@ import {
 ///   pull the capital -> [swap it to C] -> Aave flash loan of D in debt mode (interestRateMode 2, onBehalfOf caller,
 ///   no premium) -> swap D (+ capital if it was D) -> C -> supply all C for the caller -> Aave opens the debt and
 ///   checks the caller's health factor -> leftovers back to the caller -> minimum health factor check.
+///   On a pool without flash premium (SparkLend refuses mode 2), the flash loan is mode 0 and the callback borrows
+///   D for the caller to give it back: same delegation, same cost (none).
 /// Close: flash loan of D (Aave mode 0, Morpho or Balancer) -> repay the caller's debt -> pull the caller's aTokens ->
 ///   withdraw C -> swap C -> D -> give the loan back -> leftovers back to the caller -> minimum health factor check.
 /// Swap collateral (C1 -> C2, debt unchanged): flash loan of C2 -> supply it for the caller -> pull the caller's
@@ -341,13 +343,16 @@ contract LeverageExecutorV2 is
         }
 
         if (p.debtAmount != 0) {
+            bool borrowInCallback = _borrowInCallback();
             _flash(
                 address(POOL),
                 p.debtAsset,
                 p.debtAmount,
-                MODE_VARIABLE,
+                borrowInCallback ? MODE_NONE : MODE_VARIABLE,
                 msg.sender,
-                abi.encode(Action.Open, msg.sender, abi.encode(p, collateralFromCapital, debtFromCapital))
+                abi.encode(
+                    Action.Open, msg.sender, abi.encode(p, collateralFromCapital, debtFromCapital, borrowInCallback)
+                )
             );
             supplied = _out[0];
             delete _out;
@@ -589,14 +594,16 @@ contract LeverageExecutorV2 is
         address[] memory tokens = _pairTokens(p.fromAsset, p.toAsset, p.steps);
         uint256[] memory before = _balances(tokens);
 
-        // mode 2: the loan becomes variable D2 debt of the caller once the callback has repaid D1
+        // mode 2: the loan becomes variable D2 debt of the caller once the callback has repaid D1 (or the callback
+        // borrows it explicitly, see `_borrowInCallback`)
+        bool borrowInCallback = _borrowInCallback();
         _flash(
             address(POOL),
             p.toAsset,
             p.newDebtAmount,
-            MODE_VARIABLE,
+            borrowInCallback ? MODE_NONE : MODE_VARIABLE,
             msg.sender,
-            abi.encode(Action.SwapDebt, msg.sender, abi.encode(p))
+            abi.encode(Action.SwapDebt, msg.sender, abi.encode(p, borrowInCallback))
         );
         r.repaid = _out[0];
         delete _out;
@@ -623,6 +630,19 @@ contract LeverageExecutorV2 is
     // ---------------------------------------------------------------------------------------------
     // Flash loans
     // ---------------------------------------------------------------------------------------------
+
+    /// @dev True when the Pool charges no flash loan premium. Such a pool (SparkLend) may refuse a flash loan opened
+    /// as debt (`FLASHLOAN_INTO_BORROW_DEPRECATED`), and a plain flash loan costs it nothing: open and swapDebt then
+    /// take a mode 0 flash loan and borrow it for the caller in the callback, through the same credit delegation.
+    function _borrowInCallback() internal view returns (bool) {
+        return POOL.FLASHLOAN_PREMIUM_TOTAL() == 0;
+    }
+
+    /// @dev Borrows `amount` of `asset` as variable debt of `user` (credit delegation) to give a flash loan back.
+    function _borrowFor(address user, address asset, uint256 amount) internal returns (uint256) {
+        POOL.borrow(asset, amount, MODE_VARIABLE, 0, user);
+        return amount;
+    }
 
     /// @dev Requests a flash loan and checks that the lender called back. `mode` 2 (debt opened for `onBehalfOf`)
     /// only exists on Aave and is only used by open and swapDebt, always for the caller.
@@ -669,18 +689,21 @@ contract LeverageExecutorV2 is
     function _dispatch(uint256 amount, uint256 premium, bytes memory data) internal returns (uint256 owed) {
         (Action action, address user, bytes memory inner) = abi.decode(data, (Action, address, bytes));
         if (action == Action.Open) {
-            (OpenParams memory p, uint256 collateralFromCapital, uint256 debtFromCapital) =
-                abi.decode(inner, (OpenParams, uint256, uint256));
+            (OpenParams memory p, uint256 collateralFromCapital, uint256 debtFromCapital, bool borrowInCallback) =
+                abi.decode(inner, (OpenParams, uint256, uint256, bool));
             address[] memory tokens = _openTokens(p);
             _out[0] = _supplyLevered(user, p, amount, collateralFromCapital, debtFromCapital, tokens);
-            // nothing to give back: mode 2 turns the loan into variable debt of `user`
+            // mode 2: nothing to give back, the loan turns into variable debt of `user`
+            if (borrowInCallback) owed = _borrowFor(user, p.debtAsset, amount + premium);
         } else if (action == Action.Close) {
             owed = _executeClose(user, amount, premium, abi.decode(inner, (CloseParams)));
         } else if (action == Action.SwapCollateral) {
             owed = _executeSwapCollateral(user, amount, premium, abi.decode(inner, (SwapCollateralParams)));
         } else {
-            // nothing to give back: mode 2 turns the loan into variable debt of `user`
-            _executeSwapDebt(user, amount, abi.decode(inner, (SwapDebtParams)));
+            (SwapDebtParams memory p, bool borrowInCallback) = abi.decode(inner, (SwapDebtParams, bool));
+            _executeSwapDebt(user, amount, p);
+            // mode 2: nothing to give back, the loan turns into variable debt of `user`
+            if (borrowInCallback) owed = _borrowFor(user, p.toAsset, amount + premium);
         }
     }
 

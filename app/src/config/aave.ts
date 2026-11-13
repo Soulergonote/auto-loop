@@ -8,7 +8,19 @@ import { BUILD_EXECUTORS, FORK_EXECUTOR } from './executors'
  * are read on-chain.
  * `soon`: listed for visibility but not selectable, with the reason shown.
  */
-export type MarketDef = { id: string; label: string; chain: Chain; pool: Address; soon?: string }
+export type MarketDef = {
+  id: string
+  label: string
+  chain: Chain
+  pool: Address
+  soon?: string
+  /** a fork of Aave v3 with the same Pool interface: only the current v2 executor runs there (it borrows in the flash loan callback) */
+  fork?: 'Spark'
+}
+/** The protocol of a market as shown to the user: « Aave », or the fork's own name. */
+export const protocolName = (m: Pick<MarketDef, 'fork'>) => m.fork ?? 'Aave'
+/** Where a position lives, for lists: « Aave · Base », « Spark · Ethereum ». */
+export const marketPlace = (m: Pick<MarketDef, 'fork' | 'label'>) => (m.fork ? `${m.fork} · ${networkName(m.label)}` : `Aave · ${m.label}`)
 /** The network alone, without the Aave market instance: « Ethereum (Prime) » → « Ethereum ». */
 export const networkName = (label: string) => label.replace(/\s*\(.*\)$/, '')
 /** The Aave market instance when a network has several: « Ethereum (Prime) » → « Prime ». */
@@ -30,6 +42,10 @@ export const MARKETS: MarketDef[] = [
   { id: 'monad', label: 'Monad', chain: monad, pool: '0x69a5F9AD4f96ebf0a0C792dD42a01cC5C0102fef' },
   // MegaETH: Pool from @bgd-labs/aave-address-book 4.44.22 (AaveV3MegaEth), KyberSwap only; added 2026-11-11
   { id: 'megaeth', label: 'MegaETH', chain: megaeth, pool: '0x7e324AbC5De01d112AfC03a584966ff199741C28' },
+  // SparkLend (Sky), a fork of Aave v3.1 (POOL_REVISION 4): eModes read the pre-3.2 way, no flash loan premium, no flash
+  // loan into debt. Pool from Spark's address registry, checked on chain 2026-11-13. SparkLend Gnosis is left out:
+  // every reserve there is frozen (checked 2026-11-13)
+  { id: 'spark-ethereum', label: 'Ethereum (Spark)', chain: mainnet, pool: '0xC13e21B648A5Ee794902342038FF3aDAB66BE987', fork: 'Spark' },
 ]
 
 export const DEFAULT_MARKET_ID = 'base'

@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useGasPrice, useReadContracts } from 'wagmi'
 import type { Address, Hash } from 'viem'
-import type { AggregatorChoice, Token } from '../../../config'
+import { protocolName, type AggregatorChoice, type Token } from '../../../config'
 import { debtTokenAbi, erc20Abi } from '../../../chain/abi'
 import { useAllReserves, type EModeCategory, type Reserve, type Reserves, type UserState } from '../../../protocols/aave/useMarket'
 import { headlineRewards, type Campaign } from '../../../services/merkl'
@@ -154,7 +154,7 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
   const problems: string[] = []
   if (market.executor && market.executorVersion === 1) problems.push('Le contrat v1 ne change pas de dette : déployer le contrat v2 (bandeau en haut).')
   else if (oldContract) problems.push('Ce contrat date d’avant le changement de dette : déployer le contrat actuel (bandeau ci-dessus).')
-  if (D.config.paused) problems.push(`${D.token.symbol} est en pause sur Aave.`)
+  if (D.config.paused) problems.push(`${D.token.symbol} est en pause sur ${protocolName(market)}.`)
   if (T && room !== undefined && newDebt > room)
     problems.push(`Pas assez de ${T.token.symbol} à emprunter sur Aave (${fmtAmount(room, T.token.decimals)} disponibles, plafond compris).`)
   if (proj && proj.healthFactor < 1.01) problems.push(`Health factor après ${fmtHf(proj.healthFactor)} : la position serait liquidable.`)
@@ -373,9 +373,9 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
         <Fold title="Étapes" value={batch ? 'une seule confirmation' : `${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
           <Steps steps={steps} />
           <p className="muted small">
-            Le contrat emprunte la nouvelle dette en flash loan Aave sans prime (elle devient la dette du compte), la vend contre l’ancienne et rembourse
-            celle-ci, dans la même transaction. Le collatéral ne bouge pas. Pour tout changer, le montant emprunté couvre la dette même au pire du slippage : ce
-            que le swap rend en plus revient au portefeuille. Coût = taux d’emprunt + rendement propre du token − récompense Merkl.
+            Le contrat emprunte la nouvelle dette en flash loan {protocolName(market)} sans prime (elle devient la dette du compte), la vend contre l’ancienne
+            et rembourse celle-ci, dans la même transaction. Le collatéral ne bouge pas. Pour tout changer, le montant emprunté couvre la dette même au pire du
+            slippage : ce que le swap rend en plus revient au portefeuille. Coût = taux d’emprunt + rendement propre du token − récompense Merkl.
             {batch && ' Le portefeuille envoie ces opérations en un seul lot : toutes passent ou aucune.'}
           </p>
         </Fold>

@@ -10,6 +10,7 @@ import type { Account, Side } from '../../domain/math'
 import { headlineRewards, type Campaign } from '../../services/merkl'
 import { nativeYieldQuery, type NativeYield } from '../../services/yield/nativeYield'
 import { ptInfosQuery, ptYield, readFeedDiscount, type PtInfo } from '../pendle/pt'
+import { snapshotQuery } from './snapshot'
 
 export type Reserve = {
   token: Token
@@ -310,8 +311,12 @@ export function useEModeCategories(market: Market): EModeCategory[] {
     allowFailure: true,
     query: { enabled: !DEMO, staleTime: 600_000 },
   })
+  // a pool before Aave v3.2 (SparkLend) answers none of these: its categories come with the snapshot (legacy reads)
+  const legacy = !!reads.data && reads.data.every((r) => r.status === 'failure')
+  const snapshot = useQuery({ ...snapshotQuery(market), enabled: legacy })
   return useMemo(() => {
     const out: EModeCategory[] = []
+    if (legacy) return snapshot.data?.emodes ?? out
     if (!reads.data) return out
     for (let i = 0; i < MAX_EMODE_ID; i++) {
       const [label, config, collat, borrow, ltvZero] = reads.data.slice(i * EMODE_FNS.length, (i + 1) * EMODE_FNS.length).map((r) => r.result)
@@ -329,7 +334,7 @@ export function useEModeCategories(market: Market): EModeCategory[] {
       })
     }
     return out
-  }, [reads.data])
+  }, [reads.data, legacy, snapshot.data])
 }
 
 const hasBit = (bitmap: bigint, id: number) => ((bitmap >> BigInt(id)) & 1n) === 1n

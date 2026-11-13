@@ -26,6 +26,8 @@ interface IAaveV3Pool {
         uint128 isolationModeTotalDebt;
     }
 
+    function FLASHLOAN_PREMIUM_TOTAL() external view returns (uint128);
+
     function flashLoan(
         address receiverAddress,
         address[] calldata assets,

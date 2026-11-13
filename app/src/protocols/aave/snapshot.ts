@@ -8,7 +8,7 @@ import { wagmiConfig } from '../../chain/wagmi'
 import { erc20Abi, oracleAbi, poolAbi, providerAbi, rateStrategyAbi } from '../../chain/abi'
 import { aaveModelMatches, type AaveIrm } from '../../domain/irm'
 import type { Market, Token } from '../../config'
-import { decodeReserveConfig, rayAprToApy } from './reserveConfig'
+import { decodeReserveConfig, legacyEModes, rayAprToApy, type LegacyEModeData } from './reserveConfig'
 import { toBase } from '../../domain/math'
 import { readNativeYields } from '../../services/yield/nativeYield'
 import { ptYield, readFeedDiscount, readPtInfos, type PtInfo } from '../pendle/pt'
@@ -173,6 +173,20 @@ export async function loadSnapshot(market: Market): Promise<Snapshot> {
       borrowableBitmap: (borrow as bigint) ?? 0n,
       ltvZeroBitmap: (ltvZero as bigint) ?? 0n,
     })
+  }
+
+  // a pool before Aave v3.2 (SparkLend) has none of these getters: its categories are read the older way
+  if (emodes.length === 0) {
+    const legacy = await readContracts(wagmiConfig, {
+      contracts: Array.from({ length: MAX_EMODE_ID }, (_, i) => ({ ...pool, functionName: 'getEModeCategoryData', args: [i + 1] }) as const),
+      allowFailure: true,
+    }).catch(() => [])
+    emodes.push(
+      ...legacyEModes(
+        legacy.map((x) => x.result as LegacyEModeData | undefined),
+        base.map((b) => ({ id: b.rd.id, configuration: b.rd.configuration })),
+      ),
+    )
   }
 
   return { market, reserves, emodes, premiumBps: BigInt(premium) }

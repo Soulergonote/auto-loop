@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { useGasPrice, useReadContract } from 'wagmi'
 import type { Address, Hash } from 'viem'
-import { MORPHO_BLUE, type AggregatorChoice, type Token } from '../../../config'
+import { protocolName, MORPHO_BLUE, type AggregatorChoice, type Token } from '../../../config'
 import { erc20Abi } from '../../../chain/abi'
 import { useAllReserves, type EModeCategory, type Reserve, type Reserves, type UserState } from '../../../protocols/aave/useMarket'
 import { headlineRewards, type Campaign } from '../../../services/merkl'
@@ -161,7 +161,7 @@ export function SwapCollateralPanel({
   const total = swapCost !== undefined ? swapCost + premiumBase + (gas ?? 0n) : undefined
 
   const problems: string[] = []
-  if (C.config.paused) problems.push(`${C.token.symbol} est en pause sur Aave.`)
+  if (C.config.paused) problems.push(`${C.token.symbol} est en pause sur ${protocolName(market)}.`)
   if (market.executor && market.executorVersion === 1) problems.push('Le contrat v1 ne change pas de collatéral : déployer le contrat v2.')
   else if ((C.pt || T?.pt) && market.executor && !market.executorPendle)
     problems.push('Ce contrat n’autorise pas le routeur Pendle : déployer le nouveau contrat (bandeau en haut).')
@@ -393,7 +393,7 @@ export function SwapCollateralPanel({
 
         <Fold
           title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan Aave ${fmtPct(Number(reserves.premiumBps) / 10_000)}`}`}
+          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan ${protocolName(market)} ${fmtPct(Number(reserves.premiumBps) / 10_000)}`}`}
         >
           {common}
           <div className="field">

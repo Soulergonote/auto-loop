@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { wagmiConfig } from './wagmi'
 import { executorAbi, executorAbiV1, morphoExecutorAbi } from './abi'
 import { EXECUTOR_BYTECODE_MORPHO, EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../generated/executorBytecode'
-import { EXECUTOR_BYTECODE_MORPHO_0, EXECUTOR_BYTECODE_V2_0 } from '../generated/executorBytecodeLegacy'
+import { EXECUTOR_BYTECODE_MORPHO_0, EXECUTOR_BYTECODE_V2_0, EXECUTOR_BYTECODE_V2_1 } from '../generated/executorBytecodeLegacy'
 import { AGGREGATORS, MARKETS, executorLenders, executorRouters, type Market, type MorphoNet } from '../config'
 
 export type ExecutorVersion = 1 | 2
@@ -25,10 +25,13 @@ function deployDataV1(market: Market) {
   return encodeDeployData({ abi: executorAbiV1, bytecode: EXECUTOR_BYTECODE_V1, args: [market.pool, routers] })
 }
 
-/** v2 as deployed before `swapDebt` (same constructor): still a v2 for everything else. */
-function deployDataV2Legacy(market: Market): Hex {
+/**
+ * Earlier v2 builds (same constructor): before `swapDebt` (V2_0), and before open learned to borrow in the callback on a
+ * pool without flash premium (V2_1, which SparkLend refuses but every Aave market accepts).
+ */
+function deployDataV2Legacy(market: Market, bytecode: string): Hex {
   const routers = executorRouters(market.chain.id).map((r) => r.router)
-  return encodeDeployData({ abi: executorAbi, bytecode: EXECUTOR_BYTECODE_V2_0 as Hex, args: [market.pool, routers, executorLenders(market.chain.id)] })
+  return encodeDeployData({ abi: executorAbi, bytecode: bytecode as Hex, args: [market.pool, routers, executorLenders(market.chain.id)] })
 }
 
 /**
@@ -49,8 +52,14 @@ export async function verifyExecutor(market: Market, address: Address): Promise<
   let debtSwap = false
   for (const [v, data, swaps] of [
     [2, deployDataV2(market), true],
-    [2, deployDataV2Legacy(market), false],
-    [1, deployDataV1(market), false],
+    // a fork (SparkLend) refuses the earlier builds' flash loan into debt: only the current v2 opens there
+    ...(market.fork
+      ? []
+      : ([
+          [2, deployDataV2Legacy(market, EXECUTOR_BYTECODE_V2_1), true],
+          [2, deployDataV2Legacy(market, EXECUTOR_BYTECODE_V2_0), false],
+        ] as const)),
+    ...(market.fork ? [] : ([[1, deployDataV1(market), false]] as const)),
   ] as const) {
     const expected = await client.call({ data }).catch(() => undefined)
     if (expected?.data && expected.data.toLowerCase() === code.toLowerCase()) {

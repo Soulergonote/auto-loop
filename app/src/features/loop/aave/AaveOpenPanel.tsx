@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useGasPrice } from 'wagmi'
 import { parseUnits, type Address } from 'viem'
-import { AGGREGATORS, QUOTE_MODE, type AggregatorChoice, type Token } from '../../../config'
+import { protocolName, AGGREGATORS, QUOTE_MODE, type AggregatorChoice, type Token } from '../../../config'
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../../../services/merkl'
 import { CampaignTable } from '../shared/CampaignTable'
 import { RiskPanel } from '../shared/RiskPanel'
@@ -255,7 +255,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
     problems.push('Le levier visé ne dépasse pas le levier actuel. Pour le réduire : onglet « Fermer / réduire ».')
   // first cause first (charte v2): balance, then market state, liquidity, health factor, swap
   if (user && initial && capBalance !== undefined && initial > capBalance) problems.push(`Solde ${K.symbol} insuffisant.`)
-  if (!C.config.active || C.config.paused || C.config.frozen) problems.push(`${C.token.symbol} est gelé ou en pause sur Aave.`)
+  if (!C.config.active || C.config.paused || C.config.frozen) problems.push(`${C.token.symbol} est gelé ou en pause sur ${protocolName(market)}.`)
   if (!canBorrow(D, reserves.emode)) problems.push(`${D.token.symbol} ne peut pas être emprunté.`)
   if (!D.config.flashLoanEnabled) problems.push(`Flash loan désactivé sur ${D.token.symbol}.`)
   if (C.config.ltvBps === 0) problems.push(`${C.token.symbol} n’est pas accepté comme collatéral (LTV 0).`)
@@ -489,7 +489,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
           {
             label:
               emodeId === 0
-                ? `Sortir de l’eMode sur le compte Aave${batch ? '' : ' (transaction, une fois)'}`
+                ? `Sortir de l’eMode sur le compte ${protocolName(market)}${batch ? '' : ' (transaction, une fois)'}`
                 : `Passer le compte Aave en eMode « ${reserves.emode!.label} »${batch ? '' : ' (transaction, une fois)'}`,
           },
         ]

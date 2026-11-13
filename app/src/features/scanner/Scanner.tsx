@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import type { Address } from 'viem'
-import { MARKETS, MORPHO_NETWORKS, aggregatorsFor, getMarket, networkName, type Market } from '../../config'
+import { MARKETS, MORPHO_NETWORKS, aggregatorsFor, getMarket, marketPlace, networkName, type Market } from '../../config'
 import { merklQuery } from '../../services/merkl'
 import { withData } from '../../services/queryData'
 import { snapshotQuery } from '../../protocols/aave/snapshot'
@@ -193,7 +193,6 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
   const chainIds = useMemo(() => [...new Set(markets.map((m) => m.chain.id))], [markets])
   const { queries: merkl, data: merklData } = useQueries({ queries: chainIds.map((id) => merklQuery(id)), combine: withData })
   const targetHf = Number(hfText)
-  const label = (id: string) => MARKETS.find((m) => m.id === id)?.label ?? id
 
   // the parent's handlers are new at every render: the rows call the latest ones without being rebuilt for them
   const picks = useRef({ onPick, onPickMorpho })
@@ -225,7 +224,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           borrowCost: r.borrowCost,
           spread: spreadOf(r),
           pair: `${r.collateral.token.symbol} / ${r.debt.token.symbol}`,
-          place: `Aave · ${label(r.marketId)}`,
+          place: marketPlace(snapshot.market),
           protocol: 'aave',
           tags: [
             r.collateral.pt && <span key="pt">{ptTag(r.collateral.pt.expiry)}</span>,

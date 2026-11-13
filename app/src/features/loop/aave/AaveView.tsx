@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { formatUnits, type Address } from 'viem'
-import { DEMO, type AggregatorChoice, type Market, type Token } from '../../../config'
+import { protocolName, DEMO, type AggregatorChoice, type Market, type Token } from '../../../config'
 import { eligibleEModes, useEModeCategories, useMarket, withEMode, withIncentives } from '../../../protocols/aave/useMarket'
 import { useCampaigns } from '../../../services/merkl'
 import { fmtDate, fmtPct, fmtPrice } from '../../../ui/format'
@@ -94,7 +94,7 @@ export function AaveView({
         {r === null && <Notice tone="bad">Cette paire n’est pas listée sur Aave v3 {m.label}.</Notice>}
         {r && (
           <Fold
-            title="Taux Aave"
+            title={`Taux ${protocolName(m)}`}
             value={`${r.collateral.token.symbol} dépôt ${fmtPct(r.collateral.supplyApy)} · ${r.debt.token.symbol} emprunt ${fmtPct(r.debt.borrowApy)}`}
           >
             <table className="reserves cards">

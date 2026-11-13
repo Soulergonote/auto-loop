@@ -379,7 +379,7 @@ export function App() {
       </label>
       {instances.length > 1 && (
         <div className="field">
-          <span>Marché Aave</span>
+          <span>Marché</span>
           <Segmented value={market.id} onChange={chooseMarket} options={instances.map((m) => ({ value: m.id, label: marketInstance(m.label) ?? m.label }))} />
         </div>
       )}
@@ -431,7 +431,7 @@ export function App() {
     <>
       <AggregatorPicker chainId={market.chain.id} value={aggregator} onChange={setAggregator} />
       <p className="muted small">
-        Plateforme : Aave v3.{' '}
+        Plateforme : {market.fork ? `${market.fork}Lend, fork d’Aave v3` : 'Aave v3'}.{' '}
         {market.executor && (
           <>
             Contrat Auto-loop vérifié :{' '}

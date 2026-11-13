@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { type Address, type Hash } from 'viem'
 import { useReadContract } from 'wagmi'
-import { MORPHO_BLUE, type AggregatorChoice } from '../../../config'
+import { protocolName, MORPHO_BLUE, type AggregatorChoice } from '../../../config'
 import { erc20Abi } from '../../../chain/abi'
 import type { Reserves, UserState } from '../../../protocols/aave/useMarket'
 import { useQuote } from '../../../services/quotes/useQuote'
@@ -255,7 +255,7 @@ function ClosePanelInner(p: {
       `Le minimum garanti du swap (${fmtAmount(q.minOut, D.token.decimals)} ${D.token.symbol}) ne couvre pas le remboursement (${fmtAmount(required, D.token.decimals)}). Baisser le slippage ou réessayer.`,
     )
   if (repay === 0n) problems.push(`Le levier visé n’est pas sous le levier actuel (${fmtX(currentLev)}). Pour l’augmenter : onglet « Ouvrir / augmenter ».`)
-  if (D.config.paused || C.config.paused) problems.push('Marché en pause sur Aave.')
+  if (D.config.paused || C.config.paused) problems.push(`Marché en pause sur ${protocolName(market)}.`)
   if (!D.config.flashLoanEnabled) problems.push(`Flash loan désactivé sur ${D.token.symbol}.`)
   if (pt && market.executor && market.executorVersion === 1) problems.push('Le contrat v1 ne fait qu’un swap : vendre un PT demande le contrat v2.')
   else if (pt && market.executor && !market.executorPendle)
@@ -448,7 +448,7 @@ function ClosePanelInner(p: {
 
         <Fold
           title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan Aave ${fmtPct(Number(premiumBps) / 10_000)}`}`}
+          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan ${protocolName(market)} ${fmtPct(Number(premiumBps) / 10_000)}`}`}
         >
           {p.common}
           {/* after maturity the PT is redeemed 1 for 1: no pool, nothing to slip */}

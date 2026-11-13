@@ -88,6 +88,8 @@ export const poolAbi = parseAbi([
   'function getEModeCategoryCollateralBitmap(uint8 id) view returns (uint128)',
   'function getEModeCategoryBorrowableBitmap(uint8 id) view returns (uint128)',
   'function getEModeCategoryLtvzeroBitmap(uint8 id) view returns (uint128)',
+  // before Aave v3.2 (SparkLend): one call per category, the reserves carry their category in their configuration
+  'function getEModeCategoryData(uint8 id) view returns ((uint16 ltv, uint16 liquidationThreshold, uint16 liquidationBonus, address priceSource, string label))',
   'function setUserEMode(uint8 categoryId)',
 ])
 

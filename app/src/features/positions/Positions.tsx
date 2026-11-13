@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { getAddress, isAddress, type Address } from 'viem'
-import { MARKETS, getMarket, type Market } from '../../config'
+import { MARKETS, getMarket, marketPlace, type Market } from '../../config'
 import { daysLeft, merklQuery, type Campaign } from '../../services/merkl'
 import { snapshotQuery, userPositionQuery, type Snapshot, type UserPosition } from '../../protocols/aave/snapshot'
 import { merklBalances, summarizePosition, userRewardsQuery, type PositionSummary } from './positions'
@@ -273,7 +273,7 @@ function MarketPosition({
         <>
           {collateral.reserve.token.symbol}
           {s.debtBase > 0n && ` / ${debt.reserve.token.symbol}`}
-          <span className="card-sub">Aave · {market.label}</span>
+          <span className="card-sub">{marketPlace(market)}</span>
         </>
       }
       aside={

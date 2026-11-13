@@ -4,7 +4,7 @@ import { readContract } from '@wagmi/core'
 import type { Address, Hash } from 'viem'
 import { wagmiConfig } from '../../../chain/wagmi'
 import { debtTokenAbi, erc20Abi } from '../../../chain/abi'
-import type { AggregatorChoice, Token } from '../../../config'
+import { protocolName, type AggregatorChoice, type Token } from '../../../config'
 import { canBorrow, withEMode, type EModeCategory, type Reserves, type UserState } from '../../../protocols/aave/useMarket'
 import { snapshotQuery } from '../../../protocols/aave/snapshot'
 import { useQuote } from '../../../services/quotes/useQuote'
@@ -218,7 +218,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
     if (debtAmount > 0n) {
       if (!canBorrow(D, reserves.emode)) problems.push(`${D.token.symbol} ne peut pas être emprunté.`)
       if (!D.config.flashLoanEnabled) problems.push(`Flash loan désactivé sur ${D.token.symbol}.`)
-      if (!C.config.active || C.config.paused || C.config.frozen) problems.push(`${C.token.symbol} est gelé ou en pause sur Aave.`)
+      if (!C.config.active || C.config.paused || C.config.frozen) problems.push(`${C.token.symbol} est gelé ou en pause sur ${protocolName(market)}.`)
     }
     if (worst && worst.ltv > C.config.ltvBps / 10_000)
       problems.push(`LTV projetée ${fmtPct(worst.ltv)} au-dessus du maximum ${fmtPct(C.config.ltvBps / 10_000)}.`)
@@ -314,7 +314,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
       } else if ('kind' in step && step.kind === 'withdraw') {
         const r = step.reserve.reserve
         const hash = await withdrawReward(chainId, market.pool, account, r.token.address, step.reward.amount, setBusy)
-        setResult({ ok: true, text: `${fmtAmount(step.reward.amount, r.token.decimals)} ${r.token.symbol} retiré d’Aave.`, hash })
+        setResult({ ok: true, text: `${fmtAmount(step.reward.amount, r.token.decimals)} ${r.token.symbol} retiré de ${protocolName(market)}.`, hash })
       } else if ('kind' in step && step.kind === 'swap') {
         if (!q) return
         const { hash, received } = await swapFromWallet(chainId, account, step.sell.address, C.token.address, q, setBusy)
@@ -360,7 +360,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
     : current.id === 'claim'
       ? `Réclamer ${plan.length} reward${plan.length > 1 ? 's' : ''}`
       : 'kind' in current && current.kind === 'withdraw'
-        ? `Retirer ${current.reserve.reserve.token.symbol} d’Aave`
+        ? `Retirer ${current.reserve.reserve.token.symbol} de ${protocolName(market)}`
         : swapping
           ? `Échanger ${(current as SwapLeg).sell.symbol} en ${C.token.symbol}`
           : 'Augmenter la position'
@@ -402,7 +402,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
           s.id === 'claim'
             ? 'Réclamer sur Merkl (une transaction pour tous les tokens)'
             : 'kind' in s && s.kind === 'withdraw'
-              ? `Retirer ${s.reserve.reserve.token.symbol} d’Aave`
+              ? `Retirer ${s.reserve.reserve.token.symbol} de ${protocolName(market)}`
               : 'kind' in s && s.kind === 'swap'
                 ? `Échanger ${s.sell.symbol} en ${C.token.symbol} (approbation de ce montant, puis échange)`
                 : `Augmenter la position${targetLev ? ` jusqu’à ${fmtX(targetLev)}` : ''}, dans l’onglet « Ouvrir / augmenter »`
