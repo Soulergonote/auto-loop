@@ -3,6 +3,8 @@ import { fmtHf, fmtPct } from '../../../ui/format'
 import { apyTone, hfTone } from '../../../ui/tone'
 import { WINDOWS, type Window } from '../../../protocols/aave/rateHistory'
 import { Fold } from '../../../ui/primitives'
+import type { RiskSignal } from '../../../domain/riskSignals'
+import { RiskSignalList } from './RiskSignals'
 
 const DROPS = [0.01, 0.02, 0.05, 0.1]
 
@@ -24,6 +26,8 @@ type Props = {
   averageApy?: Partial<Record<Window, number>>
   /** a Pendle PT: days to maturity and the health factor then (Aave's PT price at par, debt grown) */
   maturity?: { days: number; healthFactor: number }
+  /** facts on the pair (domain/riskSignals.ts), shown first */
+  signals?: RiskSignal[]
 }
 
 /** What would hurt the loop: a price move, a rate rise, or simply time while interest accrues. */
@@ -40,6 +44,7 @@ export function RiskPanel({
   apy,
   averageApy = {},
   maturity,
+  signals = [],
 }: Props) {
   const hfClass = (hf: number) => hfTone(hf, correlated)
   if (!Number.isFinite(healthFactor)) return null
@@ -48,11 +53,14 @@ export function RiskPanel({
   const zeroWithout = breakEvenBorrowApy(leverage, supplyApy) - debtNativeApy
   const debtGrowth = borrowApy + debtNativeApy
   const liqDays = daysToLiquidationByInterest(healthFactor, supplyApy, debtGrowth)
+  // the summary names the worst signal that is not green
+  const worst = signals.find((s) => s.tone === 'bad') ?? signals.find((s) => s.tone === 'warn')
   return (
     <Fold
       title="Risques"
-      value={`${collateral} −5 % : ${hfAfterDrop(healthFactor, 0.05) < 1 ? 'liquidé' : `HF ${fmtHf(hfAfterDrop(healthFactor, 0.05))}`} · APY nul si emprunt à ${fmtPct(zeroWith)}`}
+      value={`${worst ? `${worst.label.toLowerCase()} ${worst.value} · ` : ''}${collateral} −5 % : ${hfAfterDrop(healthFactor, 0.05) < 1 ? 'liquidé' : `HF ${fmtHf(hfAfterDrop(healthFactor, 0.05))}`} · APY nul si emprunt à ${fmtPct(zeroWith)}`}
     >
+      <RiskSignalList signals={signals} />
       <table className="reserves risk">
         <tbody>
           <tr>

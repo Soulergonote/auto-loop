@@ -315,3 +315,7 @@ tr.dim > td { opacity: 0.55; }
 .picker-empty { padding: 8px; margin: 0; }
 .rebalance-up { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .rebalance-up p { margin: 0; }
+
+/* risk signals at the top of « Risques »: one fact per cell, its explanation underneath */
+.breakdown.signals { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 24px; margin-bottom: 12px; }
+.breakdown.signals dd.small { font-size: 12px; }

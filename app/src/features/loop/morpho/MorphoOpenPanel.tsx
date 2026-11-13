@@ -23,6 +23,7 @@ import { isCorrelated } from '../../../domain/pairs'
 import { exitIssues, exitSellAmount } from '../../../domain/exitCheck'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
 import { RiskPanel } from '../shared/RiskPanel'
+import { useRiskSignals } from '../shared/RiskSignals'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
 import type { MorphoCtx } from './MorphoView'
 import { pairKind, slippageNote, useSlippage } from '../../../domain/slippage'
@@ -139,19 +140,24 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
       : undefined
   const plainExit = useQuote(plainExitReq)
   const plainExitPending = !!plainExitReq && !plainExit.data && !plainExit.isError
-  const exit =
+  const exitRead =
     plainExitReq && !plainExitPending
-      ? exitIssues({
-          sell: C.symbol,
-          buy: L.symbol,
+      ? {
           noRoute: plainExit.isError || !!plainExit.data?.simulated,
-          reason: plainExit.isError ? (plainExit.error as Error).message : plainExit.data?.fallbackReason,
           loss:
             plainExit.data && !plainExit.data.simulated
               ? swapLoss(plainExit.data.sellAmount, sides.collateral, plainExit.data.buyAmount, sides.loan)
               : undefined,
-        })
+        }
       : undefined
+  const exit = exitRead
+    ? exitIssues({
+        sell: C.symbol,
+        buy: L.symbol,
+        ...exitRead,
+        reason: plainExit.isError ? (plainExit.error as Error).message : plainExit.data?.fallbackReason,
+      })
+    : undefined
   const exitPending = (!!exitReq && !exitQuote.data && !exitQuote.isError) || plainExitPending
 
   const newColl = q ? coll0 + capColl + q.buyAmount : undefined
@@ -163,6 +169,15 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
   const netBorrow = ctx.borrowApy - ctx.rewardsApr
   const apy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoNetApy(loopLev, collateralApy, netBorrow) : undefined
   const correlated = isCorrelated({ price: sides.collateral.price, token: C }, { price: sides.loan.price, token: L })
+  const signals = useRiskSignals({
+    chainId: net.chain.id,
+    collateral: C,
+    debt: L,
+    correlated,
+    oracleRatio: Number(sides.collateral.price) / Number(sides.loan.price),
+    exit: exitRead,
+    morpho: { id: M.id, totalBorrowShares: state.totals.totalBorrowShares, user: account, api: M.source !== 'chain' },
+  })
 
   const problems: string[] = []
   if (initial === undefined) problems.push('Montant invalide.')
@@ -440,6 +455,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             rewardsApy={ctx.rewardsApr * (loopLev - 1)}
             correlated={correlated}
             apy={apy}
+            signals={signals}
           />
         )}
 

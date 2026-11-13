@@ -5,6 +5,7 @@ import { AGGREGATORS, QUOTE_MODE, type AggregatorChoice, type Token } from '../.
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../../../services/merkl'
 import { CampaignTable } from '../shared/CampaignTable'
 import { RiskPanel } from '../shared/RiskPanel'
+import { useRiskSignals } from '../shared/RiskSignals'
 import { canBorrow, eligibleEModes, withEMode, type EModeCategory, type Reserves, type UserState } from '../../../protocols/aave/useMarket'
 import { useQuote } from '../../../services/quotes/useQuote'
 import { useDebounced } from '../../../ui/useDebounced'
@@ -222,17 +223,22 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
   // the collateral's Aave reserve almost all lent out: withdrawing it at close may have to wait
   const snapshot = useQuery({ ...snapshotQuery(market), enabled: !pt })
   const collSnap = snapshot.data?.reserves.find((r) => r.token.address === C.token.address)
-  const exit =
+  const exitRead =
     plainExitReq && !plainExitPending
-      ? exitIssues({
-          sell: C.token.symbol,
-          buy: D.token.symbol,
+      ? {
           noRoute: plainExit.isError || !!plainExit.data?.simulated,
-          reason: plainExit.isError ? (plainExit.error as Error).message : plainExit.data?.fallbackReason,
           loss: plainExit.data && !plainExit.data.simulated ? swapLoss(plainExit.data.sellAmount, C.side, plainExit.data.buyAmount, D.side) : undefined,
-          utilization: collSnap ? utilization(collSnap.totalSupplyBase, collSnap.totalDebtBase) : undefined,
-        })
+        }
       : undefined
+  const exit = exitRead
+    ? exitIssues({
+        sell: C.token.symbol,
+        buy: D.token.symbol,
+        ...exitRead,
+        reason: plainExit.isError ? (plainExit.error as Error).message : plainExit.data?.fallbackReason,
+        utilization: collSnap ? utilization(collSnap.totalSupplyBase, collSnap.totalDebtBase) : undefined,
+      })
+    : undefined
   const exitPending = (!!exitReq && !exitQuote.data && !exitQuote.isError) || plainExitPending
 
   const account0 = user?.account ?? EMPTY_ACCOUNT
@@ -275,6 +281,14 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
   // an input the protocol would refuse: values derived from it would be meaningless, they show a dash
   const unreal = (!!worst && worst.ltv > maxLtv) || !!lossIssue?.block || !!capLossIssue?.block
   const correlated = isCorrelated(C, D)
+  const signals = useRiskSignals({
+    chainId: market.chain.id,
+    collateral: C.token,
+    debt: D.token,
+    correlated,
+    oracleRatio: Number(C.side.price) / Number(D.side.price),
+    exit: exitRead,
+  })
   if (pt && ptDays !== undefined && !ptExpired && ptDays < 14)
     warnings.push(`Échéance dans ${Math.floor(ptDays)} j : le rendement fixe ne court plus que jusqu’au ${fmtDate(pt.expiry)}.`)
   if (fixedApy !== undefined && D.borrowApy + (D.native?.apy ?? 0) > fixedApy)
@@ -671,6 +685,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
             correlated={correlated}
             apy={apy}
             averageApy={averageApy}
+            signals={signals}
             maturity={
               pt && pt.discount !== undefined && ptDays !== undefined && !ptExpired
                 ? { days: ptDays, healthFactor: hfAtMaturity(proj.healthFactor, pt.discount, D.borrowApy, ptDays) }

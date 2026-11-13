@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useQueries } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import type { Address } from 'viem'
 import { MARKETS, MORPHO_NETWORKS, aggregatorsFor, getMarket, networkName, type Market } from '../../config'
 import { merklQuery } from '../../services/merkl'
@@ -17,6 +17,9 @@ import { ptInfosQuery } from '../../protocols/pendle/pt'
 import { fmtAddress, fmtDays, fmtLltv, fmtDate, fmtDollars, fmtMaturity, fmtPct, fmtX, ptShortSymbol } from '../../ui/format'
 import { Card, Fold, Notice, Segmented, Skel, Tag, useSlow } from '../../ui/primitives'
 import type { MorphoTab } from '../loop/morpho/MorphoView'
+import { priceChartsQuery } from '../../services/priceHistory'
+import { tokenKey } from '../../services/yield/copies'
+import { depegTone, maxDrawdown, ratioSeries } from '../../domain/riskSignals'
 
 /** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (positions' Merkl rewards) or « Renouveler » (a PT near maturity). */
 export type Pick = {
@@ -43,6 +46,8 @@ type Protocol = ScannerPrefs['protocol']
 /** sortable columns; numbers sort high first on the first click, the pair A to Z */
 type SortKey = 'pair' | 'leverage' | 'apy' | 'spread' | 'rewardsApy' | 'capacityUsd' | 'gainUsd'
 const ROWS = 20
+/** window of the « décroché » tag: largest fall of a correlated pair's price ratio */
+const DEPEG_DAYS = 90
 /** Pairs where less than this (USD) can still be looped are hidden (borrow cap or cash used up). */
 const MIN_CAPACITY_USD = 1_000
 /** Flagged as nearly full under this. */
@@ -98,6 +103,8 @@ type Line = {
   stable: boolean
   correlated: boolean
   nativeUnknown: boolean
+  /** the pair's tokens, for its price history */
+  tokens: { chainId: number; collateral: Address; debt: Address }
   open: () => void
 }
 
@@ -240,6 +247,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           stable: r.stable,
           correlated: r.correlated,
           nativeUnknown: r.flags.includes('nativeUnknown'),
+          tokens: { chainId: snapshot.market.chain.id, collateral: r.collateral.token.address, debt: r.debt.token.address },
           open: () =>
             picks.current.onPick({
               marketId: r.marketId,
@@ -284,11 +292,36 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           stable: r.stable,
           correlated: r.correlated,
           nativeUnknown: r.flags.includes('nativeUnknown'),
+          tokens: { chainId: n.chain.id, collateral: r.market.collateral.address, debt: r.market.loan.address },
           open: () => picks.current.onPickMorpho(r.market, 'open', r.leverage),
         })
     })
     return out.sort((a, b) => b.apy - a.apy)
   }, [snapshotData, merklData, chainIds, morphoNets, morphoListData, morphoPts, targetHf, amountUsd])
+
+  // past depeg of the correlated pairs (I4): daily prices over 90 days, one DefiLlama request per 25 tokens
+  const depegTokens = useMemo(() => {
+    const all = rows
+      .filter((r) => r.correlated)
+      .flatMap((r) => [
+        { chainId: r.tokens.chainId, address: r.tokens.collateral },
+        { chainId: r.tokens.chainId, address: r.tokens.debt },
+      ])
+    return [...new Map(all.map((t) => [tokenKey(t), t])).values()]
+  }, [rows])
+  const charts = useQuery(priceChartsQuery(depegTokens, { days: DEPEG_DAYS, period: '1d' }))
+  const depegTag = (r: Line) => {
+    if (!r.correlated || !charts.data) return null
+    const a = charts.data.get(tokenKey({ chainId: r.tokens.chainId, address: r.tokens.collateral }))
+    const b = charts.data.get(tokenKey({ chainId: r.tokens.chainId, address: r.tokens.debt }))
+    if (!a || !b) return null
+    const dd = maxDrawdown(ratioSeries(a, b, 12 * 3600))
+    return depegTone(dd, true) === 'good' ? null : (
+      <Tag key="depeg" tone="warn">
+        décroché −{fmtPct(dd, 1)} sur {DEPEG_DAYS} j
+      </Tag>
+    )
+  }
 
   const words = search
     .trim()
@@ -449,6 +482,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                       {(chain === 'all' || protocol === 'all') && <span className="muted"> · {r.place}</span>}
                       <div className="tags">
                         {r.tags}
+                        {depegTag(r)}
                         {variants.length > 0 && (
                           <Tag>
                             + {variants.length} marché{variants.length > 1 ? 's' : ''}
@@ -527,7 +561,10 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                               {variants.map((v) => (
                                 <tr key={v.key} className="clickable" onClick={v.open}>
                                   <td className="lead">
-                                    <div className="tags">{v.tags}</div>
+                                    <div className="tags">
+                                      {v.tags}
+                                      {depegTag(v)}
+                                    </div>
                                     {v.note && <div className="muted small">{v.note}</div>}
                                   </td>
                                   <td data-label="Levier" className="num">

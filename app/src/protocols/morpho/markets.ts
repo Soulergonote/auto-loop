@@ -224,6 +224,19 @@ export async function fetchPositionMarkets(user: Address, chainIds: number[], si
   ).flat()
 }
 
+/** The market's largest borrower (Morpho's API) and its borrow shares, or undefined when the market has no debt. */
+export async function fetchTopBorrower(chainId: number, id: Hex, signal?: AbortSignal): Promise<{ user: Address; borrowShares: bigint } | undefined> {
+  const data = await gql<{ marketPositions: { items: { user: { address: string }; state?: { borrowShares?: string | null } | null }[] } }>(
+    `query($m: [String!], $c: [Int!]) { marketPositions(first: 1, orderBy: BorrowShares, orderDirection: Desc, where: { marketUniqueKey_in: $m, chainId_in: $c }) {
+      items { user { address } state { borrowShares } } } }`,
+    { m: [id], c: [chainId] },
+    signal,
+  )
+  const top = data.marketPositions.items[0]
+  const shares = BigInt(top?.state?.borrowShares ?? 0)
+  return top && shares > 0n ? { user: getAddress(top.user.address), borrowShares: shares } : undefined
+}
+
 /**
  * Markets of `candidates` where the user has collateral or debt, read on-chain in one multicall: finds a position the
  * API has not indexed yet (just opened) and does not depend on the API for the listed markets.
