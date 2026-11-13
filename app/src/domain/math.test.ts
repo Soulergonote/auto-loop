@@ -87,7 +87,19 @@ describe('Aave decoding', () => {
 })
 
 /** forge inspect LeverageExecutorV2 methodIdentifiers, in the ABI's order */
-const SELECTORS_V2 = ['0x7535d246', '0x926ee4eb', '0x68883fad', '0x64cdaee6', '0xf48d7888', '0x7a19da58', '0xe83c2bc6', '0xe0164ac0', '0x58b7aa05', '0x61771e49', '0x7778ffdd']
+const SELECTORS_V2 = [
+  '0x7535d246',
+  '0x926ee4eb',
+  '0x68883fad',
+  '0x64cdaee6',
+  '0xf48d7888',
+  '0x7a19da58',
+  '0xe83c2bc6',
+  '0xe0164ac0',
+  '0x58b7aa05',
+  '0x61771e49',
+  '0x7778ffdd',
+]
 
 describe('executor ABI', () => {
   // selectors checked against forge's methodIdentifiers for LeverageExecutorV2 (2026-11-08; swapDebt 2026-11-13)

@@ -217,7 +217,7 @@ function MorphoPosition({
           {ptShortSymbol(m.collateral.symbol)} / {m.loan.symbol}
           <span className="card-sub">
             Morpho · {net.label} · LLTV {fmtLltv(m.lltv)}
-            {!m.listed && ' · marché non listé'}
+            {!m.listed && (m.source === 'chain' ? ' · marché lu sur la chaîne' : ' · marché non listé')}
           </span>
         </>
       }
@@ -306,14 +306,17 @@ function MorphoPosition({
           </tbody>
         </table>
       </Fold>
-      <PositionHistory
-        chain={net.chain}
-        queryKey={['morpho', m.chainId, m.id, user]}
-        load={(signal) => morphoHistory(m.chainId, m.id, user, m.collateral, m.loan, signal)}
-        equityUsd={Number(equity) / 1e8}
-        now={nowPrices}
-        reference={u.debt > 0n ? { address: m.loan.address, symbol: m.loan.symbol } : undefined}
-      />
+      {/* the history comes from Morpho's API, which does not cover the chains read on-chain */}
+      {!net.onchain && (
+        <PositionHistory
+          chain={net.chain}
+          queryKey={['morpho', m.chainId, m.id, user]}
+          load={(signal) => morphoHistory(m.chainId, m.id, user, m.collateral, m.loan, signal)}
+          equityUsd={Number(equity) / 1e8}
+          now={nowPrices}
+          reference={u.debt > 0n ? { address: m.loan.address, symbol: m.loan.symbol } : undefined}
+        />
+      )}
     </Card>
   )
 }

@@ -20,24 +20,24 @@ type Quoted = TokenRef & { symbol: string; price: number }
 export const SAME_PRICE_TOLERANCE = 0.005
 const TTL_MS = 30 * 60_000
 
-const key = (t: TokenRef) => `${t.chainId}:${t.address.toLowerCase()}`
+export const tokenKey = (t: TokenRef) => `${t.chainId}:${t.address.toLowerCase()}`
 const samePrice = (a: number, b: number) => a > 0 && b > 0 && Math.abs(a / b - 1) <= SAME_PRICE_TOLERANCE
 
 /** Candidates that are the same token as `token`: same symbol (case aside), same price, another chain or address. */
 export function matchCopies(token: Quoted, candidates: Quoted[]): TokenRef[] {
-  const seen = new Set([key(token)])
+  const seen = new Set([tokenKey(token)])
   const out: TokenRef[] = []
   for (const c of candidates) {
-    if (seen.has(key(c)) || c.chainId === token.chainId) continue
+    if (seen.has(tokenKey(c)) || c.chainId === token.chainId) continue
     if (c.symbol.toLowerCase() !== token.symbol.toLowerCase() || !samePrice(c.price, token.price)) continue
-    seen.add(key(c))
+    seen.add(tokenKey(c))
     out.push({ chainId: c.chainId, address: c.address.toLowerCase() })
   }
   return out
 }
 
 /** Symbol and USD price of each token from DefiLlama, by `chainId:address`; tokens it does not know are left out. */
-async function llamaQuotes(tokens: TokenRef[]): Promise<Map<string, { symbol: string; price: number }>> {
+export async function llamaQuotes(tokens: TokenRef[]): Promise<Map<string, { symbol: string; price: number }>> {
   const out = new Map<string, { symbol: string; price: number }>()
   const named = tokens.filter((t) => LLAMA_CHAIN[t.chainId])
   for (let i = 0; i < named.length; i += 40) {
@@ -47,7 +47,7 @@ async function llamaQuotes(tokens: TokenRef[]): Promise<Map<string, { symbol: st
     const body = (await res.json()) as { coins?: Record<string, { symbol?: string; price?: number }> }
     named.slice(i, i + 40).forEach((t, j) => {
       const c = body.coins?.[ids[j]]
-      if (c?.symbol && c.price) out.set(key(t), { symbol: c.symbol, price: c.price })
+      if (c?.symbol && c.price) out.set(tokenKey(t), { symbol: c.symbol, price: c.price })
     })
   }
   return out
@@ -86,11 +86,11 @@ async function readCopies(chainId: number, addresses: string[], known: TokenRef[
       AbortSignal.timeout(8_000),
     ).catch(() => ({ assets: { items: [] as ApiAsset[] } })),
   ])
-  const apiSelf = new Map(self.assets.items.map((a) => [key({ chainId, address: a.address }), a]))
+  const apiSelf = new Map(self.assets.items.map((a) => [tokenKey({ chainId, address: a.address }), a]))
   const tokens: Quoted[] = []
   for (const t of own) {
-    const l = llama.get(key(t))
-    const a = apiSelf.get(key(t))
+    const l = llama.get(tokenKey(t))
+    const a = apiSelf.get(tokenKey(t))
     // the API's spelling first: its symbol filter is case-sensitive
     const symbol = a?.symbol ?? l?.symbol
     const price = l?.price ?? a?.price?.usd ?? 0
@@ -107,14 +107,14 @@ async function readCopies(chainId: number, addresses: string[], known: TokenRef[
   )
   const others = found.assets.items.map((a) => ({ chainId: a.chain.id, address: a.address.toLowerCase(), symbol: a.symbol, apiPrice: a.price?.usd ?? 0 }))
   const llamaOthers = await llamaQuotes([...others, ...known])
-  const candidates: Quoted[] = others.map((o) => ({ ...o, price: llamaOthers.get(key(o))?.price ?? o.apiPrice }))
+  const candidates: Quoted[] = others.map((o) => ({ ...o, price: llamaOthers.get(tokenKey(o))?.price ?? o.apiPrice }))
   for (const t of known) {
-    const q = llamaOthers.get(key(t))
+    const q = llamaOthers.get(tokenKey(t))
     if (q) candidates.push({ ...t, address: t.address.toLowerCase(), ...q })
   }
   for (const t of tokens) {
     const copies = matchCopies(t, candidates)
-    if (copies.length > 0) out.set(key(t), copies)
+    if (copies.length > 0) out.set(tokenKey(t), copies)
   }
   return out
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getAddress, isAddress, type Address, type Hash, type Hex } from 'viem'
 import { executorRouters, type AggregatorChoice, type MorphoNet } from '../../../config'
-import { morphoMarketsQuery, readMorphoState, morphoSides, type MorphoMarket, type MorphoState } from '../../../protocols/morpho/markets'
+import { marketSizeUsd, morphoMarketsQuery, readMorphoState, morphoSides, type MorphoMarket, type MorphoState } from '../../../protocols/morpho/markets'
 import { ptInfosQuery, needsRenewal, type PtInfo } from '../../../protocols/pendle/pt'
 import { yieldSourceText } from '../../../services/yield/nativeYield'
 import { verifyMorphoExecutor } from '../../../chain/deploy'
@@ -142,6 +142,7 @@ type Props = {
 /** Boucle screen for Morpho Blue: pick a market (collateral, loan token, then LLTV / oracle), then open, close or move. */
 export function MorphoView({ net, networkSelect, account, aggregator, common, notes, seed, onExecutor }: Props) {
   const chainId = net.chain.id
+  const onchain = !!net.onchain
   const [unlisted, setUnlisted] = useState(false)
   const listed = useQuery(morphoMarketsQuery(chainId, false))
   const others = useQuery({ ...morphoMarketsQuery(chainId, true), enabled: unlisted })
@@ -149,7 +150,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
     const all = [...(listed.data ?? []), ...(unlisted ? (others.data ?? []) : [])]
     // a market given by the scanner or the positions is offered even when it is not in the list (unlisted)
     if (seed && !all.some((m) => m.id === seed.market.id)) all.push(seed.market)
-    return all.filter((m) => m.collateralTotalUsd + m.liquidityUsd >= MIN_MARKET_USD || m.id === seed?.market.id)
+    return all.filter((m) => marketSizeUsd(m) + m.liquidityUsd >= MIN_MARKET_USD || m.id === seed?.market.id)
   }, [listed.data, others.data, unlisted, seed])
   const [picked, setPicked] = useState<Hex | undefined>(seed?.market.id)
   const [tab, setTab] = useState<MorphoTab>(seed?.tab ?? 'open')
@@ -161,13 +162,13 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
   }, [seed])
 
   // default: the market with the most collateral
-  const market = markets.find((m) => m.id === picked) ?? [...markets].sort((a, b) => b.collateralTotalUsd - a.collateralTotalUsd)[0]
+  const market = markets.find((m) => m.id === picked) ?? [...markets].sort((a, b) => marketSizeUsd(b) - marketSizeUsd(a))[0]
   const collaterals = useMemo(() => {
     const by = new Map<string, { token: MorphoMarket['collateral']; usd: number }>()
     for (const m of markets) {
       const k = m.collateral.address.toLowerCase()
       const e = by.get(k) ?? { token: m.collateral, usd: 0 }
-      e.usd += m.collateralTotalUsd
+      e.usd += marketSizeUsd(m)
       by.set(k, e)
     }
     return [...by.values()].sort((a, b) => b.usd - a.usd)
@@ -177,7 +178,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
   const sameCollateral = market ? markets.filter((m) => m.collateral.address === market.collateral.address) : []
   const loans = [...new Map(sameCollateral.map((m) => [m.loan.address, m.loan])).values()]
   const samePair = market ? sameCollateral.filter((m) => m.loan.address === market.loan.address).sort((a, b) => b.liquidityUsd - a.liquidityUsd) : []
-  const bestOf = (list: MorphoMarket[]) => [...list].sort((a, b) => b.liquidityUsd + b.collateralTotalUsd - (a.liquidityUsd + a.collateralTotalUsd))[0]
+  const bestOf = (list: MorphoMarket[]) => [...list].sort((a, b) => b.liquidityUsd + marketSizeUsd(b) - (a.liquidityUsd + marketSizeUsd(a)))[0]
 
   const state = useQuery({
     queryKey: ['morpho-state', chainId, market?.id, account, net.executor],
@@ -287,19 +288,28 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
             }))}
           />
         )}
-        <label className="check small">
-          <input type="checkbox" checked={unlisted} onChange={(e) => setUnlisted(e.target.checked)} /> Inclure les marchés non listés par Morpho (au moins{' '}
-          {usd(10_000)} déposés)
-        </label>
+        {onchain ? (
+          <p className="muted small">
+            Morpho ne publie pas de liste pour ce réseau : marchés lus sur la chaîne (au moins {usd(10_000)} déposés), aucun n’est revu par Morpho.
+          </p>
+        ) : (
+          <label className="check small">
+            <input type="checkbox" checked={unlisted} onChange={(e) => setUnlisted(e.target.checked)} /> Inclure les marchés non listés par Morpho (au moins{' '}
+            {usd(10_000)} déposés)
+          </label>
+        )}
+        {listed.isSuccess && markets.length === 0 && <Notice>Aucun marché Morpho assez grand sur ce réseau pour l’instant.</Notice>}
         {listed.isError && (
           <Notice>
-            <span>API Morpho injoignable : {(listed.error as Error).message}</span>
+            <span>
+              {onchain ? 'Marchés Morpho illisibles sur la chaîne' : 'API Morpho injoignable'} : {(listed.error as Error).message}
+            </span>
             <button className="btn" onClick={() => void listed.refetch()}>
               Réessayer
             </button>
           </Notice>
         )}
-        {slow && !listed.isError && <Notice>L’API Morpho répond lentement.</Notice>}
+        {slow && !listed.isError && <Notice>{onchain ? 'La lecture des marchés sur la chaîne prend du temps.' : 'L’API Morpho répond lentement.'}</Notice>}
         {state.isError && <Notice tone="bad">Lecture du marché sur Morpho impossible : {errText(state.error)}</Notice>}
         {market && (
           <Fold
@@ -325,7 +335,8 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
               </dd>
               <dt>Liquidité</dt>
               <dd>
-                {usd(market.liquidityUsd)} · utilisation {fmtPct(market.utilization, 1)} · collatéral déposé {usd(market.collateralTotalUsd)}
+                {usd(market.liquidityUsd)} · utilisation {fmtPct(market.utilization, 1)} ·{' '}
+                {market.collateralTotalUsd > 0 ? `collatéral déposé ${usd(market.collateralTotalUsd)}` : `emprunté ${usd(market.borrowUsd)}`}
               </dd>
               <dt>Oracle</dt>
               <dd>
@@ -342,7 +353,10 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
           </Fold>
         )}
         {market && !market.listed && (
-          <Notice>Marché non listé par Morpho : oracle et paramètres non revus par Morpho. Vérifier l’oracle avant d’y déposer.</Notice>
+          <Notice>
+            {market.source === 'chain' ? 'Marché lu sur la chaîne' : 'Marché non listé par Morpho'} : oracle et paramètres non revus par Morpho. Vérifier
+            l’oracle avant d’y déposer.
+          </Notice>
         )}
         {market && market.oracleType === 'Unknown' && <Notice>Oracle de type inconnu pour l’API Morpho : vérifier sa source de prix avant d’y déposer.</Notice>}
         {market?.warnings

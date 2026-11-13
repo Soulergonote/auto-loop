@@ -10,7 +10,8 @@ import { encodeAbiParameters, getAddress, keccak256, type Address, type Hex } fr
 import { readContracts } from '@wagmi/core'
 import { wagmiConfig } from '../../chain/wagmi'
 import { erc20Abi, morphoAbi, morphoIrmAbi, morphoOracleAbi } from '../../chain/abi'
-import type { Token } from '../../config'
+import { MORPHO_NETWORKS, type Token } from '../../config'
+import { fetchOnchainMarkets } from './onchain'
 import type { Side } from '../../domain/math'
 import { gql } from './api'
 import type { NativeYield } from '../../services/yield/nativeYield'
@@ -40,6 +41,8 @@ export type MorphoMarket = {
   chainId: number
   params: MarketParams
   listed: boolean
+  /** read on-chain (a chain the API does not cover): no curation, no rewards, total collateral unknown */
+  source?: 'chain'
   collateral: Token
   loan: Token
   /** USD prices from the API (0 when it has none) */
@@ -54,6 +57,7 @@ export type MorphoMarket = {
   borrowRewardsApr: number
   liquidity: bigint
   liquidityUsd: number
+  /** collateral deposited, USD (0 when unknown: markets read on-chain, see marketSizeUsd) */
   collateralTotalUsd: number
   borrowUsd: number
   utilization: number
@@ -173,9 +177,23 @@ async function withTokenYields(chainId: number, markets: MorphoMarket[]): Promis
   return markets.map((m) => ({ ...m, collateralYield: found.get(m.collateral.address.toLowerCase()) ?? m.collateralYield }))
 }
 
+/**
+ * Size of a market for ranking, USD: its deposited collateral, or for a market read on-chain (where Morpho keeps no
+ * per-market total) the least collateral its debt needs, debt / LLTV.
+ */
+export const marketSizeUsd = (m: Pick<MorphoMarket, 'collateralTotalUsd' | 'borrowUsd' | 'lltv'>) =>
+  m.collateralTotalUsd > 0 ? m.collateralTotalUsd : m.lltv > 0 ? m.borrowUsd / m.lltv : 0
+
+/** The chain's markets: from Morpho's API, or read on-chain where the API does not go (all of them in the first list). */
+function loadMarkets(chainId: number, unlisted: boolean, signal?: AbortSignal): Promise<MorphoMarket[]> {
+  const net = MORPHO_NETWORKS.find((n) => n.chain.id === chainId)
+  if (net?.onchain) return unlisted ? Promise.resolve([]) : fetchOnchainMarkets({ ...net, onchain: net.onchain }).then((ms) => withTokenYields(chainId, ms))
+  return fetchMorphoMarkets(chainId, unlisted, signal)
+}
+
 export const morphoMarketsQuery = (chainId: number, unlisted = false) => ({
   queryKey: ['morpho-markets', chainId, unlisted],
-  queryFn: ({ signal }: { signal?: AbortSignal }) => fetchMorphoMarkets(chainId, unlisted, signal),
+  queryFn: ({ signal }: { signal?: AbortSignal }) => loadMarkets(chainId, unlisted, signal),
   staleTime: 120_000,
   refetchInterval: 300_000,
   retry: 2,
@@ -183,6 +201,9 @@ export const morphoMarketsQuery = (chainId: number, unlisted = false) => ({
 
 /** Markets where the user has collateral on these chains (API, unlisted markets included), to be read on-chain one by one. */
 export async function fetchPositionMarkets(user: Address, chainIds: number[], signal?: AbortSignal): Promise<MorphoMarket[]> {
+  // chains read on-chain are not in the API (it refuses the whole query): their positions come from readHeldMarkets
+  chainIds = chainIds.filter((c) => !MORPHO_NETWORKS.some((n) => n.chain.id === c && n.onchain))
+  if (chainIds.length === 0) return []
   const data = await gql<{ marketPositions: { items: { market: ApiMarket & { chain: { id: number } } }[] } }>(
     `query($user: [String!], $chains: [Int!]) { marketPositions(first: 200, where: { userAddress_in: $user, chainId_in: $chains, collateral_gte: 1 }) {
       items { market { chain { id } ${MARKET_FIELDS} } } } }`,
