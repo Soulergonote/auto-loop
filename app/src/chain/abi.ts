@@ -32,6 +32,8 @@ const openV2 = `(address collateralAsset, address debtAsset, address capitalToke
 const closeV2 = `(address collateralAsset, address debtAsset, uint256 repayAmount, uint256 collateralToWithdraw, uint256 collateralToSell, ${step}[] steps, address flashLender, ${guard} guard)`
 const swapCollV2 = `(address fromAsset, address toAsset, uint256 fromAmount, uint256 toAmount, ${step}[] steps, address flashLender, ${guard} guard)`
 const swapCollResult = '(uint256 withdrawn, uint256 supplied, uint256 flashPremium, uint256 healthFactor)'
+const swapDebtV2 = `(address fromAsset, address toAsset, uint256 newDebtAmount, uint256 minRepaid, ${step}[] steps, ${guard} guard)`
+const swapDebtResult = '(uint256 repaid, uint256 borrowed, uint256 returned, uint256 healthFactor)'
 const closeResult =
   '(uint256 debtRepaid, uint256 collateralWithdrawn, uint256 collateralReturned, uint256 debtReturned, uint256 flashPremium, uint256 healthFactor)'
 
@@ -45,6 +47,8 @@ export const executorAbi = parseAbi([
   `function closeWithSig(${closeV2} p, ${sig} aTokenPermit) returns (${closeResult})`,
   `function swapCollateral(${swapCollV2} p) returns (${swapCollResult})`,
   `function swapCollateralWithSig(${swapCollV2} p, ${sig} aTokenPermit) returns (${swapCollResult})`,
+  `function swapDebt(${swapDebtV2} p) returns (${swapDebtResult})`,
+  `function swapDebtWithSig(${swapDebtV2} p, ${sig} delegation) returns (${swapDebtResult})`,
   'function isRouterAllowed(address) view returns (bool)',
   'function flashLenderKind(address) view returns (uint8)',
   'error ZeroAddress()',
@@ -68,6 +72,7 @@ export const executorAbi = parseAbi([
   'error ExcessiveInput(uint256 spent, uint256 maxIn)',
   'error SellExceedsWithdrawn(uint256 toSell, uint256 withdrawn)',
   'error InsufficientToRepayFlashLoan(uint256 balance, uint256 owed)',
+  'error RepaidTooLittle(uint256 repaid, uint256 minRepaid)',
 ])
 
 export const poolAbi = parseAbi([

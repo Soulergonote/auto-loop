@@ -115,7 +115,7 @@ export function App() {
       !declared.executor
         ? declared
         : check.data
-          ? { ...declared, executorVersion: check.data.version, executorPendle: check.data.pendle }
+          ? { ...declared, executorVersion: check.data.version, executorPendle: check.data.pendle, executorDebtSwap: check.data.debtSwap }
           : { ...declared, executor: undefined },
     [declared, check.data],
   )
@@ -136,7 +136,7 @@ export function App() {
   // the shared executor of the network (CREATE2, same address for everyone): used as soon as someone deployed it
   const sharedAave = useSharedExecutor(
     declared,
-    !DEMO && !morpho && (!declared.executor || check.data?.version === 1 || (check.data !== undefined && !check.data.pendle)),
+    !DEMO && !morpho && (!declared.executor || check.data?.version === 1 || (check.data !== undefined && (!check.data.pendle || !check.data.debtSwap))),
   )
   const sharedMorpho = useSharedMorphoExecutor(declaredMorpho, !DEMO && morpho && !declaredMorpho.executor)
   useEffect(() => {

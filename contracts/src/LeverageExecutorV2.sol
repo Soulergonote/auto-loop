@@ -28,6 +28,7 @@ import {
 ///   5. close and swapCollateral can borrow from a free flash lender (Morpho Blue, Balancer v2) instead of Aave
 ///   6. every call returns the amounts actually moved and emits one `Swapped` event per step
 ///   7. (deployment) any router can be whitelisted at deployment, e.g. the Pendle router; no code change
+///   8. `swapDebt` replaces the debt asset without touching the collateral (follow the cheapest stablecoin)
 ///
 /// Open (collateral C, debt D):
 ///   pull the capital -> [swap it to C] -> Aave flash loan of D in debt mode (interestRateMode 2, onBehalfOf caller,
@@ -37,11 +38,15 @@ import {
 ///   withdraw C -> swap C -> D -> give the loan back -> leftovers back to the caller -> minimum health factor check.
 /// Swap collateral (C1 -> C2, debt unchanged): flash loan of C2 -> supply it for the caller -> pull the caller's
 ///   aC1 -> withdraw C1 -> swap C1 -> C2 -> give the loan back -> surplus C2 supplied for the caller -> checks.
+/// Swap debt (D1 -> D2, collateral unchanged): Aave flash loan of D2 in debt mode (onBehalfOf caller, no premium)
+///   -> swap D2 -> D1 -> repay the caller's D1 debt -> Aave opens the D2 debt and checks the caller's health factor
+///   -> leftovers back to the caller -> minimum repaid and minimum health factor checks.
 ///
 /// Prerequisites for the caller (granted in the same wallet batch, exact amounts):
 ///   open:           capital.approve(executor, capitalAmount) and variableDebtD.approveDelegation(executor, debt)
 ///   close:          aC.approve(executor, amount)
 ///   swapCollateral: aC1.approve(executor, amount), and the caller's eMode must accept C2
+///   swapDebt:       variableDebtD2.approveDelegation(executor, newDebt), and the caller's eMode must lend D2
 ///
 /// Security model (unchanged from v1, extended to every function):
 ///   - the contract only ever acts for msg.sender: borrower, supplier and owner of the withdrawn aTokens
@@ -91,7 +96,8 @@ contract LeverageExecutorV2 is
     enum Action {
         Open,
         Close,
-        SwapCollateral
+        SwapCollateral,
+        SwapDebt
     }
 
     /// @param minHealthFactor the call reverts if the caller's health factor ends below it (1e18 = 1.00; 0 = no check)
@@ -146,6 +152,27 @@ contract LeverageExecutorV2 is
         Guard guard;
     }
 
+    /// @param fromAsset     debt asset repaid (D1)
+    /// @param toAsset       debt asset borrowed instead (D2)
+    /// @param newDebtAmount D2 borrowed and sold for D1 (the first step sells exactly this amount)
+    /// @param minRepaid     the call reverts if less D1 debt is repaid; type(uint256).max = the caller's whole D1 debt
+    /// @param steps         D2 -> D1
+    struct SwapDebtParams {
+        address fromAsset;
+        address toAsset;
+        uint256 newDebtAmount;
+        uint256 minRepaid;
+        Step[] steps;
+        Guard guard;
+    }
+
+    struct SwapDebtResult {
+        uint256 repaid;
+        uint256 borrowed;
+        uint256 returned;
+        uint256 healthFactor;
+    }
+
     struct CloseResult {
         uint256 debtRepaid;
         uint256 collateralWithdrawn;
@@ -197,7 +224,10 @@ contract LeverageExecutorV2 is
         SwapCollateralResult result
     );
 
+    event DebtSwapped(address indexed user, address indexed fromAsset, address indexed toAsset, SwapDebtResult result);
+
     error ZeroAmount();
+    error RepaidTooLittle(uint256 repaid, uint256 minRepaid);
     error HealthFactorTooLow(uint256 healthFactor, uint256 minHealthFactor);
     error InvalidFlashLender(address lender);
     error FlashLenderNotAllowed(address lender);
@@ -517,11 +547,85 @@ contract LeverageExecutorV2 is
     }
 
     // ---------------------------------------------------------------------------------------------
+    // Swap debt (collateral unchanged)
+    // ---------------------------------------------------------------------------------------------
+
+    function swapDebt(SwapDebtParams calldata p) external nonReentrant returns (SwapDebtResult memory) {
+        return _swapDebt(p);
+    }
+
+    /// @notice Same as `swapDebt`, granting the credit delegation of the new debt asset with a signature.
+    /// A front-run of the signature only makes the inner call fail; the delegation is then already in place.
+    function swapDebtWithSig(SwapDebtParams calldata p, Signature calldata delegation)
+        external
+        nonReentrant
+        returns (SwapDebtResult memory)
+    {
+        address vDebt = POOL.getReserveData(p.toAsset).variableDebtTokenAddress;
+        try ICreditDelegationToken(vDebt)
+            .delegationWithSig(
+                msg.sender,
+                address(this),
+                delegation.value,
+                delegation.deadline,
+                delegation.v,
+                delegation.r,
+                delegation.s
+            ) {}
+            catch {}
+        return _swapDebt(p);
+    }
+
+    function _swapDebt(SwapDebtParams calldata cp) internal returns (SwapDebtResult memory r) {
+        SwapDebtParams memory p = cp;
+        _checkDeadline(p.guard.deadline);
+        if (p.fromAsset == p.toAsset) revert SameAsset();
+        if (p.newDebtAmount == 0 || p.steps.length == 0) revert ZeroAmount();
+        if (p.minRepaid == type(uint256).max) {
+            p.minRepaid = IERC20(POOL.getReserveData(p.fromAsset).variableDebtTokenAddress).balanceOf(msg.sender);
+        }
+        if (p.minRepaid == 0) revert ZeroAmount();
+
+        address[] memory tokens = _pairTokens(p.fromAsset, p.toAsset, p.steps);
+        uint256[] memory before = _balances(tokens);
+
+        // mode 2: the loan becomes variable D2 debt of the caller once the callback has repaid D1
+        _flash(
+            address(POOL),
+            p.toAsset,
+            p.newDebtAmount,
+            MODE_VARIABLE,
+            msg.sender,
+            abi.encode(Action.SwapDebt, msg.sender, abi.encode(p))
+        );
+        r.repaid = _out[0];
+        delete _out;
+        r.borrowed = p.newDebtAmount;
+
+        uint256[] memory sent = _sweep(tokens, before, msg.sender);
+        r.returned = sent[0];
+        r.healthFactor = _checkHealth(msg.sender, p.guard.minHealthFactor);
+        emit DebtSwapped(msg.sender, p.fromAsset, p.toAsset, r);
+    }
+
+    function _executeSwapDebt(address user, uint256 amount, SwapDebtParams memory p) internal {
+        address[] memory tokens = _pairTokens(p.fromAsset, p.toAsset, p.steps);
+        // 1. new debt asset -> old one
+        uint256 received = _swapChain(user, p.toAsset, amount, p.steps, p.fromAsset, tokens);
+        // 2. repay the old debt (Aave takes at most the debt; the rest goes back to the user with the sweep)
+        IERC20(p.fromAsset).forceApprove(address(POOL), received);
+        uint256 repaid = POOL.repay(p.fromAsset, received, MODE_VARIABLE, user);
+        IERC20(p.fromAsset).forceApprove(address(POOL), 0);
+        if (repaid < p.minRepaid) revert RepaidTooLittle(repaid, p.minRepaid);
+        _out[0] = repaid;
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // Flash loans
     // ---------------------------------------------------------------------------------------------
 
     /// @dev Requests a flash loan and checks that the lender called back. `mode` 2 (debt opened for `onBehalfOf`)
-    /// only exists on Aave and is only used by open, always for the caller.
+    /// only exists on Aave and is only used by open and swapDebt, always for the caller.
     function _flash(address lender, address asset, uint256 amount, uint256 mode, address onBehalfOf, bytes memory data)
         internal
     {
@@ -572,8 +676,11 @@ contract LeverageExecutorV2 is
             // nothing to give back: mode 2 turns the loan into variable debt of `user`
         } else if (action == Action.Close) {
             owed = _executeClose(user, amount, premium, abi.decode(inner, (CloseParams)));
-        } else {
+        } else if (action == Action.SwapCollateral) {
             owed = _executeSwapCollateral(user, amount, premium, abi.decode(inner, (SwapCollateralParams)));
+        } else {
+            // nothing to give back: mode 2 turns the loan into variable debt of `user`
+            _executeSwapDebt(user, amount, abi.decode(inner, (SwapDebtParams)));
         }
     }
 
@@ -689,5 +796,4 @@ contract LeverageExecutorV2 is
             mstore(tokens, n)
         }
     }
-
 }

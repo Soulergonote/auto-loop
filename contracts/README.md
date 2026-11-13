@@ -88,7 +88,7 @@ Prérequis côté utilisateur : `C.approve(executor, initial)` et `variableDebtD
 
 Nouveau contrat, même modèle de sécurité que la v1 ; la v1 n'est pas modifiée. Une position ouverte avec la v1 (ou directement sur aave.com) se gère avec la v2, puisqu'elle vit sur le compte Aave de l'utilisateur (testé).
 
-### Les 7 changements
+### Les 8 changements
 
 1. **Chaînes de swaps** : chaque swap est une liste de 1 à 4 étapes `Step {router, tokenOut, data, minOut}` (par exemple PT → sUSDe → USDe). Chaque étape a son propre minimum, contrôlé par différence de soldes ; la dernière doit livrer le bon token. La deuxième étape vend le montant écrit dans son calldata (le minimum de la première, comme l'app le cote) : ce que la première a livré en plus revient à l'utilisateur dans le token intermédiaire.
 2. **Capital en n'importe quel token** : `capitalToken` peut être le collatéral, l'actif de dette (vendu avec la dette, en une seule étape) ou autre chose, échangé en collatéral par `capitalSteps`. `debtAmount = 0` fait un simple dépôt (avec ou sans swap) ; `capitalAmount = 0` ajoute du levier à une position existante.
@@ -97,11 +97,13 @@ Nouveau contrat, même modèle de sécurité que la v1 ; la v1 n'est pas modifi�
 5. **Fermeture et changement de collatéral sans prime** : `flashLender` vaut `address(POOL)` (prime Aave, 0,05 % par défaut) ou un prêteur gratuit enregistré au déploiement, Morpho Blue ou le Vault Balancer v2. L'ouverture reste en flash loan Aave mode 2 (sans prime).
 6. **Valeurs de retour et événements** : `open` renvoie `(collateralSupplied, debtBorrowed, healthFactor)`, `close` un `CloseResult` (dette remboursée, collatéral retiré, collatéral et dette rendus, prime, HF), `swapCollateral` un `SwapCollateralResult`. Un événement `Swapped` par étape, et `PositionOpened` / `PositionClosed` / `CollateralSwapped` qui reprennent exactement les valeurs renvoyées (testé).
 7. **Routeur Pendle** : aucun code spécifique, il suffit de le mettre dans la liste blanche au déploiement (`0x888888888889758F76e7103c6CbF23ABbF58F946`, même adresse sur toutes les chaînes).
+8. **`swapDebt`** (ajouté le 13/11/2026) : remplace l'actif de la dette sans toucher au collatéral. Flash loan Aave de la nouvelle dette en mode 2 (elle devient la dette variable de l'appelant, sans prime) → swap nouvelle → ancienne dette → remboursement de l'ancienne pour l'appelant → Aave ouvre la nouvelle dette et contrôle le health factor. `minRepaid` (`type(uint256).max` = toute la dette au moment de l'inclusion) ; ce que le swap rapporte au-delà de la dette revient à l'appelant. Événement `DebtSwapped`. Tests : `test/v2/V2SwapDebt.t.sol` (total, partiel, signature, gardes, délégation qui ne sert qu'à son titulaire, rappel forgé). Le bytecode change, donc l'adresse commune CREATE2 aussi ; un contrat v2 déployé avant reste reconnu par l'app pour tout le reste.
 
 Prérequis côté utilisateur, montants exacts, dans le même lot de transactions du portefeuille :
 - ouverture : `capitalToken.approve(executor, capitalAmount)` et `variableDebtD.approveDelegation(executor, debtAmount)` (ou `openWithSig`) ;
 - fermeture : `aC.approve(executor, montant)` (ou `closeWithSig`) ;
-- changement de collatéral : `aC1.approve(executor, montant)` (ou `swapCollateralWithSig`), et l'eMode de l'utilisateur doit accepter le nouveau collatéral.
+- changement de collatéral : `aC1.approve(executor, montant)` (ou `swapCollateralWithSig`), et l'eMode de l'utilisateur doit accepter le nouveau collatéral ;
+- changement de dette : `variableDebtD2.approveDelegation(executor, montant)` (ou `swapDebtWithSig`), et l'eMode de l'utilisateur doit permettre d'emprunter D2.
 
 ### Sécurité v2 (en plus de celle de la v1)
 

@@ -1,10 +1,11 @@
-/** Aave executor calls (open, close, change of collateral) as one atomic batch with their exact approvals around them. */
+/** Aave executor calls (open, close, change of collateral or of debt) as one atomic batch with their exact approvals around them. */
 import { encodeFunctionData, type Hash } from 'viem'
 import { readContract } from '@wagmi/core'
 import { wagmiConfig } from '../../chain/wagmi'
 import { debtTokenAbi, erc20Abi, poolAbi } from '../../chain/abi'
 import { aTokensToApprove, type SwapCollateralPlan } from './swapCollateral'
-import { capitalTokenOf, closeCall, encodeCall, openCall, swapCollateralCall, type ClosePlan, type OpenPlan } from './execute'
+import { capitalTokenOf, closeCall, encodeCall, openCall, swapCollateralCall, swapDebtCall, type ClosePlan, type OpenPlan } from './execute'
+import type { SwapDebtPlan } from './swapDebt'
 import { type Progress } from '../../chain/tx'
 import { allowanceCalls, sendBatch, type BatchCall } from '../../chain/batch'
 
@@ -114,4 +115,27 @@ export async function executeCloseBatch(p: ClosePlan, onStep: Progress): Promise
     args: [p.user, p.executor],
   })
   return sendBatch(p.chainId, p.user, closeBatchCalls(p, allowance), onStep, p.executor)
+}
+
+/** "Changer de dette" as one batch: exact credit delegation of the new debt asset, `swapDebt`, delegation back after. */
+export function swapDebtBatchCalls(p: SwapDebtPlan, borrowAllowance: bigint): BatchCall[] {
+  const call = encodeCall(swapDebtCall(p))
+  const d = allowanceCalls('delegation', p.toDebtToken, p.executor, p.newDebtAmount, borrowAllowance, {
+    set: 'Déléguer l’emprunt de la nouvelle dette au contrat (montant exact)',
+    reset: 'Remettre la délégation d’emprunt à sa valeur',
+  })
+  return [...d.before, { to: p.executor, data: call, label: 'Changer de dette : flash loan, swap et remboursement' }, ...d.after]
+}
+
+/** Changes the debt asset in one confirmation, with the delegation read now. */
+export async function executeSwapDebtBatch(p: SwapDebtPlan, onStep: Progress): Promise<Hash | undefined> {
+  onStep('Lecture des autorisations…')
+  const allowance = await readContract(wagmiConfig, {
+    chainId: p.chainId,
+    address: p.toDebtToken,
+    abi: debtTokenAbi,
+    functionName: 'borrowAllowance',
+    args: [p.user, p.executor],
+  })
+  return sendBatch(p.chainId, p.user, swapDebtBatchCalls(p, allowance), onStep, p.executor)
 }

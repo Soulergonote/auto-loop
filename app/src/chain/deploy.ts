@@ -5,11 +5,15 @@ import { useQuery } from '@tanstack/react-query'
 import { wagmiConfig } from './wagmi'
 import { executorAbi, executorAbiV1, morphoExecutorAbi } from './abi'
 import { EXECUTOR_BYTECODE_MORPHO, EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../generated/executorBytecode'
+import { EXECUTOR_BYTECODE_V2_0 } from '../generated/executorBytecodeLegacy'
 import { AGGREGATORS, executorLenders, executorRouters, type Market, type MorphoNet } from '../config'
 
 export type ExecutorVersion = 1 | 2
-/** What the code check found: the contract version, and whether Pendle's router is whitelisted (PT loops). */
-export type ExecutorCheck = { version: ExecutorVersion; pendle: boolean }
+/**
+ * What the code check found: the contract version, whether Pendle's router is whitelisted (PT loops), and whether
+ * the contract can change the debt asset (`swapDebt`, v2 deployed from 2026-11-13).
+ */
+export type ExecutorCheck = { version: ExecutorVersion; pendle: boolean; debtSwap: boolean }
 
 export function deployDataV2(market: Market) {
   const routers = executorRouters(market.chain.id).map((r) => r.router)
@@ -19,6 +23,12 @@ export function deployDataV2(market: Market) {
 function deployDataV1(market: Market) {
   const routers = executorRouters(market.chain.id).map((r) => r.router)
   return encodeDeployData({ abi: executorAbiV1, bytecode: EXECUTOR_BYTECODE_V1, args: [market.pool, routers] })
+}
+
+/** v2 as deployed before `swapDebt` (same constructor): still a v2 for everything else. */
+function deployDataV2Legacy(market: Market): Hex {
+  const routers = executorRouters(market.chain.id).map((r) => r.router)
+  return encodeDeployData({ abi: executorAbi, bytecode: EXECUTOR_BYTECODE_V2_0 as Hex, args: [market.pool, routers, executorLenders(market.chain.id)] })
 }
 
 /**
@@ -36,13 +46,16 @@ export async function verifyExecutor(market: Market, address: Address): Promise<
   const code = await client.getCode({ address })
   if (!code || code === '0x') throw new Error(`aucun contrat à cette adresse sur ${market.chain.name}`)
   let version: ExecutorVersion | undefined
-  for (const [v, data] of [
-    [2, deployDataV2(market)],
-    [1, deployDataV1(market)],
+  let debtSwap = false
+  for (const [v, data, swaps] of [
+    [2, deployDataV2(market), true],
+    [2, deployDataV2Legacy(market), false],
+    [1, deployDataV1(market), false],
   ] as const) {
     const expected = await client.call({ data }).catch(() => undefined)
     if (expected?.data && expected.data.toLowerCase() === code.toLowerCase()) {
       version = v
+      debtSwap = swaps
       break
     }
   }
@@ -59,7 +72,7 @@ export async function verifyExecutor(market: Market, address: Address): Promise<
       const kind = await client.readContract({ address, abi: executorAbi, functionName: 'flashLenderKind', args: [l.lender] })
       if (kind !== l.kind) throw new Error('le prêteur Morpho n’est pas enregistré dans ce contrat')
     }
-  return { version, pendle }
+  return { version, pendle, debtSwap }
 }
 
 export function useExecutorCheck(market: Market) {

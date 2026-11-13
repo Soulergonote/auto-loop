@@ -122,3 +122,26 @@ describe('decodeOutcome', () => {
     expect(decodeOutcome([swapped(WETH, USDC, 1n, 1n, OTHER), opened(USER, EXECUTOR)], EXECUTOR, USER)!.swaps).toHaveLength(0)
   })
 })
+
+describe('decodeOutcome: change of debt', () => {
+  it('reads the repaid and new debt, and what went back to the wallet', () => {
+    const logs = [
+      swapped(WETH, USDC, 10n ** 18n, 3_010_000_000n),
+      log(EXECUTOR, 'DebtSwapped', {
+        user: USER,
+        fromAsset: USDC,
+        toAsset: WETH,
+        result: { repaid: 3_000_000_000n, borrowed: 10n ** 18n, returned: 10_000_000n, healthFactor: 1_2n * 10n ** 17n },
+      }),
+    ]
+    const o = decodeOutcome(logs, EXECUTOR, USER)!
+    expect(o.kind).toBe('debt')
+    expect(plain(outcomeLines(o, tokens))).toEqual([
+      'Dette remboursée 3 000,00 USDC',
+      'Nouvelle dette 1 WETH',
+      'Swap 1 WETH → 3 010,00 USDC',
+      'Rendu 10 USDC',
+      'Health factor 1,20',
+    ])
+  })
+})

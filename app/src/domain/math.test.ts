@@ -87,10 +87,10 @@ describe('Aave decoding', () => {
 })
 
 /** forge inspect LeverageExecutorV2 methodIdentifiers, in the ABI's order */
-const SELECTORS_V2 = ['0x7535d246', '0x926ee4eb', '0x68883fad', '0x64cdaee6', '0xf48d7888', '0x7a19da58', '0xe83c2bc6', '0x61771e49', '0x7778ffdd']
+const SELECTORS_V2 = ['0x7535d246', '0x926ee4eb', '0x68883fad', '0x64cdaee6', '0xf48d7888', '0x7a19da58', '0xe83c2bc6', '0xe0164ac0', '0x58b7aa05', '0x61771e49', '0x7778ffdd']
 
 describe('executor ABI', () => {
-  // selectors checked against forge's methodIdentifiers for LeverageExecutorV2 (2026-11-08)
+  // selectors checked against forge's methodIdentifiers for LeverageExecutorV2 (2026-11-08; swapDebt 2026-11-13)
   it('matches the Solidity signatures of LeverageExecutorV2', () => {
     const sigs = executorAbi.filter((x) => x.type === 'function').map((f) => toFunctionSignature(f))
     const STEP = '(address,address,bytes,uint256)'
@@ -99,6 +99,7 @@ describe('executor ABI', () => {
     const OPEN = `(address,address,address,uint256,${STEP}[],uint256,${STEP}[],${GUARD})`
     const CLOSE = `(address,address,uint256,uint256,uint256,${STEP}[],address,${GUARD})`
     const SWAP = `(address,address,uint256,uint256,${STEP}[],address,${GUARD})`
+    const DEBT = `(address,address,uint256,uint256,${STEP}[],${GUARD})`
     expect(sigs).toEqual([
       'POOL()',
       `open(${OPEN})`,
@@ -107,6 +108,8 @@ describe('executor ABI', () => {
       `closeWithSig(${CLOSE},${SIG})`,
       `swapCollateral(${SWAP})`,
       `swapCollateralWithSig(${SWAP},${SIG})`,
+      `swapDebt(${DEBT})`,
+      `swapDebtWithSig(${DEBT},${SIG})`,
       'isRouterAllowed(address)',
       'flashLenderKind(address)',
     ])

@@ -15,6 +15,7 @@ function errText(e: unknown) {
  * Banner shown while the market has no executor: deploy one from the connected wallet, or reuse one already deployed.
  * With `upgrade`, the market runs a v1 executor: it keeps working, the banner offers the v2 (closes without premium).
  * With `upgrade="pendle"`, a v2 executor deployed before PT loops: the banner offers one with Pendle's router.
+ * With `upgrade="debt"`, a v2 executor deployed before `swapDebt`: the banner offers the current one.
  */
 export function DeployPanel({
   market,
@@ -24,7 +25,7 @@ export function DeployPanel({
 }: {
   market: Market
   onReady: (a: Address) => void
-  upgrade?: boolean | 'pendle'
+  upgrade?: boolean | 'pendle' | 'debt'
   /** the network's shared v2 executor, already deployed and checked: offered instead of a deployment */
   shared?: Address
 }) {
@@ -56,6 +57,7 @@ export function DeployPanel({
       const v = await verifyExecutor(market, a)
       if (upgrade && v.version !== 2) throw new Error('ce contrat est une v1')
       if (upgrade === 'pendle' && !v.pendle) throw new Error('ce contrat n’autorise pas le routeur Pendle')
+      if (upgrade === 'debt' && !v.debtSwap) throw new Error('ce contrat ne change pas de dette')
       return a
     })
 
@@ -67,9 +69,11 @@ export function DeployPanel({
       {upgrade && (
         <Notice>
           <span>
-            {upgrade === 'pendle'
-              ? `Le contrat Auto-loop de ${market.label} n’autorise pas le routeur Pendle : il reste utilisable pour les autres paires. Une transaction déploie un contrat qui gère aussi les PT.`
-              : `Contrat Auto-loop v1 sur ${market.label} : il reste utilisable. La v2 corrige un défaut de la v1 (des aTokens envoyés au contrat peuvent bloquer les fermetures)${market.chain.id in MORPHO_BLUE ? ' et ferme les positions sans prime de flash loan quand Morpho a la liquidité' : ''}${shared ? ' ; le contrat v2 commun de ce réseau est déjà déployé, la position reste sur le compte Aave' : ' ; une transaction la déploie, une fois pour tous les utilisateurs'}.`}
+            {upgrade === 'debt'
+              ? `Le contrat Auto-loop de ${market.label} date d’avant le changement de dette : il reste utilisable pour tout le reste. Le contrat actuel change l’actif de la dette sans fermer la position ; une transaction le déploie, une fois pour tous les utilisateurs, à l’adresse commune.`
+              : upgrade === 'pendle'
+                ? `Le contrat Auto-loop de ${market.label} n’autorise pas le routeur Pendle : il reste utilisable pour les autres paires. Une transaction déploie un contrat qui gère aussi les PT.`
+                : `Contrat Auto-loop v1 sur ${market.label} : il reste utilisable. La v2 corrige un défaut de la v1 (des aTokens envoyés au contrat peuvent bloquer les fermetures)${market.chain.id in MORPHO_BLUE ? ' et ferme les positions sans prime de flash loan quand Morpho a la liquidité' : ''}${shared ? ' ; le contrat v2 commun de ce réseau est déjà déployé, la position reste sur le compte Aave' : ' ; une transaction la déploie, une fois pour tous les utilisateurs'}.`}
           </span>
           {shared ? (
             <button className="btn" onClick={() => onReady(shared)}>
@@ -81,7 +85,7 @@ export function DeployPanel({
             </button>
           ) : (
             <button className="btn" disabled={busy} onClick={deploy}>
-              {step ?? `Déployer le contrat${upgrade === 'pendle' ? ' avec Pendle' : ' v2'} sur ${market.label}`}
+              {step ?? `Déployer le contrat${upgrade === 'pendle' ? ' avec Pendle' : upgrade === 'debt' ? ' actuel' : ' v2'} sur ${market.label}`}
             </button>
           )}
         </Notice>

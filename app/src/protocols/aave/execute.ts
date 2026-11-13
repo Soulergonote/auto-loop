@@ -5,6 +5,7 @@ import { erc20Abi, executorAbi, executorAbiV1, poolAbi } from '../../chain/abi'
 import { quoteSteps, type Quote } from '../../services/quotes/quotes'
 import { signATokenPermit, signDelegation, type ExecutorSignature } from './signatures'
 import { aTokensToApprove, swapCollateralArgs, type SwapCollateralPlan } from './swapCollateral'
+import { swapDebtArgs, type SwapDebtPlan } from './swapDebt'
 
 import type { Progress } from '../../chain/tx'
 
@@ -239,6 +240,25 @@ export async function executeSwapCollateral(p: SwapCollateralPlan, onStep: Progr
     call = swapCollateralCall(p, await signATokenPermit(p.chainId, p.user, p.fromAToken, p.executor, need))
   }
   const hash = await send(p.chainId, p.user, p.executor, call, onStep, 'du changement de collatéral')
+  onStep('En attente d’inclusion…')
+  const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: p.chainId, hash })
+  if (receipt.status !== 'success') throw new Error('La transaction a échoué')
+  return hash
+}
+
+export function swapDebtCall(p: SwapDebtPlan, sig?: ExecutorSignature): Call {
+  const args = swapDebtArgs(p)
+  return { abi: executorAbi, functionName: sig ? 'swapDebtWithSig' : 'swapDebt', args: sig ? [args, sig] : [args] }
+}
+
+/** Changes the debt asset: credit delegation of the new one by signature if needed, then one transaction. */
+export async function executeSwapDebt(p: SwapDebtPlan, onStep: Progress): Promise<Hash> {
+  let call = swapDebtCall(p) // checks the plan before anything is signed
+  if (p.borrowAllowance < p.newDebtAmount) {
+    onStep('Signature de la délégation de crédit…')
+    call = swapDebtCall(p, await signDelegation(p.chainId, p.user, p.toDebtToken, p.executor, p.newDebtAmount))
+  }
+  const hash = await send(p.chainId, p.user, p.executor, call, onStep, 'du changement de dette')
   onStep('En attente d’inclusion…')
   const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: p.chainId, hash })
   if (receipt.status !== 'success') throw new Error('La transaction a échoué')

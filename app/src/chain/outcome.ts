@@ -1,6 +1,6 @@
 /**
  * What a v2 transaction really did, read from its receipt: the executor emits one event per action
- * (PositionOpened, PositionClosed, CollateralSwapped) and one `Swapped` per swap step. Only the executor's own logs
+ * (PositionOpened, PositionClosed, CollateralSwapped, DebtSwapped) and one `Swapped` per swap step. Only the executor's own logs
  * for the connected account count; a v1 executor emits none of these, so nothing is shown for it.
  */
 import { parseAbi, parseEventLogs, type Address, type Hash, type Log } from 'viem'
@@ -13,6 +13,7 @@ export const executorEventsAbi = parseAbi([
   'event PositionOpened(address indexed user, address indexed collateralAsset, address indexed debtAsset, address capitalToken, uint256 capitalAmount, uint256 collateralSupplied, uint256 debtBorrowed, uint256 healthFactor)',
   'event PositionClosed(address indexed user, address indexed collateralAsset, address indexed debtAsset, address flashLender, (uint256 debtRepaid, uint256 collateralWithdrawn, uint256 collateralReturned, uint256 debtReturned, uint256 flashPremium, uint256 healthFactor) result)',
   'event CollateralSwapped(address indexed user, address indexed fromAsset, address indexed toAsset, address flashLender, (uint256 withdrawn, uint256 supplied, uint256 flashPremium, uint256 healthFactor) result)',
+  'event DebtSwapped(address indexed user, address indexed fromAsset, address indexed toAsset, (uint256 repaid, uint256 borrowed, uint256 returned, uint256 healthFactor) result)',
 ])
 
 export type SwapDone = { tokenIn: Address; tokenOut: Address; amountIn: bigint; amountOut: bigint }
@@ -53,6 +54,16 @@ export type Outcome =
       withdrawn: bigint
       supplied: bigint
       flashPremium: bigint
+      healthFactor: number
+      swaps: SwapDone[]
+    }
+  | {
+      kind: 'debt'
+      from: Address
+      to: Address
+      repaid: bigint
+      borrowed: bigint
+      returned: bigint
       healthFactor: number
       swaps: SwapDone[]
     }
@@ -97,6 +108,10 @@ export function decodeOutcome(logs: Log[], executor: Address, user: Address): Ou
     case 'CollateralSwapped': {
       const a = action.args
       return { kind: 'swap', from: a.fromAsset, to: a.toAsset, flashLender: a.flashLender, ...a.result, healthFactor: hf(a.result.healthFactor), swaps }
+    }
+    case 'DebtSwapped': {
+      const a = action.args
+      return { kind: 'debt', from: a.fromAsset, to: a.toAsset, ...a.result, healthFactor: hf(a.result.healthFactor), swaps }
     }
   }
 }
@@ -157,6 +172,13 @@ export function outcomeLines(o: Outcome, tokens: TokenInfo[], expected: Expected
       `Déposé ${amt(o.supplied, o.to)}${est(o.supplied, o.to, expected.supplied)}`,
       ...swapLines,
       o.flashPremium > 0n && `Prime du flash loan ${amt(o.flashPremium, o.to)}`,
+    )
+  if (o.kind === 'debt')
+    lines.push(
+      `Dette remboursée ${amt(o.repaid, o.from)}`,
+      `Nouvelle dette ${amt(o.borrowed, o.to)}`,
+      ...swapLines,
+      o.returned > 0n && `Rendu ${amt(o.returned, o.from)}${est(o.returned, o.from, expected.debtReturned)}`,
     )
   lines.push(`Health factor ${fmtHf(o.healthFactor)}`)
   return lines.filter((l): l is string => typeof l === 'string' && !l.includes('undefined'))

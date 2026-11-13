@@ -193,12 +193,15 @@ const anvil = async (method, params) =>
   if (mode.startsWith('close') || mode === 'reduce') await page.getByRole('radio', { name: 'Fermer / réduire' }).click()
   // swap (v2): TARGET=cbETH the new collateral, PART=50 % (default Tout)
   // mroll (Morpho): « Changer de marché » / « Renouveler », TARGET=<start of the new market's label>
-  if (mode === 'swap' || mode === 'renew' || mode === 'mroll') {
-    const tab = mode === 'mroll' ? /Changer de marché|Renouveler/ : mode === 'renew' ? 'Renouveler' : 'Changer de collatéral'
+  // debt (v2): « Changer de dette », TARGET=USDT0 the new debt asset, PART=50 % (default Tout)
+  if (mode === 'swap' || mode === 'renew' || mode === 'mroll' || mode === 'debt') {
+    const tab =
+      mode === 'mroll' ? /Changer de marché|Renouveler/ : mode === 'renew' ? 'Renouveler' : mode === 'debt' ? 'Changer de dette' : 'Changer de collatéral'
     await page.getByRole('radio', { name: tab }).click({ timeout: 60000 })
     await page.waitForTimeout(5000)
     if (process.env.TARGET) {
-      const sel = page.locator(`label:has-text("${mode === 'mroll' ? 'Nouveau marché' : mode === 'renew' ? 'Nouveau PT' : 'Nouveau collatéral'}") select`)
+      const field = { mroll: 'Nouveau marché', renew: 'Nouveau PT', debt: 'Nouvelle dette' }[mode] ?? 'Nouveau collatéral'
+      const sel = page.locator(`label:has-text("${field}") select`)
       const label = (await sel.locator('option').allTextContents()).find((t) => t.startsWith(process.env.TARGET + (mode === 'mroll' ? '' : ' ')))
       console.log('target:', label)
       await sel.selectOption({ label })
@@ -261,7 +264,7 @@ const anvil = async (method, params) =>
       await page.waitForTimeout(1000)
       const t = await page.locator('main, .page').first().innerText()
       if (
-        /Position ouverte|Position augmentée|Position réduite|Position fermée|Collatéral changé|PT renouvelé|Position déplacée|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(
+        /Position ouverte|Position augmentée|Position réduite|Position fermée|Collatéral changé|Dette changée|PT renouvelé|Position déplacée|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(
           t,
         ) &&
         i > 3

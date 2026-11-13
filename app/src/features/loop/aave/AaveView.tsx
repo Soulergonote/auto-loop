@@ -11,6 +11,7 @@ import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary } from '../../
 import { AaveOpenPanel } from './AaveOpenPanel'
 import { AaveClosePanel } from './AaveClosePanel'
 import { SwapCollateralPanel } from './SwapCollateralPanel'
+import { SwapDebtPanel } from './SwapDebtPanel'
 import { DeployPanel } from '../shared/DeployPanel'
 import { type Pick } from '../../scanner/Scanner'
 import { needsRenewal } from '../../../protocols/pendle/pt'
@@ -54,7 +55,7 @@ export function AaveView({
   seed,
   onExecutor,
 }: AaveViewProps) {
-  const [tab, setTab] = useState<'open' | 'close' | 'swap' | 'reinvest' | 'renew'>(seed?.tab ?? 'open')
+  const [tab, setTab] = useState<'open' | 'close' | 'swap' | 'debt' | 'reinvest' | 'renew'>(seed?.tab ?? 'open')
   // filled by the reinvest flow's last step: "Augmenter" with the capital it gained
   const [augment, setAugment] = useState<{ emode: number; leverage: number; amount: string; capital?: Address }>()
   // a PT roll in two steps: after the close, open this PT with the collateral given back
@@ -70,6 +71,8 @@ export function AaveView({
   const canReinvest = !!account && (claimables.length > 0 || tab === 'reinvest')
   // contract v2: the collateral of an existing position can be changed without closing it
   const canSwap = !!account && m.executorVersion === 2 && !!market.user && market.user.aTokenBalance > 0n
+  // contract v2: the debt of an existing position can move to another asset without closing it
+  const canDebt = !!account && m.executorVersion === 2 && !!market.user && market.user.debtBalance > 0n
   // a PT in its last month (or matured) can be rolled into a later one, without closing
   const pt = r?.collateral.pt
   const canRenew = canSwap && !!pt && needsRenewal(pt)
@@ -165,6 +168,7 @@ export function AaveView({
             { value: 'open', label: 'Ouvrir / augmenter' },
             { value: 'close', label: 'Fermer / réduire' },
             ...(canSwap || tab === 'swap' ? [{ value: 'swap' as const, label: 'Changer de collatéral' }] : []),
+            ...(canDebt || tab === 'debt' ? [{ value: 'debt' as const, label: 'Changer de dette' }] : []),
             ...(canRenew || tab === 'renew' ? [{ value: 'renew' as const, label: 'Renouveler' }] : []),
             ...(canReinvest ? [{ value: 'reinvest' as const, label: 'Réinvestir' }] : []),
           ]}
@@ -214,6 +218,26 @@ export function AaveView({
         }}
       />
     )
+  if (tab === 'debt' && account && market.user)
+    return (
+      <SwapDebtPanel
+        reserves={withEMode(r, currentEMode)}
+        emode={market.user.eModeCategory ? emodes.find((c) => c.id === market.user!.eModeCategory) : undefined}
+        tokens={tokens}
+        campaigns={incentives.data}
+        user={market.user}
+        account={account}
+        aggregator={aggregator}
+        common={common}
+        head={head}
+        onDone={market.refetchUser}
+        onExecutor={onExecutor}
+        onShowPair={(d) => {
+          setTab('close')
+          onPair(collateral, d)
+        }}
+      />
+    )
   if ((tab === 'swap' || tab === 'renew') && account && market.user)
     return (
       <SwapCollateralPanel
@@ -241,7 +265,7 @@ export function AaveView({
         }}
       />
     )
-  return tab === 'open' || tab === 'swap' || tab === 'renew' ? (
+  return tab === 'open' || tab === 'swap' || tab === 'debt' || tab === 'renew' ? (
     <AaveOpenPanel
       reserves={r}
       tokens={tokens}

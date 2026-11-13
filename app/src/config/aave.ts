@@ -44,6 +44,8 @@ export type Market = MarketDef & {
   quoteTaker: Address
   /** the executor whitelists Pendle's router (PT loops), known once its code is checked */
   executorPendle?: boolean
+  /** the executor can change the debt asset (`swapDebt`), known once its code is checked */
+  executorDebtSwap?: boolean
 }
 
 export function getMarket(id: string, local: Record<string, Address> = {}): Market {

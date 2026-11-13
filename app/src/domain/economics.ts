@@ -8,7 +8,7 @@ import { fmtPct } from '../ui/format'
 const BPS = 10_000n
 
 /** Gas used by the executor, measured on a Base fork (2026-10-18 e2e: ~733k to open, ~1.7M to close; 2026-11-08: ~1.14M to change the collateral), rounded up. */
-export const GAS_UNITS = { open: 800_000n, close: 1_700_000n, swapCollateral: 1_200_000n }
+export const GAS_UNITS = { open: 800_000n, close: 1_700_000n, swapCollateral: 1_200_000n, swapDebt: 900_000n }
 /** A loop on a Pendle PT, measured on an Ethereum fork (2026-11-08: ~1.25M to open through an aggregator and Pendle, ~1.05M to close), rounded up. */
 export const GAS_UNITS_PT = { open: 1_300_000n, close: 1_100_000n, swapCollateral: 1_400_000n }
 
