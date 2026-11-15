@@ -41,3 +41,25 @@ export const ARCHIVE_RPCS: Record<number, string[]> = {
   // the chain's own RPC keeps under a day of state; dRPC answers 30 days back (CORS *), checked 12 Nov 2026
   [robinhood.id]: ['https://robinhood.drpc.org'],
 }
+
+/**
+ * Protected RPCs proposed on Ethereum (F7): the transaction goes to builders without passing through the public
+ * mempool, so a big swap cannot be sandwiched. Both keyless, both answer eth_chainId 0x1 (checked 15 Nov 2026).
+ * Useless on L2s with a sequencer (no public mempool).
+ */
+export const PROTECTED_RPCS = [
+  { id: 'mevblocker', label: 'MEV Blocker', url: 'https://rpc.mevblocker.io' },
+  { id: 'flashbots', label: 'Flashbots Protect', url: 'https://rpc.flashbots.net' },
+] as const
+export type ProtectedRpc = (typeof PROTECTED_RPCS)[number]
+
+/** Parameters of wallet_addEthereumChain that add a protected RPC to Ethereum in the wallet. Pure, tested. */
+export function protectedChainParams(rpc: ProtectedRpc) {
+  return {
+    chainId: `0x${mainnet.id.toString(16)}`,
+    chainName: `Ethereum (${rpc.label})`,
+    nativeCurrency: mainnet.nativeCurrency,
+    rpcUrls: [rpc.url],
+    blockExplorerUrls: [mainnet.blockExplorers.default.url],
+  }
+}

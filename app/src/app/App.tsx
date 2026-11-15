@@ -27,6 +27,7 @@ import { useReserveTokens } from '../protocols/aave/useMarket'
 import { merklQuery } from '../services/merkl'
 import { fmtAddress } from '../ui/format'
 import { useBalances } from '../chain/walletTokens'
+import { PrivateRpc } from '../features/loop/shared/PrivateRpc'
 import { AggregatorPicker, Card, LoopLayout, Notice, Segmented, Skel, Summary } from '../ui/primitives'
 import { DeployPanel } from '../features/loop/shared/DeployPanel'
 import {
@@ -430,6 +431,7 @@ export function App() {
   const common = (
     <>
       <AggregatorPicker chainId={market.chain.id} value={aggregator} onChange={setAggregator} />
+      <PrivateRpc chainId={market.chain.id} />
       <p className="muted small">
         Plateforme : {market.fork ? `${market.fork}Lend, fork d’Aave v3` : 'Aave v3'}.{' '}
         {market.executor && (
@@ -473,6 +475,7 @@ export function App() {
   const morphoCommon = (
     <>
       <AggregatorPicker chainId={morphoNet.chain.id} value={aggregator} onChange={setAggregator} />
+      <PrivateRpc chainId={morphoNet.chain.id} />
       <p className="muted small">
         Plateforme : Morpho Blue.{' '}
         {morphoNet.executor && (
