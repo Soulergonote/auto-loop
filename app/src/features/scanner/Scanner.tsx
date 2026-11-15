@@ -436,8 +436,11 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
     return sort.desc ? -d : d
   })
   const sortBy = (key: SortKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'pair' }))
-  const head = (key: SortKey, text: string, num = true) => (
-    <th className={`sortable ${num ? 'num' : ''}`} aria-sort={sort.key === key ? (sort.desc ? 'descending' : 'ascending') : undefined}>
+  const head = (key: SortKey, text: string, num = true, detail = false) => (
+    <th
+      className={`sortable ${num ? 'num' : ''} ${detail ? 'detail' : ''}`}
+      aria-sort={sort.key === key ? (sort.desc ? 'descending' : 'ascending') : undefined}
+    >
       <button onClick={() => sortBy(key)}>
         {text}
         {sort.key === key && <span aria-hidden="true">{sort.desc ? ' ↓' : ' ↑'}</span>}
@@ -581,8 +584,8 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
               {head('pair', 'Paire', false)}
               {head('leverage', 'Levier')}
               {head('apy', 'APY net')}
-              {head('spread', 'Écart')}
-              {head('rewardsApy', 'Bonus Merkl')}
+              {head('spread', 'Écart', true, true)}
+              {head('rewardsApy', 'Bonus Merkl', true, true)}
               {amountUsd !== undefined && head('gainUsd', 'Gain / an')}
               {head('capacityUsd', 'Capacité')}
               <th></th>
@@ -644,13 +647,14 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                     </td>
                     {amountUsd !== undefined && (
                       <td data-label="Gain / an" className={`num ${r.gainUsd < 0 ? 'bad' : ''}`}>
-                        {fmtDollars(r.gainUsd, true)}
-                        {r.paybackDays !== undefined && <div className="muted small">rentable en {fmtDays(Math.max(1, Math.ceil(r.paybackDays)))}</div>}
+                        {r.fits ? fmtDollars(r.gainUsd, true) : <span className="na">—</span>}
+                        {r.fits && r.paybackDays !== undefined && (
+                          <div className="muted small">rentable en {fmtDays(Math.max(1, Math.ceil(r.paybackDays)))}</div>
+                        )}
                       </td>
                     )}
-                    <td data-label="Capacité" className={`num ${r.fits ? '' : 'warn'}`}>
+                    <td data-label="Capacité" className={`num ${r.fits ? '' : 'warn'}`} title={r.fits ? undefined : 'Trop petit pour ce montant'}>
                       {fmtDollars(r.capacityUsd, true)}
-                      {!r.fits && <div className="small">trop petit pour ce montant</div>}
                     </td>
                     <td className="row-action">
                       {r.open && (
@@ -742,6 +746,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
       ) : (
         <p className="muted">Aucune paire ne correspond à ces filtres. Changer de health factor ou de type de paire.</p>
       )}
+      {visible.some((g) => !g.head.fits) && <p className="muted small scan-status">Capacité en ambre, ligne grisée : trop petite pour ce montant.</p>}
       {groups.length > ROWS && (
         <div className="actions">
           <span className="muted small">

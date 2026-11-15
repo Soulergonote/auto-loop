@@ -429,3 +429,12 @@ tr.dim > td { opacity: 0.55; }
   .contribs { grid-template-columns: 1fr max-content max-content; }
   .contribs span + span { padding-left: 12px; }
 }
+
+/* Scanner on a narrow window (tablet, half screen): « Écart » and « Bonus Merkl » stay in « Détail », so « Ouvrir » fits */
+@media (max-width: 960px) {
+  table.scan th.detail, table.scan td.detail { display: none; }
+}
+/* narrower still, down to the card layout: the whole line opens the pair, as on mobile */
+@media (max-width: 760px) {
+  table.scan td.row-action, table.scan thead th:last-child { display: none; }
+}
