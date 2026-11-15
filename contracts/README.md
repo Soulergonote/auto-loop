@@ -24,6 +24,9 @@ Deux versions cohabitent : `LeverageExecutorV2` (v2, voir [la section v2](#v2--l
 | `test/fork/BaseForkV2.t.sol`, `test/fork/EthereumForkV2.t.sol` | v2 sur forks réels : Base (Aave, Morpho, Balancer, Uniswap) et Ethereum (Aave Core, Pendle, Curve, Morpho, Balancer). Ignorés sans `BASE_RPC_URL` / `ETH_RPC_URL`. |
 | `src/LeverageExecutorMorpho.sol`, `src/interfaces/IMorpho.sol` | Boucles sur Morpho Blue (ouvrir, fermer, changer de marché), autorisation Morpho le temps d'une transaction. |
 | `test/morpho/*` | 35 tests sur le **vrai Morpho Blue v1.0.0** (bytecode du tag compilé, `MorphoBlueBytecode.sol`), oracle et IRM factices. |
+| `src/LeverageExecutorV4.sol`, `src/interfaces/IAaveV4.sol` | Boucles sur Aave v4 (ouvrir, fermer) à travers les gestionnaires de position Giver et Taker d'Aave, flash loan Morpho. |
+| `test/v4/*` | 26 tests locaux : spoke et gestionnaires factices qui reprennent les règles d'Aave v4 (`V4Mocks.sol`). |
+| `test/fork/EthereumForkV4.t.sol` | Aave v4 sur fork d'Ethereum : vrais spokes Main, Lido et Bluechip (hub Sentora), vrais gestionnaires, vrai Morpho. Ignorés sans `ETH_RPC_URL`. |
 | `test/fork/EthereumForkMorpho.t.sol` | Morpho sur fork d'Ethereum avec de vrais marchés PT (reUSD, USD3), routeur Pendle. Ignorés sans `ETH_RPC_URL`. |
 
 ## Lancer
@@ -200,3 +203,42 @@ ETH_RPC_URL=https://ethereum-rpc.publicnode.com forge test --match-contract Ethe
 - La liquidité d'un marché peut manquer à la fermeture (actif prêté entièrement emprunté) : `close` rembourse la dette avec le prêt flash, ce qui ne demande pas de liquidité, mais un `roll` emprunte sur le marché cible et en demande.
 
 Dépendance de test : `aave-v3-origin` est sous licence BUSL-1.1, utilisé uniquement pour les tests. Le contrat lui-même est MIT et n'importe que OpenZeppelin.
+
+## Aave v4 : `LeverageExecutorV4`
+
+Contrat séparé, sans propriétaire, pour boucler sur **n'importe quel spoke Aave v4** (ajouté le 15/11/2026). Aave v4 n'a ni flash loan ni délégation de crédit : le prêt vient de Morpho Blue (gratuit) et le contrat agit pour l'appelant à travers les gestionnaires de position d'Aave, le **Giver** (`supplyOnBehalfOf`, `repayOnBehalfOf`) et le **Taker** (`borrowOnBehalfOf`, `withdrawOnBehalfOf`, dans la limite d'une allocation par réserve). Même moteur de swaps que la v2 et Morpho (`SwapExecutorBase`). Constructeur : `(morpho, giver, taker, address[] routers)` ; il refuse comme routeur Morpho, les deux gestionnaires, le contrat lui-même et toute adresse sans code. Une réserve est désignée par son `reserveId` dans le spoke (un même token peut y figurer deux fois).
+
+### Fonctions
+
+- `open(OpenParams)` : capital tiré (collatéral, actif de dette ou autre token converti par `capitalSteps`) → flash loan Morpho de la dette → swap vers le collatéral → dépôt par le Giver → emprunt par le Taker → remboursement du prêt → restes renvoyés → health factor minimum. `capitalAmount = 0` augmente le levier d'une position, `debtAmount = 0` dépose sans emprunter.
+- `close(CloseParams)` : flash loan de la dette (plafonné à la dette réelle : `type(uint256).max` rembourse tout, sans poussière) → remboursement par le Giver → retrait par le Taker (`type(uint256).max` = tout) → swap → remboursement du prêt → restes renvoyés → health factor minimum.
+- `openWithPermit(params, Permit)` et `closeWithPermit(params, Permit)` : l'allocation d'emprunt (`BorrowPermit`) ou de retrait (`WithdrawPermit`) est donnée par une signature EIP-712 du Taker, relayée par le contrat, et **le reste de l'allocation est abandonné avant le retour** (`renounce…Allowance`) : aucune allocation ne survit à la transaction. Un rejeu en avance de la signature ne fait qu'échouer cet essai.
+- `healthFactor(spoke, user)` : celui du compte de l'utilisateur sur le spoke.
+
+### Préalables de l'appelant
+
+Une fois par spoke : `spoke.setUserPositionManager(GIVER, true)`, `(TAKER, true)` et `spoke.setUsingAsCollateral(reserveId, true, soi)`, en un seul `multicall` du spoke (déposer ne suffit pas à faire d'une réserve un collatéral sur v4 ; sans cela `open` échoue avec `CollateralNotEnabled`). Puis à chaque opération l'approbation du capital et l'allocation du Taker (transaction ou signature).
+
+### Sécurité
+
+Même modèle que la v2 : le contrat n'agit que pour `msg.sender` ; seuls les spokes enregistrés sur les deux gestionnaires sont acceptés (`SpokeNotRegistered`) ; rappel de flash loan à usage unique, accepté du seul Morpho ; routeurs figés au déploiement, jamais Morpho, un gestionnaire ou un token de l'opération ; approbations exactes remises à 0 ; aucun fonds ni allocation gardé entre deux transactions ; ni propriétaire ni proxy. Limite propre à v4 : le Giver et le Taker appartiennent à la gouvernance d'Aave, qui peut désenregistrer un spoke ; la position reste alors dans le compte de l'utilisateur et se ferme depuis l'interface d'Aave.
+
+### Lancer
+
+```bash
+forge test --match-path 'test/v4/*'
+ETH_RPC_URL=https://ethereum-rpc.publicnode.com forge test --match-contract EthereumForkV4Test -vv
+```
+
+### Résultats (15/11/2026)
+
+- **Locaux, 26/26** : ouverture (permit, allocation par transaction, capital en collatéral, en dette ou en autre token, augmentation sans capital, dépôt simple, restes renvoyés), fermeture (totale avec intérêts, partielle, sans dette), tous les refus, et la sécurité : un tiers ne peut rien tirer des allocations d'un utilisateur, rappel de flash loan direct ou rejoué depuis une route, réentrance depuis une route, prêteur qui ne rappelle pas, routeur hors liste ou gourmand, dons non balayés ; fuzz ouverture puis fermeture totale (256 tirages).
+- **Fork Ethereum, 6/6** : 10 WETH à 3x contre USDC sur le spoke Main avec permits puis fermeture totale après 30 jours ; allocations par transactions et fermeture partielle ; 10 wstETH à 10x contre WETH sur le spoke Lido ; 1 kBTC à 2x contre RLUSD sur un spoke du hub Sentora (autres gestionnaires, second contrat, le premier le refuse) ; préalables manquants ; un tiers ne peut pas utiliser les allocations.
+- Taille : 13 587 octets (limite 24 576).
+
+### Limites connues (Aave v4)
+
+- Audit interne seulement, rien n'est déployé sur un réseau réel.
+- Pas de changement de collatéral ou de dette, pas de refinancement vers ou depuis v4.
+- Trois spokes d'Ethereum (hub Sentora) ont leur propre Giver et Taker : un second déploiement.
+- Sur un fork de mainnet, ne pas signer avec la clé `makeAddrAndKey("user")` : cette adresse porte une délégation EIP-7702 et le Taker vérifie alors la signature par ERC-1271.
