@@ -24,6 +24,9 @@ import { useSparklines, type SeriesSource } from './sparklines'
 import { Sparkline } from '../../ui/Sparkline'
 import { Logo, Place } from '../../ui/Logo'
 import { networkProgress, sourceStatus } from './sources'
+import { AAVE_V4_CHAINS } from '../../config'
+import { v4ReservesQuery } from '../../protocols/aavev4/reserves'
+import { scanV4 } from './v4Scan'
 
 /** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (positions' Merkl rewards) or « Renouveler » (a PT near maturity). */
 export type Pick = {
@@ -111,7 +114,8 @@ type Line = {
   tokens: { chainId: number; collateral: Address; debt: Address }
   /** where its rate history is read (mini-curve); none for a fork of Aave the API does not follow */
   series?: SeriesSource
-  open: () => void
+  /** opens the pair in the Boucle; none for a read-only line (Aave v4: no contract yet) */
+  open?: () => void
 }
 
 const ptTag = (expiry: number) => (
@@ -200,6 +204,9 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
   // a PT's yield is its Pendle implied APY: read for the PT collaterals of each network's listed markets
   const ptTokens = morphoListData.map((list) => [...new Set((list ?? []).filter((m) => /^PT-/i.test(m.collateral.symbol)).map((m) => m.collateral.address))])
   const { queries: ptQueries, data: morphoPts } = useQueries({ queries: morphoNets.map((n, i) => ptInfosQuery(n.chain.id, ptTokens[i])), combine: withData })
+  // Aave v4, read-only (O3): one request for every spoke of the chains the filters leave
+  const v4Chains = useMemo(() => (protocol === 'morpho' ? [] : AAVE_V4_CHAINS.filter((id) => chain === 'all' || id === chain)), [protocol, chain])
+  const v4 = useQuery(v4ReservesQuery(v4Chains))
   // one Merkl query per chain (Ethereum Core and Prime share it)
   const chainIds = useMemo(() => [...new Set(markets.map((m) => m.chain.id))], [markets])
   const { queries: merkl, data: merklData } = useQueries({ queries: chainIds.map((id) => merklQuery(id)), combine: withData })
@@ -317,8 +324,44 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           open: () => picks.current.onPickMorpho(r.market, 'open', r.leverage),
         })
     })
+    for (const r of v4.data ? scanV4(v4.data, { targetHf }) : []) {
+      const C = r.collateral
+      const D = r.debt
+      out.push({
+        key: `v4-${C.chainId}-${C.spoke.address}-${C.token.address}-${D.token.address}-${D.borrowApy}`,
+        group: `v4-${C.chainId}-${C.token.address}-${D.token.address}`,
+        collateralYield: r.collateralYield,
+        borrowCost: r.borrowCost,
+        spread: r.collateralYield - r.borrowCost,
+        note: `spoke ${C.spoke.name}`,
+        pair: `${C.token.symbol} / ${D.token.symbol}`,
+        place: `Aave v4 · ${C.network}`,
+        protocol: 'aave',
+        tags: [
+          <Tag key="spoke">{C.spoke.name}</Tag>,
+          <Tag key="ro">non exécutable</Tag>,
+          r.rewardsApy > 0 && (
+            <Tag key="bonus" tone="good">
+              bonus
+            </Tag>
+          ),
+          ...flagTags([...(r.nativeUnknown ? (['nativeUnknown'] as const) : []), ...(r.capacityUsd < LOW_CAPACITY_USD ? (['lowCapacity'] as const) : [])]),
+        ],
+        leverage: r.leverage,
+        apy: r.apy,
+        nativeApy: r.nativeApy,
+        rewardsApy: r.rewardsApy,
+        capacityUsd: r.capacityUsd,
+        ...sized(r, r.capacityUsd, r.stable ? 'stable' : r.correlated ? 'correlated' : 'other'),
+        rewardsEnd: r.rewardsEnd,
+        stable: r.stable,
+        correlated: r.correlated,
+        nativeUnknown: r.nativeUnknown,
+        tokens: { chainId: C.chainId, collateral: C.token.address, debt: D.token.address },
+      })
+    }
     return out.sort((a, b) => b.apy - a.apy)
-  }, [snapshotData, merklData, chainIds, morphoNets, morphoListData, morphoPts, targetHf, amountUsd])
+  }, [snapshotData, merklData, chainIds, morphoNets, morphoListData, morphoPts, targetHf, amountUsd, v4.data])
 
   // past depeg of the correlated pairs (I4): daily prices over 90 days, one DefiLlama request per 25 tokens
   const depegTokens = useMemo(() => {
@@ -397,6 +440,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
     silent: [
       ptQueries.some((q) => q.isError) && 'Pendle',
       charts.isError && 'DefiLlama',
+      v4.isError && 'Aave v4',
       sparks.failed.aave && 'historique Aave',
       sparks.failed.morpho && 'historique Morpho',
     ],
@@ -525,10 +569,10 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
               const open = opened === r.group
               return (
                 <Fragment key={r.group}>
-                  <tr className={`clickable ${r.fits ? '' : 'dim'}`} onClick={r.open}>
+                  <tr className={`${r.open ? 'clickable' : ''} ${r.fits ? '' : 'dim'}`} onClick={r.open}>
                     <td className="lead">
                       {r.pair}
-                      {(chain === 'all' || protocol === 'all') && (
+                      {(chain === 'all' || protocol === 'all' || !r.open) && (
                         <span className="muted">
                           {' · '}
                           <Place text={r.place} />
@@ -585,15 +629,17 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                       {!r.fits && <div className="small">trop petit pour ce montant</div>}
                     </td>
                     <td className="row-action">
-                      <button
-                        className="btn small"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          r.open()
-                        }}
-                      >
-                        Ouvrir
-                      </button>
+                      {r.open && (
+                        <button
+                          className="btn small"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            r.open?.()
+                          }}
+                        >
+                          Ouvrir
+                        </button>
+                      )}
                     </td>
                   </tr>
                   {open && (
@@ -614,7 +660,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                             </thead>
                             <tbody>
                               {variants.map((v) => (
-                                <tr key={v.key} className="clickable" onClick={v.open}>
+                                <tr key={v.key} className={v.open ? 'clickable' : undefined} onClick={v.open}>
                                   <td className="lead">
                                     <div className="tags">
                                       {v.tags}
@@ -635,15 +681,17 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                                     {fmtDollars(v.capacityUsd, true)}
                                   </td>
                                   <td className="row-action">
-                                    <button
-                                      className="btn small"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        v.open()
-                                      }}
-                                    >
-                                      Ouvrir
-                                    </button>
+                                    {v.open && (
+                                      <button
+                                        className="btn small"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          v.open?.()
+                                        }}
+                                      >
+                                        Ouvrir
+                                      </button>
+                                    )}
                                   </td>
                                 </tr>
                               ))}
@@ -704,6 +752,11 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
         <p className="muted small">
           Non compté : le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes Merkl à public restreint. La capacité est le capital encore «
           bouclable » avant que l’actif emprunté manque de liquidité ou atteigne un plafond.
+        </p>
+        <p className="muted small">
+          Aave v4 (lecture seule, étiquette « non exécutable ») : chaque paire collatéral / dette d’un même spoke, d’après l’API publique d’Aave, au levier qui
+          donne ce health factor avec le facteur de collatéral du spoke. Le coût de l’emprunt compte la prime de risque que ce collatéral ajoute au taux de base
+          ; les bonus Merkl de l’API sont comptés sans vérifier leurs conditions. Aucun contrat Auto-loop n’y existe : la ligne ne s’ouvre pas.
         </p>
         <p className="muted small">
           Morpho Blue : chaque marché listé par Morpho (un collatéral, un actif emprunté, une LLTV), au levier qui donne ce health factor, plafonné au levier

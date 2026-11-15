@@ -74,3 +74,9 @@ export function getMarket(id: string, local: Record<string, Address> = {}): Mark
   const executorSource = fromBuild ? 'build' : executor ? 'wallet' : undefined
   return { ...def, executor, executorSource, quoteTaker: executor ?? FORK_EXECUTOR }
 }
+
+/**
+ * Chains where Aave v4 is live (api.v4.aave.com `chains`, checked 2026-11-15): shown read-only in the Scanner (O3),
+ * no executor exists for v4.
+ */
+export const AAVE_V4_CHAINS: number[] = [mainnet.id, avalanche.id, 5042, base.id]
