@@ -19,3 +19,10 @@ export function v4SetupSteps(setup: V4Setup, batch: boolean, opts: { collateral?
   const text = what.charAt(0).toUpperCase() + what.slice(1)
   return [{ label: batch ? text : `${text} (transaction, une fois par spoke)` }]
 }
+
+/** About 1 000 $ of a token at this price, two significant digits. Pure. */
+export function defaultCapital(usd: number): string {
+  if (!(usd > 0)) return '1000'
+  const x = Number((1000 / usd).toPrecision(2))
+  return x >= 1 ? String(Math.round(x)) : x.toFixed(8).replace(/0+$/, '')
+}

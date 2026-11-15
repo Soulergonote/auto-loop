@@ -10,6 +10,7 @@
 # user gets 1 ETH, 20 000 USDC and 5000 USDe. NET=arbitrum does the same on Arbitrum (anvil --chain-id 42161): PT-sUSDai
 # 25FEB2027 and 24JUN2027 listed against USDC and USDT, 20 000 USDC to the user (needs an archive RPC: FORK_URL=…).
 # NET=morpho: Ethereum (anvil --chain-id 1) for Morpho Blue, 20 000 USDC to the user, no executor (deployed from the app).
+# NET=v4: the same fork as NET=morpho, for Aave v4 (its executor is deployed from the app, flash loans come from Morpho).
 # NET=base-pendle: Base (anvil --chain-id 8453) with PT-yUTY-17DEC2026 listed against USDC, 20 000 USDC to the user.
 # NET=plasma: Plasma (anvil --chain-id 9745), no executor (deployed from the app), 5000 USDe and 5000 USDT0 to the user,
 # taken from their aTokens (USDe/GHO is the pair used for real there). NET=monad: Monad (anvil --chain-id 143), same with
@@ -47,7 +48,7 @@ elif [ "${NET:-base}" = base-pendle ]; then
   ADMIN=0x9390B1735def18560c509E2d0bc090E9d6BA257a # Aave ACL admin on Base (governance executor)
   FUNDS="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913:20000000000"
   LIST_ENV="POOL=$POOL REF=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 BORROW=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 PTS=0x0112e4D09bc228534eef9D52D5A06d6b94244E8E DISCOUNTS=${DISCOUNTS:-1150}"
-elif [ "${NET:-base}" = morpho ]; then
+elif [ "${NET:-base}" = morpho ] || [ "${NET:-base}" = v4 ]; then
   # Ethereum for Morpho Blue: no executor deployed (the app's "Déployer le contrat Morpho" button does it), 20 000 USDC
   # to the user, taken from Aave's aUSDC
   POOL=0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2
@@ -70,12 +71,16 @@ else
   DEFAULT_FORK=https://mainnet.base.org
 fi
 cast rpc --rpc-url $R anvil_reset "{\"forking\":{\"jsonRpcUrl\":\"${FORK_URL:-$DEFAULT_FORK}\"}}" >/dev/null
-if [ "${NET:-base}" = morpho ]; then
+if [ "${NET:-base}" = morpho ] || [ "${NET:-base}" = v4 ]; then
   USDC=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
   A=$(cast call --rpc-url $R $POOL "getReserveAToken(address)(address)" $USDC)
   cast rpc --rpc-url $R anvil_impersonateAccount $A >/dev/null
   cast rpc --rpc-url $R anvil_setBalance $A 0xDE0B6B3A7640000 >/dev/null
   cast send --rpc-url $R --unlocked --from $A $USDC "transfer(address,uint256)" $U 20000000000 >/dev/null
+  # on mainnet the test account carries an EIP-7702 delegation: Aave v4's Taker would then check its permits through
+  # ERC-1271 and refuse them. Cleared so that the account signs as a plain EOA (KEEP_CODE=1 keeps it, to test the
+  # approvals by transaction of an account with code)
+  [ "${NET:-base}" = v4 ] && [ -z "${KEEP_CODE:-}" ] && cast rpc --rpc-url $R anvil_setCode $U 0x >/dev/null
   echo "fork block $(cast block-number --rpc-url $R), user $U: 20 000 USDC (Morpho Blue, executor to deploy from the app)"
   exit 0
 fi

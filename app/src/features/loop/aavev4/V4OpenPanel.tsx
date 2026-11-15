@@ -31,18 +31,11 @@ import { pairKind, slippageNote, useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
 import { CapitalField, SlippageHorizonFields, YieldMetrics } from '../shared/OpenFields'
-import { v4SetupOf, v4SetupSteps } from './setup'
+import { defaultCapital, v4SetupOf, v4SetupSteps } from './setup'
 
 /** The slider stops at this health factor: the spoke liquidates at 1. */
 const SLIDER_MIN_HF = 1.02
 const MAX_SLIDER = 15
-
-/** About 1 000 $ of a token at this price, two significant digits. Pure. */
-export function defaultCapital(usd: number): string {
-  if (!(usd > 0)) return '1000'
-  const x = Number((1000 / usd).toPrecision(2))
-  return x >= 1 ? String(Math.round(x)) : x.toFixed(8).replace(/0+$/, '')
-}
 
 export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; seedLeverage?: number; seedAmount?: string }) {
   const { net, pair, state, sides, account } = ctx
@@ -273,7 +266,7 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
       const fresh = await getQuote(quoteReq!)
       if (fresh.simulated) throw new Error('Plus de devis réel disponible')
       const p = plan(fresh)!
-      const hash = await executeV4Open(p, { batch: ctx.batch, nonce: user?.permitNonce ?? 0n }, setBusy)
+      const hash = await executeV4Open(p, { batch: ctx.batch, nonce: user?.permitNonce ?? 0n, permit: ctx.permit }, setBusy)
       const outcome = await readV4Outcome(net.chain.id, hash, p.executor, p.user)
       setResult({ ok: true, text: augment ? 'Position augmentée.' : 'Position ouverte.', hash, details: outcome && v4OutcomeLines(outcome, C, L) })
       ctx.onDone()
@@ -295,7 +288,15 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
     : [
         ...setupSteps,
         ...(needsApprove ? [{ label: `Autoriser le contrat à prendre ${fmtAmount(initial ?? 0n, K.decimals)} ${K.symbol} (transaction)` }] : []),
-        ...(needsBorrow ? [{ label: 'Signer un message (sans gas) : autoriser le contrat à emprunter ce montant, pour cette transaction seulement' }] : []),
+        ...(needsBorrow
+          ? [
+              {
+                label: ctx.permit
+                  ? 'Signer un message (sans gas) : autoriser le contrat à emprunter ce montant, pour cette transaction seulement'
+                  : `Autoriser le contrat à emprunter ${fmtAmount(debtAmount, L.decimals)} ${L.symbol} pour ce compte (transaction, montant exact)`,
+              },
+            ]
+          : []),
         { label: 'Signer la transaction : flash loan, swap, dépôt et emprunt en une fois' },
       ]
 

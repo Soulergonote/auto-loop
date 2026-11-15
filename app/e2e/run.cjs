@@ -14,6 +14,8 @@
 // (COLL=PT-reUSD-10DEC2026 CAPITAL=USDC AMOUNT=1000), close, reduce and mroll (TARGET=PT-USD3 or an LLTV label).
 // refi (Morpho): « Refinancer », COLL=wstETH DEBT=USDC picks the market, TARGET=<start of the move's label> (Aave Ethereum
 // (Core) → Morpho, Morpho → Aave …); the account needs the pair on Aave (to Morpho) or on that market (to Aave).
+// Aave v4: MARKET=v4-ethereum CHAIN_HEX=0x1 after NET=v4 fork.sh; deploy, then EXECUTOR=0x… with open (COLL=WETH DEBT=USDC
+// CAPITAL=USDC AMOUNT=1000), reduce and close on the default spoke (Main); BATCH=1 for the atomic batch instead of the permit.
 // EXECUTOR=0x… preloads an executor as if deployed from this browser (app built without VITE_EXECUTORS).
 // E2E_STRICT=1 (weekly workflow): exit code 1 when the action cannot be signed or does not end with a success.
 // Writes <prefix>-avant.png / <prefix>-apres.png and prints the notices. Needs playwright (NODE_PATH=$(npm root -g)).
@@ -72,7 +74,7 @@ const anvil = async (method, params) =>
   // the Boucle opens on the last pair of the network, else the scanner's best one: start from WETH / USDC as before
   // (PAIR=cbETH/WETH for another one)
   const [PC, PD] = (process.env.PAIR || 'WETH/USDC').split('/')
-  if (!MARKET.startsWith('morpho'))
+  if (!MARKET.startsWith('morpho') && !MARKET.startsWith('v4-'))
     await page.addInitScript(([m, c, d]) => localStorage.setItem('auto-loop.pairs', JSON.stringify({ [m]: { collateral: c, debt: d } })), [MARKET, PC, PD])
   if (process.env.EXECUTOR)
     await page.addInitScript(([a, m]) => localStorage.setItem('auto-loop.executors', JSON.stringify({ [m]: a })), [process.env.EXECUTOR, MARKET])

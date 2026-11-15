@@ -1,7 +1,7 @@
 name: Test hebdomadaire sur fork
 
 # Once a week (and on demand): the outside APIs the app reads still answer in the expected shape, and a real loop
-# opens and closes in the app on forks of Base and Plasma with live quotes (Velora, KyberSwap). A failure opens a
+# opens and closes in the app on forks of Base, Plasma and Ethereum (Aave v4) with live quotes (Velora, KyberSwap). A failure opens a
 # GitHub issue (or comments on the open one); the next success closes it. No secret needed.
 on:
   schedule:
@@ -49,11 +49,18 @@ jobs:
             hex: '0x2611'
             fork: https://rpc.plasma.to
             env: "PAIR=USDe/GHO AMOUNT=1000 LEV=3 SLIP='1 %'"
+          # Aave v4 on Ethereum (spoke Main): 1 000 USDC at 3x on WETH / USDC, flash loan from Morpho, Taker permit
+          - net: v4
+            market: v4-ethereum
+            chain: 1
+            hex: '0x1'
+            fork: https://ethereum-rpc.publicnode.com
+            env: "COLL=WETH DEBT=USDC CAPITAL=USDC AMOUNT=1000 LEV=3 SLIP='1 %'"
     defaults:
       run:
         working-directory: app
     env:
-      MARKET: ${{ matrix.net }}
+      MARKET: ${{ matrix.market || matrix.net }}
       CHAIN_HEX: ${{ matrix.hex }}
       E2E_STRICT: '1'
       WAIT: '20000'

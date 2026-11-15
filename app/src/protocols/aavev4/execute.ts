@@ -6,7 +6,9 @@
  *     the call, allowances back, all or nothing;
  *   - otherwise the setup transaction when missing, the capital approval when needed, then one EIP-712 permit of the
  *     Taker (20 minutes) handed to the contract's `*WithPermit` function, which renounces what is left of it.
- * An allowance already in place is served with the plain call.
+ * An allowance already in place is served with the plain call. An account with code (a smart account, an EIP-7702
+ * delegation) cannot sign the Taker's permit as an EOA: without batches it approves by transaction instead
+ * (`permit: false`), and takes a withdraw allowance back after the close.
  */
 import { decodeEventLog, encodeFunctionData, maxUint256, type Address, type Hash, type Hex, type Log } from 'viem'
 import { getPublicClient, sendTransaction, signTypedData, simulateContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
@@ -305,7 +307,23 @@ async function batch(tx: V4Tx, calls: BatchCall[], onStep: Progress): Promise<Ha
  * Opens. `batch`: one atomic confirmation. Otherwise: the setup (transaction) when missing, the capital approval
  * (transaction) when needed, the borrow permit (signature) unless an allowance covers it, then the call.
  */
-export async function executeV4Open(p: V4OpenPlan, opts: { batch: boolean; nonce: bigint }, onStep: Progress): Promise<Hash> {
+export type V4SendOptions = { batch: boolean; nonce: bigint; /** false: the account has code, allowances go by transaction */ permit?: boolean }
+
+/** The Taker allowance by a transaction of the user (accounts that cannot sign the permit). */
+const approveTaker = (tx: V4Tx, kind: 'borrow' | 'withdraw', amount: bigint, what: string, onStep: Progress) =>
+  userTx(
+    tx,
+    {
+      address: tx.net.taker,
+      abi: v4TakerAbi,
+      functionName: kind === 'borrow' ? 'approveBorrow' : 'approveWithdraw',
+      args: [tx.spoke, BigInt(kind === 'borrow' ? tx.debtId : tx.collateralId), tx.executor, amount],
+    },
+    what,
+    onStep,
+  )
+
+export async function executeV4Open(p: V4OpenPlan, opts: V4SendOptions, onStep: Progress): Promise<Hash> {
   const a = v4OpenAction(p) // checks the plan before anything is signed
   if (opts.batch) return batch(p, v4OpenBatch(p), onStep)
   await sendSetup(p, onStep)
@@ -313,8 +331,11 @@ export async function executeV4Open(p: V4OpenPlan, opts: { batch: boolean; nonce
     await userTx(p, { address: p.capitalToken, abi: erc20Abi, functionName: 'approve', args: [p.executor, p.capitalAmount] }, 'Approbation du capital', onStep)
   let permit: V4Permit | undefined
   if (p.debtAmount > 0n && p.borrowAllowance < p.debtAmount) {
-    onStep('Signature : autoriser le contrat à emprunter ce montant pour cette transaction…')
-    permit = await signPermit(p, 'BorrowPermit', p.debtId, p.debtAmount, opts.nonce)
+    if (opts.permit === false) await approveTaker(p, 'borrow', p.debtAmount, 'Autorisation d’emprunt', onStep)
+    else {
+      onStep('Signature : autoriser le contrat à emprunter ce montant pour cette transaction…')
+      permit = await signPermit(p, 'BorrowPermit', p.debtId, p.debtAmount, opts.nonce)
+    }
   }
   return sendAction(p, a, onStep, permit)
 }
@@ -323,13 +344,22 @@ export async function executeV4Open(p: V4OpenPlan, opts: { batch: boolean; nonce
  * Closes. `batch`: one atomic confirmation. Otherwise: the position managers (transaction) when the position was
  * opened elsewhere, the withdraw permit (signature) unless an allowance covers it, then the call.
  */
-export async function executeV4Close(p: V4ClosePlan, opts: { batch: boolean; nonce: bigint }, onStep: Progress): Promise<Hash> {
+export async function executeV4Close(p: V4ClosePlan, opts: V4SendOptions, onStep: Progress): Promise<Hash> {
   const a = v4CloseAction(p)
   if (opts.batch) return batch(p, v4CloseBatch(p), onStep)
   await sendSetup({ ...p, setup: { ...p.setup, collateral: false } }, onStep)
   let permit: V4Permit | undefined
   const need = withdrawNeed(p)
   if (need > 0n && p.withdrawAllowance < need) {
+    if (opts.permit === false) {
+      await approveTaker(p, 'withdraw', need, 'Autorisation de retrait', onStep)
+      // whatever the close does, the allowance does not stay in place
+      try {
+        return await sendAction(p, a, onStep)
+      } finally {
+        await approveTaker(p, 'withdraw', p.withdrawAllowance, 'Retrait de l’autorisation', onStep)
+      }
+    }
     onStep('Signature : autoriser le contrat à retirer le collatéral pour cette transaction…')
     permit = await signPermit(p, 'WithdrawPermit', p.collateralId, need, opts.nonce)
   }

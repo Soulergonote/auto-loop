@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useBytecode } from 'wagmi'
 import { getAddress, isAddress, type Address } from 'viem'
 import { DEFAULT_DEBT_SYMBOLS, executorRouters, v4Serves, type AggregatorChoice, type V4Net } from '../../../config'
 import { v4ReservesQuery, type V4Reserve } from '../../../protocols/aavev4/reserves'
@@ -47,6 +48,8 @@ export type V4Ctx = {
   account?: Address
   aggregator: AggregatorChoice
   batch: boolean
+  /** the account can sign the Taker's permit: false for an account with code (smart account, EIP-7702 delegation) */
+  permit: boolean
   common: ReactNode
   head: ReactNode
   onDone: () => void
@@ -206,6 +209,9 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
     retry: 1,
   })
   const batch = useAtomicBatch(chainId, account) === true
+  // the Taker checks a signature of an account with code through ERC-1271, which a delegated EOA rarely answers
+  const code = useBytecode({ chainId, address: account, query: { enabled: !!account, staleTime: 300_000 } })
+  const permit = !code.data || code.data === '0x'
   const slow = useSlow(list.isPending)
   const s = state.data
   const explorer = net.chain.blockExplorers?.default.url
@@ -367,6 +373,7 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
     account,
     aggregator,
     batch,
+    permit,
     common,
     head,
     onDone: () => void state.refetch(),

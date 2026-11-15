@@ -195,7 +195,7 @@ export function V4ClosePanel({ ctx, seedTarget }: { ctx: V4Ctx; seedTarget?: num
         if (fresh.minOut < repay) throw new Error('Le nouveau devis ne couvre plus la dette : recoter')
       }
       const p = plan(fresh)!
-      const hash = await executeV4Close(p, { batch: ctx.batch, nonce: user?.permitNonce ?? 0n }, setBusy)
+      const hash = await executeV4Close(p, { batch: ctx.batch, nonce: user?.permitNonce ?? 0n, permit: ctx.permit }, setBusy)
       const outcome = await readV4Outcome(net.chain.id, hash, p.executor, p.user)
       setResult({ ok: true, text: full ? 'Position fermée.' : 'Position réduite.', hash, details: outcome && v4OutcomeLines(outcome, C, L) })
       ctx.onDone()
@@ -213,8 +213,17 @@ export function V4ClosePanel({ ctx, seedTarget }: { ctx: V4Ctx; seedTarget?: num
       ]
     : [
         ...setupSteps,
-        ...(needsWithdraw ? [{ label: 'Signer un message (sans gas) : autoriser le contrat à retirer le collatéral, pour cette transaction seulement' }] : []),
+        ...(needsWithdraw
+          ? [
+              {
+                label: ctx.permit
+                  ? 'Signer un message (sans gas) : autoriser le contrat à retirer le collatéral, pour cette transaction seulement'
+                  : 'Autoriser le contrat à retirer le collatéral (transaction)',
+              },
+            ]
+          : []),
         { label: 'Signer la transaction : flash loan, remboursement, retrait et swap en une fois' },
+        ...(needsWithdraw && !ctx.permit ? [{ label: 'Retirer l’autorisation de retrait (transaction)' }] : []),
       ]
 
   const back = [
