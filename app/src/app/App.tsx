@@ -27,6 +27,8 @@ import { useReserveTokens } from '../protocols/aave/useMarket'
 import { merklQuery } from '../services/merkl'
 import { fmtAddress } from '../ui/format'
 import { useBalances } from '../chain/walletTokens'
+import { Picker } from '../ui/Picker'
+import { Logo } from '../ui/Logo'
 import { PrivateRpc } from '../features/loop/shared/PrivateRpc'
 import { AggregatorPicker, Card, LoopLayout, Notice, Segmented, Skel, Summary } from '../ui/primitives'
 import { DeployPanel } from '../features/loop/shared/DeployPanel'
@@ -368,16 +370,12 @@ export function App() {
           ]}
         />
       </div>
-      <label className="field">
-        <span>Réseau</span>
-        <select value={placeChain} onChange={(e) => choosePlace(protocol, Number(e.target.value))}>
-          {places.map((x) => (
-            <option key={x.chainId} value={x.chainId}>
-              {x.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <Picker
+        label="Réseau"
+        value={String(placeChain)}
+        onChange={(v) => choosePlace(protocol, Number(v))}
+        options={places.map((x) => ({ value: String(x.chainId), label: x.label, icon: <Logo name={x.label} /> }))}
+      />
       {instances.length > 1 && (
         <div className="field">
           <span>Marché</span>

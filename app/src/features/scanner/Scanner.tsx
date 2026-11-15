@@ -23,6 +23,7 @@ import { depegTone, maxDrawdown, ratioSeries } from '../../domain/riskSignals'
 import { useSparklines, type SeriesSource } from './sparklines'
 import { Sparkline } from '../../ui/Sparkline'
 import { Logo, Place } from '../../ui/Logo'
+import { Picker } from '../../ui/Picker'
 import { networkProgress, sourceStatus } from './sources'
 import { AAVE_V4_CHAINS } from '../../config'
 import { v4ReservesQuery } from '../../protocols/aavev4/reserves'
@@ -462,17 +463,15 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
             ]}
           />
         </div>
-        <label className="field">
-          <span>Réseau</span>
-          <select value={chain} onChange={(e) => setScope(e.target.value === 'all' ? 'all' : Number(e.target.value))}>
-            <option value="all">Tous les réseaux</option>
-            {networks.map((n) => (
-              <option key={n.chainId} value={n.chainId}>
-                {n.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <Picker
+          label="Réseau"
+          value={String(chain)}
+          onChange={(v) => setScope(v === 'all' ? 'all' : Number(v))}
+          options={[
+            { value: 'all', label: 'Tous les réseaux' },
+            ...networks.map((n) => ({ value: String(n.chainId), label: n.label, icon: <Logo name={n.label} /> })),
+          ]}
+        />
         <div className="field">
           <span>Health factor visé</span>
           <Segmented value={hfText} onChange={setHf} options={HFS.map((h) => ({ value: h, label: h.replace('.', ',') }))} />

@@ -119,7 +119,7 @@ Sous l'APY net de chaque ligne affichée, une mini-courbe trace les 30 derniers 
 
 ## Logos de réseau et de protocole
 
-Dans le Scanner, les cartes de Positions et la répartition par réseau, le nom d'un réseau ou d'un protocole (Aave, Morpho, Pendle sur l'étiquette « PT ») est précédé de son logo : 14 px, monochrome dans la couleur du texte voisin, décoratif (`aria-hidden`, le nom suit toujours). Les logos sont embarqués dans le build (`src/generated/logos.ts`, 21 logos, aucune image chargée) : jeu « mono » de `@web3icons/core` 4.0.59 (MIT) et marque de Morpho sans son disque. Un nom sans logo (Spark) reste en texte seul ; les tokens restent sans icône. Un test vérifie que chaque réseau de l'app a son logo et qu'aucune couleur n'est en dur (`src/ui/Logo.tsx`). Décision d'Azerty du 15/11/2026.
+Dans le Scanner, les cartes de Positions et la répartition par réseau, le nom d'un réseau ou d'un protocole (Aave, Morpho, Pendle sur l'étiquette « PT ») est précédé de son logo : 14 px, monochrome dans la couleur du texte voisin, décoratif (`aria-hidden`, le nom suit toujours). Le choix du réseau (Boucle et Scanner) est une liste maison avec recherche, qui montre le logo de chaque réseau, la liste native du navigateur ne pouvant pas afficher d'image. Les logos sont embarqués dans le build (`src/generated/logos.ts`, 21 logos, aucune image chargée) : jeu « mono » de `@web3icons/core` 4.0.59 (MIT) et marque de Morpho sans son disque. Un nom sans logo (Spark) reste en texte seul ; les tokens restent sans icône. Un test vérifie que chaque réseau de l'app a son logo et qu'aucune couleur n'est en dur (`src/ui/Logo.tsx`). Décision d'Azerty du 15/11/2026.
 
 ## Ramener à un health factor cible
 

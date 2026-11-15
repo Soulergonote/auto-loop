@@ -3,6 +3,8 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode 
 export type PickerOption = {
   value: string
   label: string
+  /** shown before the label, in the list and on the closed button (a network's logo) */
+  icon?: ReactNode
   /** extra columns on the right (balance, LLTV, liquidity…) */
   cells?: ReactNode[]
   /** a second line under the label */
@@ -91,7 +93,14 @@ export function Picker({
     <div className="field picker" ref={root} onKeyDown={open ? onKey : undefined}>
       <span id={`${id}-l`}>{label}</span>
       <button type="button" className="picker-btn" aria-haspopup="listbox" aria-expanded={open} aria-labelledby={`${id}-l`} onClick={toggle}>
-        <span className="picker-value">{display ?? current?.label ?? '—'}</span>
+        <span className="picker-value">
+          {display ?? (
+            <>
+              {current?.icon}
+              {current?.label ?? '—'}
+            </>
+          )}
+        </span>
         <span className="picker-caret" aria-hidden="true">
           ▾
         </span>
@@ -136,6 +145,7 @@ export function Picker({
               >
                 <span className="picker-label">
                   <span>
+                    {o.icon}
                     {o.label}
                     {o.sub && <span className="muted small picker-sub">{o.sub}</span>}
                   </span>
