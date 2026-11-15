@@ -13,15 +13,16 @@ import { encodeCall, executeSwapDebt, swapDebtCall } from '../../../protocols/aa
 import { executeSwapDebtBatch } from '../../../protocols/aave/batch'
 import { useAtomicBatch } from '../../../chain/batch'
 import { borrowCost, borrowRoom, debtTargets, fullDebtTarget, projectDebtSwap, quoteDebtSwap, type SwapDebtPlan } from '../../../protocols/aave/swapDebt'
-import { fmtBps, fmtAmount, fmtDays, fmtHf, fmtPct, fmtUsd, fmtX } from '../../../ui/format'
+import { fmtAmount, fmtDays, fmtHf, fmtPct, fmtUsd, fmtX } from '../../../ui/format'
 import { outcomeLines, readOutcome } from '../../../chain/outcome'
 import { isCorrelated } from '../../../domain/pairs'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
-import { Banners, Card, Fold, LoopLayout, Metric, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
-import { SLIPPAGES, pairKind, reserveAsset, slippageNote, useSlippage } from '../../../domain/slippage'
+import { Banners, Card, Fold, LoopLayout, Metric, QuoteCompare, Segmented, Summary, TxResult } from '../../../ui/primitives'
+import { pairKind, reserveAsset, useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
 import { DeployPanel } from '../shared/DeployPanel'
+import { SettingsFold, SlippageField, StepsFold } from '../shared/folds'
 
 const PARTS = ['25', '50', '100'] as const
 const BPS = 10_000n
@@ -348,13 +349,10 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
         {all.error && <p className="muted small">Lecture des réserves Aave impossible : {all.error.message.split('\n')[0]}</p>}
         <Banners problems={problems} warnings={warnings} />
 
-        <Fold title="Réglages" value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)}`}>
+        <SettingsFold aggregator={aggregator} slippage={slippage} auto={autoSlip}>
           {common}
-          <div className="field">
-            <span>Slippage max</span>
-            <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
-          </div>
-        </Fold>
+          <SlippageField slippage={slippage} setSlippage={setSlippage} />
+        </SettingsFold>
 
         {q && (
           <Fold title="Devis" value={`${quoteLabel(q)} · minimum ${fmtAmount(q.minOut, D.token.decimals)} ${D.token.symbol}`}>
@@ -370,15 +368,14 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
           </Fold>
         )}
 
-        <Fold title="Étapes" value={batch ? 'une seule confirmation' : `${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
-          <Steps steps={steps} />
+        <StepsFold steps={steps} batch={batch}>
           <p className="muted small">
             Le contrat emprunte la nouvelle dette en flash loan {protocolName(market)} sans prime (elle devient la dette du compte), la vend contre l’ancienne
             et rembourse celle-ci, dans la même transaction. Le collatéral ne bouge pas. Pour tout changer, le montant emprunté couvre la dette même au pire du
             slippage : ce que le swap rend en plus revient au portefeuille. Coût = taux d’emprunt + rendement propre du token − récompense Merkl.
             {batch && ' Le portefeuille envoie ces opérations en un seul lot : toutes passent ou aucune.'}
           </p>
-        </Fold>
+        </StepsFold>
       </Card>
     </LoopLayout>
   )

@@ -24,10 +24,11 @@ import { buildReinvestBatch, swapCapital, walletQuote, type WalletSwap } from '.
 import { sendBatch, useAtomicBatch, type BatchCall } from '../../../chain/batch'
 import { isCorrelated } from '../../../domain/pairs'
 import { hfThresholds, hfTone } from '../../../ui/tone'
-import { fmtBps, fmtAmount, fmtDollars, fmtHf, fmtPct, fmtX } from '../../../ui/format'
-import { Banners, Card, Fold, QuoteCompare, LoopLayout, Notice, Segmented, Skel, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
-import { SLIPPAGES, slippageNote, useSlippage } from '../../../domain/slippage'
+import { fmtAmount, fmtDollars, fmtHf, fmtPct, fmtX } from '../../../ui/format'
+import { Banners, Card, Fold, QuoteCompare, LoopLayout, Notice, Skel, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
+import { useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
+import { SettingsFold, SlippageField } from '../shared/folds'
 
 /** same choices and default as the open and close panels (0,01 %, Azerty's choice) */
 
@@ -486,13 +487,10 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
             </tbody>
           </table>
         )}
-        <Fold title="Réglages" value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)}`}>
+        <SettingsFold aggregator={aggregator} slippage={slippage} auto={autoSlip}>
           {common}
-          <div className="field">
-            <span>Slippage max</span>
-            <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
-          </div>
-        </Fold>
+          <SlippageField slippage={slippage} setSlippage={setSlippage} />
+        </SettingsFold>
         {oneClick && lq && (
           <Fold title="Devis du levier" value={`${aggregatorLabel(lq.aggregator)} · minimum ${fmtAmount(lq.minOut, C.token.decimals)} ${C.token.symbol}`}>
             <QuoteCompare quote={lq} token={C.token} />

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { AGGREGATORS } from '../../../config'
 import { collateralInLoan, dropToLiquidation, morphoHf, morphoLeverage, repayForMorphoLeverage } from '../../../protocols/morpho/markets'
 import {
   REPAY_ALL,
@@ -16,28 +15,15 @@ import { getQuote, quoteLabel } from '../../../services/quotes/quotes'
 import { daysToMaturity, isExpired } from '../../../protocols/pendle/pt'
 import { collateralToSellForRepay, roundSignificant, toBase } from '../../../domain/math'
 import { swapLoss, swapLossProblem } from '../../../domain/economics'
-import { fmtBps, fmtAmount, fmtDate, fmtHf, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
+import { fmtAmount, fmtDate, fmtHf, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
 import { isCorrelated } from '../../../domain/pairs'
 import { hfThresholds, hfTone } from '../../../ui/tone'
-import {
-  Banners,
-  Card,
-  Fold,
-  LeverageSlider,
-  LoopLayout,
-  Metric,
-  NA,
-  QuoteCompare,
-  Segmented,
-  Steps,
-  Summary,
-  TxResult,
-  aggregatorLabel,
-} from '../../../ui/primitives'
+import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Summary, TxResult } from '../../../ui/primitives'
 import type { MorphoCtx } from './MorphoView'
-import { SLIPPAGES, pairKind, slippageNote, useSlippage } from '../../../domain/slippage'
+import { pairKind, useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
+import { QuoteRoute, SettingsFold, SlippageField, StepsFold } from '../shared/folds'
 
 export function MorphoClosePanel({ ctx, seedTarget }: { ctx: MorphoCtx; seedTarget?: number }) {
   const { net, market: M, state, pt, sides, account } = ctx
@@ -270,21 +256,14 @@ export function MorphoClosePanel({ ctx, seedTarget }: { ctx: MorphoCtx; seedTarg
           <Metric label="Flash loan" value="gratuit" sub="Morpho Blue" />
         </div>
         <Banners problems={problems} warnings={warnings} />
-        <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)}`}>
+        <SettingsFold aggregator={ctx.aggregator} slippage={slippage} auto={autoSlip}>
           {ctx.common}
-          <div className="field">
-            <span>Slippage max</span>
-            <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
-          </div>
-        </Fold>
+          <SlippageField slippage={slippage} setSlippage={setSlippage} />
+        </SettingsFold>
         {q && (
           <Fold title="Devis" value={`${quoteLabel(q)} · minimum ${fmtAmount(q.minOut, L.decimals)} ${L.symbol}`}>
             <QuoteCompare quote={q} token={L} />
-            {q.route && (
-              <p className="small">
-                Route : {q.route.map((l) => `${l.sell.symbol} → ${l.buy.symbol} (${l.via === 'pendle' ? 'Pendle' : AGGREGATORS[l.via].label})`).join(', ')}.
-              </p>
-            )}
+            <QuoteRoute quote={q} />
             {preview && (
               <dl className="preview">
                 <dt>Contrat</dt>
@@ -295,9 +274,7 @@ export function MorphoClosePanel({ ctx, seedTarget }: { ctx: MorphoCtx; seedTarg
             )}
           </Fold>
         )}
-        <Fold title="Étapes" value={ctx.batch ? 'une seule confirmation' : `${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
-          <Steps steps={steps} />
-        </Fold>
+        <StepsFold steps={steps} batch={ctx.batch} />
       </Card>
     </LoopLayout>
   )

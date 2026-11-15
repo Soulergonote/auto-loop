@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { parseUnits } from 'viem'
-import { AGGREGATORS, QUOTE_MODE } from '../../../config'
+import { QUOTE_MODE } from '../../../config'
 import {
   collateralInLoan,
   debtForMorphoLeverage,
@@ -16,7 +16,7 @@ import { useDebounced } from '../../../ui/useDebounced'
 import { getQuote, quoteLabel } from '../../../services/quotes/quotes'
 import { roundSignificant, toBase } from '../../../domain/math'
 import { GAS_UNITS_PT, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../../../domain/economics'
-import { fmtAmount, fmtBps, fmtDays, fmtHf, fmtLltv, fmtPct, fmtPrice, fmtUsd, fmtX } from '../../../ui/format'
+import { fmtAmount, fmtDays, fmtHf, fmtLltv, fmtPct, fmtPrice, fmtUsd, fmtX } from '../../../ui/format'
 import { isCorrelated } from '../../../domain/pairs'
 import { exitIssues, exitSellAmount } from '../../../domain/exitCheck'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
@@ -25,13 +25,14 @@ import { PositionBar } from '../../../ui/PositionBar'
 import { projectHealthFactor } from '../../../domain/projection'
 import { ApyBreakdown } from '../shared/ApyBreakdown'
 import { useRiskSignals } from '../shared/RiskSignals'
-import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
+import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Summary, TxResult } from '../../../ui/primitives'
 import type { V4Ctx } from './V4View'
-import { pairKind, slippageNote, useSlippage } from '../../../domain/slippage'
+import { pairKind, useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
 import { CapitalField, SlippageHorizonFields, YieldMetrics } from '../shared/OpenFields'
 import { defaultCapital, v4SetupOf, v4SetupSteps } from './setup'
+import { QuoteRoute, SettingsFold, StepsFold } from '../shared/folds'
 
 /** The slider stops at this health factor: the spoke liquidates at 1. */
 const SLIDER_MIN_HF = 1.02
@@ -423,10 +424,10 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
 
         <Banners problems={problems} warnings={warnings} />
 
-        <Fold title="Réglages" value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)} · ${fmtDays(horizon)}`}>
+        <SettingsFold aggregator={ctx.aggregator} slippage={slippage} auto={autoSlip} extras={[fmtDays(horizon)]}>
           {ctx.common}
           <SlippageHorizonFields slippage={slippage} setSlippage={setSlippage} pt={false} horizonText={horizonText} setHorizon={setHorizon} />
-        </Fold>
+        </SettingsFold>
 
         {hf !== undefined && loopLev !== undefined && (
           <RiskPanel
@@ -460,11 +461,7 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
         {q && (
           <Fold title="Devis" value={`${quoteLabel(q)} · minimum ${fmtAmount(capColl + q.minOut, C.decimals)} ${C.symbol}`}>
             <QuoteCompare quote={q} token={C} />
-            {q.route && (
-              <p className="small">
-                Route : {q.route.map((l) => `${l.sell.symbol} → ${l.buy.symbol} (${l.via === 'pendle' ? 'Pendle' : AGGREGATORS[l.via].label})`).join(', ')}.
-              </p>
-            )}
+            <QuoteRoute quote={q} />
             {preview && (
               <dl className="preview">
                 <dt>Contrat</dt>
@@ -478,13 +475,12 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
           </Fold>
         )}
 
-        <Fold title="Étapes" value={ctx.batch ? 'une seule confirmation' : `${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
-          <Steps steps={steps} />
+        <StepsFold steps={steps} batch={ctx.batch}>
           <p className="muted small">
             Le contrat passe par les gestionnaires de position d’Aave. L’emprunt n’est autorisé que pour ce montant et cette transaction : ce qu’il en reste est
             rendu à la fin.
           </p>
-        </Fold>
+        </StepsFold>
       </Card>
     </LoopLayout>
   )

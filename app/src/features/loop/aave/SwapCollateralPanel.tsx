@@ -21,15 +21,16 @@ import {
   thresholdIn,
   type SwapCollateralPlan,
 } from '../../../protocols/aave/swapCollateral'
-import { fmtBps, fmtAmount, fmtDate, fmtHf, fmtMaturity, fmtPct, fmtUsd, fmtX } from '../../../ui/format'
+import { fmtAmount, fmtDate, fmtHf, fmtMaturity, fmtPct, fmtUsd, fmtX } from '../../../ui/format'
 import { isExpired } from '../../../protocols/pendle/pt'
 import { outcomeLines, readOutcome } from '../../../chain/outcome'
 import { isCorrelated } from '../../../domain/pairs'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
-import { Banners, Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmented, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
-import { SLIPPAGES, pairKind, reserveAsset, slippageNote, useSlippage } from '../../../domain/slippage'
+import { Banners, Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmented, Summary, TxResult } from '../../../ui/primitives'
+import { pairKind, reserveAsset, useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
+import { SettingsFold, SlippageField, StepsFold } from '../shared/folds'
 
 const PARTS = ['25', '50', '100'] as const
 
@@ -391,16 +392,15 @@ export function SwapCollateralPanel({
         {all.error && <Notice>Lecture des réserves Aave impossible : {all.error.message.split('\n')[0]}</Notice>}
         <Banners problems={problems} warnings={warnings} />
 
-        <Fold
-          title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan ${protocolName(market)} ${fmtPct(Number(reserves.premiumBps) / 10_000)}`}`}
+        <SettingsFold
+          aggregator={aggregator}
+          slippage={slippage}
+          auto={autoSlip}
+          extras={[viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan ${protocolName(market)} ${fmtPct(Number(reserves.premiumBps) / 10_000)}`]}
         >
           {common}
-          <div className="field">
-            <span>Slippage max</span>
-            <Segmented value={slippage} onChange={setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
-          </div>
-        </Fold>
+          <SlippageField slippage={slippage} setSlippage={setSlippage} />
+        </SettingsFold>
 
         {q && T && (
           <Fold title="Devis" value={`${quoteLabel(q)} · minimum ${fmtAmount(q.minOut, T.token.decimals)} ${T.token.symbol}`}>
@@ -416,10 +416,9 @@ export function SwapCollateralPanel({
           </Fold>
         )}
 
-        <Fold title="Étapes" value={batch ? 'une seule confirmation' : `${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
-          <Steps steps={steps} />
+        <StepsFold steps={steps} batch={batch}>
           {batch && <p className="muted small">Le portefeuille envoie ces opérations en un seul lot : toutes passent ou aucune.</p>}
-        </Fold>
+        </StepsFold>
       </Card>
     </LoopLayout>
   )

@@ -14,27 +14,14 @@ import { closeCall, encodeCall, executeClose, type ClosePlan } from '../../../pr
 import { explainError } from '../../../chain/tx'
 import { executeCloseBatch } from '../../../protocols/aave/batch'
 import { useAtomicBatch } from '../../../chain/batch'
-import { fmtBps, fmtAmount, fmtDate, fmtHf, fmtPct, fmtUsd, fmtX } from '../../../ui/format'
+import { fmtAmount, fmtDate, fmtHf, fmtPct, fmtUsd, fmtX } from '../../../ui/format'
 import { outcomeLines, readOutcome } from '../../../chain/outcome'
 import { isCorrelated } from '../../../domain/pairs'
 import { hfThresholds, hfTone } from '../../../ui/tone'
-import {
-  Banners,
-  Card,
-  Fold,
-  LeverageSlider,
-  LoopLayout,
-  QuoteCompare,
-  Metric,
-  NA,
-  Segmented,
-  Steps,
-  Summary,
-  TxResult,
-  aggregatorLabel,
-} from '../../../ui/primitives'
-import { SLIPPAGES, type SlippageBps, pairKind, reserveAsset, slippageNote, useSlippage } from '../../../domain/slippage'
+import { Banners, Card, Fold, LeverageSlider, LoopLayout, QuoteCompare, Metric, NA, Summary, TxResult } from '../../../ui/primitives'
+import { type SlippageBps, pairKind, reserveAsset, useSlippage } from '../../../domain/slippage'
 import { signBlocker } from '../shared/signing'
+import { SettingsFold, SlippageField, StepsFold } from '../shared/folds'
 
 type Props = {
   reserves: Reserves
@@ -446,19 +433,16 @@ function ClosePanelInner(p: {
 
         <Banners problems={problems} warnings={warnings} />
 
-        <Fold
-          title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)} · ${viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan ${protocolName(market)} ${fmtPct(Number(premiumBps) / 10_000)}`}`}
+        <SettingsFold
+          aggregator={aggregator}
+          slippage={slippage}
+          auto={autoSlip}
+          extras={[viaMorpho ? 'flash loan Morpho sans prime' : `prime flash loan ${protocolName(market)} ${fmtPct(Number(premiumBps) / 10_000)}`]}
         >
           {p.common}
           {/* after maturity the PT is redeemed 1 for 1: no pool, nothing to slip */}
-          {!ptExpired && (
-            <div className="field">
-              <span>Slippage max</span>
-              <Segmented value={slippage} onChange={p.setSlippage} options={SLIPPAGES.map((s) => ({ value: s, label: fmtBps(s) }))} />
-            </div>
-          )}
-        </Fold>
+          {!ptExpired && <SlippageField slippage={slippage} setSlippage={p.setSlippage} />}
+        </SettingsFold>
 
         {q && (
           <Fold title="Devis" value={`${quoteLabel(q)} · minimum ${fmtAmount(q.minOut, D.token.decimals)} ${D.token.symbol}`}>
@@ -486,10 +470,9 @@ function ClosePanelInner(p: {
           </Fold>
         )}
 
-        <Fold title="Étapes" value={batch ? 'une seule confirmation' : `${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
-          <Steps steps={steps} />
+        <StepsFold steps={steps} batch={batch}>
           {batch && <p className="muted small">Le portefeuille envoie ces opérations en un seul lot : toutes passent ou aucune.</p>}
-        </Fold>
+        </StepsFold>
       </Card>
     </LoopLayout>
   )

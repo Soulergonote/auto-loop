@@ -32,10 +32,11 @@ import { toBase } from '../../../domain/math'
 import { isCorrelated } from '../../../domain/pairs'
 import { fmtAddress, fmtAmount, fmtDollars, fmtHf, fmtLltv, fmtPct, fmtX, ptShortSymbol } from '../../../ui/format'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
-import { Banners, Card, Fold, LoopLayout, Metric, Notice, Steps, Summary, TxResult } from '../../../ui/primitives'
+import { Banners, Card, Fold, LoopLayout, Metric, Notice, Summary, TxResult } from '../../../ui/primitives'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
 import type { MorphoCtx } from './MorphoView'
+import { StepsFold } from '../shared/folds'
 
 /** Aave v3 markets of the network (selectable ones). */
 export const aaveMarketsOn = (chainId: number): Market[] => MARKETS.filter((m) => m.chain.id === chainId && !m.soon).map((m) => getMarket(m.id))
@@ -405,11 +406,7 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
             </dl>
           </Fold>
         )}
-        {r && (
-          <Fold title="Étapes" value={ctx.batch ? 'une seule confirmation' : `${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
-            <Steps steps={steps} />
-          </Fold>
-        )}
+        {r && <StepsFold steps={steps} batch={ctx.batch} />}
       </Card>
     </LoopLayout>
   )

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { parseUnits } from 'viem'
-import { AGGREGATORS, QUOTE_MODE } from '../../../config'
+import { QUOTE_MODE } from '../../../config'
 import {
   collateralInLoan,
   debtForMorphoLeverage,
@@ -18,7 +18,7 @@ import { getQuote, quoteLabel } from '../../../services/quotes/quotes'
 import { daysToMaturity, isExpired } from '../../../protocols/pendle/pt'
 import { roundSignificant, toBase } from '../../../domain/math'
 import { GAS_UNITS_PT, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../../../domain/economics'
-import { fmtLltv, fmtBps, fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
+import { fmtLltv, fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
 import { isCorrelated } from '../../../domain/pairs'
 import { exitIssues, exitSellAmount } from '../../../domain/exitCheck'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
@@ -29,12 +29,13 @@ import { ApyHistory } from '../shared/ApyHistory'
 import { ApyBreakdown } from '../shared/ApyBreakdown'
 import { useMorphoBorrowSeries } from '../../../protocols/morpho/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
-import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
+import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Summary, TxResult } from '../../../ui/primitives'
 import type { MorphoCtx } from './MorphoView'
-import { pairKind, slippageNote, useSlippage } from '../../../domain/slippage'
+import { pairKind, useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
 import { CapitalField, SlippageHorizonFields, YieldMetrics } from '../shared/OpenFields'
+import { QuoteRoute, SettingsFold, StepsFold } from '../shared/folds'
 
 /** The slider stops at this health factor: Morpho liquidates at 1, with no LTV margin below the LLTV like Aave's. */
 const SLIDER_MIN_HF = 1.02
@@ -461,13 +462,10 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
 
         <Banners problems={problems} warnings={warnings} />
 
-        <Fold
-          title="Réglages"
-          value={`${aggregatorLabel(ctx.aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)}${pt ? '' : ` · ${fmtDays(horizon)}`}`}
-        >
+        <SettingsFold aggregator={ctx.aggregator} slippage={slippage} auto={autoSlip} extras={[!pt && fmtDays(horizon)]}>
           {ctx.common}
           <SlippageHorizonFields slippage={slippage} setSlippage={setSlippage} pt={!!pt} horizonText={horizonText} setHorizon={setHorizon} />
-        </Fold>
+        </SettingsFold>
 
         {hf !== undefined && loopLev !== undefined && (
           <RiskPanel
@@ -511,11 +509,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
         {q && (
           <Fold title="Devis" value={`${quoteLabel(q)} · minimum ${fmtAmount(capColl + q.minOut, C.decimals)} ${ptShortSymbol(C.symbol)}`}>
             <QuoteCompare quote={q} token={C} />
-            {q.route && (
-              <p className="small">
-                Route : {q.route.map((l) => `${l.sell.symbol} → ${l.buy.symbol} (${l.via === 'pendle' ? 'Pendle' : AGGREGATORS[l.via].label})`).join(', ')}.
-              </p>
-            )}
+            <QuoteRoute quote={q} />
             {preview && (
               <dl className="preview">
                 <dt>Contrat</dt>
@@ -529,13 +523,12 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
           </Fold>
         )}
 
-        <Fold title="Étapes" value={ctx.batch ? 'une seule confirmation' : `${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
-          <Steps steps={steps} />
+        <StepsFold steps={steps} batch={ctx.batch}>
           <p className="muted small">
             Le contrat n’agit sur le compte Morpho que pendant cette transaction : l’autorisation est donnée puis retirée dedans, et la transaction échoue si
             elle restait en place.
           </p>
-        </Fold>
+        </StepsFold>
       </Card>
     </LoopLayout>
   )

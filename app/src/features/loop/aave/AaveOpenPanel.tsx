@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useGasPrice } from 'wagmi'
 import { parseUnits, type Address } from 'viem'
-import { protocolName, wrappedNative, AGGREGATORS, QUOTE_MODE, type AggregatorChoice, type Token } from '../../../config'
+import { protocolName, wrappedNative, QUOTE_MODE, type AggregatorChoice, type Token } from '../../../config'
 import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../../../services/merkl'
 import { CampaignTable } from '../shared/CampaignTable'
 import { RiskPanel } from '../shared/RiskPanel'
@@ -38,17 +38,18 @@ import { executeOpenBatch } from '../../../protocols/aave/batch'
 import { useAtomicBatch } from '../../../chain/batch'
 import { capitalKind, useWalletTokens, walletValue, type WalletToken } from '../../../chain/walletTokens'
 import { outcomeLines, readOutcome } from '../../../chain/outcome'
-import { fmtBps, fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
+import { fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
 import { isCorrelated } from '../../../domain/pairs'
 import { useQuery } from '@tanstack/react-query'
 import { exitIssues, exitSellAmount, utilization } from '../../../domain/exitCheck'
 import { snapshotQuery } from '../../../protocols/aave/snapshot'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
-import { Banners, Card, Fold, LeverageSlider, LoopLayout, QuoteCompare, Metric, NA, Steps, Summary, TxResult, aggregatorLabel } from '../../../ui/primitives'
-import { pairKind, reserveAsset, slippageNote, useSlippage } from '../../../domain/slippage'
+import { Banners, Card, Fold, LeverageSlider, LoopLayout, QuoteCompare, Metric, NA, Summary, TxResult } from '../../../ui/primitives'
+import { pairKind, reserveAsset, useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
 import { CapitalField, SlippageHorizonFields, YieldMetrics } from '../shared/OpenFields'
+import { QuoteRoute, SettingsFold, StepsFold } from '../shared/folds'
 
 type Props = {
   reserves: Reserves
@@ -697,10 +698,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
 
         <Banners problems={problems} warnings={warnings} />
 
-        <Fold
-          title="Réglages"
-          value={`${aggregatorLabel(aggregator)} · slippage ${fmtBps(slippage)}${slippageNote(autoSlip)}${pt ? '' : ` · ${fmtDays(horizon)}`} · ${emodeLabel}`}
-        >
+        <SettingsFold aggregator={aggregator} slippage={slippage} auto={autoSlip} extras={[!pt && fmtDays(horizon), emodeLabel]}>
           {common}
           <SlippageHorizonFields slippage={slippage} setSlippage={setSlippage} pt={!!pt} horizonText={horizonText} setHorizon={setHorizon} />
           {eligible.length > 0 && (
@@ -716,7 +714,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
               </select>
             </label>
           )}
-        </Fold>
+        </SettingsFold>
 
         {proj && loopLev !== undefined && (
           <RiskPanel
@@ -792,11 +790,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
               </p>
             )}
             <QuoteCompare quote={q} token={C.token} />
-            {q.route && (
-              <p className="small">
-                Route : {q.route.map((l) => `${l.sell.symbol} → ${l.buy.symbol} (${l.via === 'pendle' ? 'Pendle' : AGGREGATORS[l.via].label})`).join(', ')}.
-              </p>
-            )}
+            <QuoteRoute quote={q} />
             {preview && (
               <dl className="preview">
                 <dt>Contrat</dt>
@@ -814,10 +808,9 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
           </Fold>
         )}
 
-        <Fold title="Étapes" value={batch ? 'une seule confirmation' : `${steps.length} étape${steps.length > 1 ? 's' : ''}`}>
-          <Steps steps={steps} />
+        <StepsFold steps={steps} batch={batch}>
           {batch && <p className="muted small">Le portefeuille envoie ces opérations en un seul lot : toutes passent ou aucune.</p>}
-        </Fold>
+        </StepsFold>
       </Card>
     </LoopLayout>
   )
