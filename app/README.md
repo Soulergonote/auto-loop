@@ -260,6 +260,8 @@ Limite propre au fork : le fork est figé au bloc du `fork.sh`, alors que Velora
 - `node e2e/api-check.mjs` appelle chaque API extérieure comme l'app le fait (Velora et KyberSwap : devis puis transaction, Pendle, Morpho, Merkl, DefiLlama prix et historique) et vérifie les champs lus ;
 - sur un fork de Base (1 WETH à 3x contre USDC), un de Plasma (1 000 USDe à 3x contre GHO) et un d'Ethereum pour Aave v4 (1 000 USDC à 3x sur WETH / USDC, spoke Main, ajouté le 15/11/2026) : déploiement du contrat commun avec le bouton de l'app, ouverture puis fermeture avec de vrais devis, par `e2e/run.cjs` avec `E2E_STRICT=1` (code de sortie 1 si le bouton reste grisé ou si la transaction ne finit pas en succès). Un essai de plus après deux minutes, les agrégateurs limitant le débit par adresse IP.
 
+Sur Base, l'app du test ne garde que les AMM classiques (`VITE_VELORA_INCLUDE_DEXS`, `VITE_KYBER_INCLUDED_SOURCES`) : le 15/11/2026, l'ouverture comme la fermeture échouaient avec `ExecutionFailed()` de l'exécuteur de l'agrégateur, la route passant par un DEX à prix d'oracle que le fork figé ne peut pas servir (reproduit en local, corrigé par ce filtre).
+
 Un échec ouvre un ticket GitHub « Test hebdomadaire sur fork en échec » (ou le commente s'il est déjà ouvert), avec le lien vers le run et ses captures ; le premier succès suivant le ferme. Le portefeuille de test de `run.cjs` ajoute 30 % à l'estimation de gas, comme un vrai portefeuille : l'estimation nue d'anvil ne suffit pas toujours aux routes KyberSwap.
 
 ## Organisation du code
