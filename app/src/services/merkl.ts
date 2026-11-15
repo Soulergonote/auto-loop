@@ -208,10 +208,6 @@ export function campaignYields(p: PairCampaigns, leverage: number, collateral: S
   ]
 }
 
-export function rewardsOnEquity(p: PairCampaigns, leverage: number, collateral: Side, debt: Side): number {
-  return campaignYields(p, leverage, collateral, debt).reduce((s, y) => s + y.apy, 0)
-}
-
 /** Days until the campaign's last known end (Infinity when the API gives none). */
 export function daysLeft(c: Campaign, nowMs = Date.now()): number {
   return c.endsAt === undefined ? Infinity : Math.max(0, (c.endsAt * 1000 - nowMs) / 86_400_000)

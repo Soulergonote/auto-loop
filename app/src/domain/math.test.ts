@@ -3,7 +3,6 @@ import { parseUnits, toFunctionSelector, toFunctionSignature } from 'viem'
 import {
   repayForTarget,
   collateralToSellForRepay,
-  debtForLeverage,
   extraDebtForTarget,
   positionLeverage,
   toBase,
@@ -18,6 +17,9 @@ import { executorAbi, executorAbiV1 } from '../chain/abi'
 
 const WETH = { price: 2500n * 10n ** 8n, decimals: 18 }
 const USDC = { price: 1n * 10n ** 8n, decimals: 6 }
+/** debt of a fresh position: equity x (leverage - 1) */
+const debtForLeverage = (initial: bigint, leverageBps: bigint, c: typeof WETH, d: typeof USDC) =>
+  extraDebtForTarget({ collateralBase: 0n, debtBase: 0n }, toBase(initial, c), leverageBps, d)
 
 describe('leverage maths', () => {
   it('borrows C0 x (L - 1) of debt', () => {
@@ -152,10 +154,6 @@ describe('increasing an existing position', () => {
     expect(extraDebtForTarget(pos, usd(3000), 30_000n, USDC)).toBe(parseUnits('9000', 6))
     // already above the target: nothing to borrow
     expect(extraDebtForTarget(pos, 0n, 15_000n, USDC)).toBe(0n)
-  })
-  it('matches the fresh-position formula without a position', () => {
-    const initial = parseUnits('1', 18)
-    expect(extraDebtForTarget({ collateralBase: 0n, debtBase: 0n }, toBase(initial, WETH), 30_000n, USDC)).toBe(debtForLeverage(initial, 30_000n, WETH, USDC))
   })
 
   it('repays what brings the position down to the target leverage', () => {

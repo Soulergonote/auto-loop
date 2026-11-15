@@ -109,9 +109,6 @@ export function parseV4Reserves(raw: Raw[]): V4Reserve[] {
     })
 }
 
-/** One reserve among those of the API, by chain, spoke and id. */
-export const v4ReserveKey = (r: Pick<V4Reserve, 'chainId' | 'spoke' | 'reserveId'>) => `${r.chainId}:${r.spoke.address.toLowerCase()}:${r.reserveId}`
-
 export async function fetchV4Reserves(chainIds: number[], signal?: AbortSignal): Promise<V4Reserve[]> {
   const res = await fetch(AAVE_V4_API, {
     method: 'POST',

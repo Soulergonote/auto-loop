@@ -388,4 +388,3 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
 }
 
 /** Short name of a v4 pair for lists: collateral / debt, spoke. */
-export const v4PairName = (p: V4Pair) => `${p.collateral.token.symbol} / ${p.debt.token.symbol} · ${p.collateral.spoke.name}`

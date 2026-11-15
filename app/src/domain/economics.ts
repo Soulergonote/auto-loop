@@ -13,7 +13,6 @@ export const GAS_UNITS = { open: 800_000n, close: 1_700_000n, swapCollateral: 1_
 export const GAS_UNITS_PT = { open: 1_300_000n, close: 1_100_000n, swapCollateral: 1_400_000n }
 
 export const HORIZONS = [30, 90, 180, 365] as const
-export type Horizon = (typeof HORIZONS)[number]
 
 /** Value lost in a swap at oracle prices (price impact + route fees), never negative. */
 export function swapCostBase(sellAmount: bigint, sell: Side, buyAmount: bigint, buy: Side): bigint {

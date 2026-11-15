@@ -12,7 +12,7 @@ import { explainError } from '../../../chain/tx'
 import { fmtLltv, fmtAddress, fmtAmount, fmtDollars, fmtPct, ptShortSymbol } from '../../../ui/format'
 import { useBalances } from '../../../chain/walletTokens'
 import { Picker } from '../../../ui/Picker'
-import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, Tag, TxResult, useSlow } from '../../../ui/primitives'
+import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, TxResult, useSlow } from '../../../ui/primitives'
 import { MorphoOpenPanel } from './MorphoOpenPanel'
 import { MorphoClosePanel } from './MorphoClosePanel'
 import { MorphoRollPanel } from './MorphoRollPanel'
@@ -438,7 +438,3 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
 
 /** Short name of a market for lists: collateral / loan, LLTV. */
 export const morphoMarketName = (m: MorphoMarket) => `${ptShortSymbol(m.collateral.symbol)} / ${m.loan.symbol} · ${fmtLltv(m.lltv)}`
-
-export function MorphoTag() {
-  return <Tag>Morpho</Tag>
-}

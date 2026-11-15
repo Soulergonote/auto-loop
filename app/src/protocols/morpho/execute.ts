@@ -8,22 +8,19 @@
  * An account that already authorized the executor for good is served with the plain call.
  */
 import { decodeEventLog, encodeFunctionData, hexToSignature, maxUint256, type Address, type Hash, type Hex, type Log } from 'viem'
-import { signTypedData, simulateContract, waitForTransactionReceipt, writeContract, getPublicClient } from '@wagmi/core'
+import { signTypedData, simulateContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
 import { wagmiConfig } from '../../chain/wagmi'
 import { debtTokenAbi, erc20Abi, morphoAbi, morphoExecutorAbi, poolAbi } from '../../chain/abi'
 import type { MorphoNet } from '../../config'
 import { quoteSteps, type Quote } from '../../services/quotes/quotes'
 import { authorizationTypedData, type MarketParams } from './markets'
-import { allowanceCalls, sendBatch, type BatchCall } from '../../chain/batch'
+import { allowanceCalls, type BatchCall } from '../../chain/batch'
+import { receiptLogs, sendBatchTx, sendExecutorCall, userTx } from '../../chain/send'
+import { deadlineFromNow, guardOf as guard, hfText as hf, liveQuote as live, sameAddress as same, type Step } from '../common'
 import type { Progress } from '../../chain/tx'
 import type { TokenInfo } from '../../chain/outcome'
 import { fmtAmount } from '../../ui/format'
 import { signATokenPermit, signDelegation, type ExecutorSignature } from '../aave/signatures'
-
-export const MORPHO_DEADLINE_SECONDS = 20 * 60
-
-type Step = { router: Address; tokenOut: Address; data: Hex; minOut: bigint }
-type Guard = { minHealthFactor: bigint; deadline: bigint }
 
 /** What every Morpho action needs to be sent. */
 export type MorphoTx = {
@@ -81,15 +78,6 @@ export type MorphoRefinancePlan = MorphoTx & {
   aave: { token: Address; need: bigint; allowance: bigint }
   /** eMode to switch the Aave account to first (to Aave, an empty account only) */
   eModeTarget?: number
-}
-
-const guard = (minHealthFactor: bigint): Guard => ({ minHealthFactor, deadline: BigInt(Math.floor(Date.now() / 1000) + MORPHO_DEADLINE_SECONDS) })
-const same = (a: Address, b: Address) => a.toLowerCase() === b.toLowerCase()
-
-function live(q: Quote | undefined, what: string): Quote {
-  if (!q) throw new Error(`Devis ${what} manquant`)
-  if (q.simulated) throw new Error('Devis simulé : impossible à exécuter')
-  return q
 }
 
 export function morphoOpenArgs(p: MorphoOpenPlan) {
@@ -199,7 +187,7 @@ function split(sig: Hex) {
 
 /** Grant (nonce n) and revoke (nonce n + 1) signatures for the executor, valid 20 minutes. */
 export async function signAuthorizations(tx: MorphoTx, nonce: bigint, onStep: Progress): Promise<AuthSigs> {
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + MORPHO_DEADLINE_SECONDS)
+  const deadline = deadlineFromNow()
   const base = { authorizer: tx.user, authorized: tx.executor, deadline }
   onStep('Signature 1/2 : autoriser le contrat sur Morpho pour cette transaction…')
   const grant = await signTypedData(wagmiConfig, {
@@ -261,19 +249,7 @@ export function refinanceBatchCalls(p: MorphoRefinancePlan): BatchCall[] {
   return [...emode, ...a.before, ...morphoBatchCalls(p, refinanceAction(p)), ...a.after]
 }
 
-async function approveTx(tx: MorphoTx, token: Address, amount: bigint, onStep: Progress) {
-  onStep('Approbation du capital (transaction)…')
-  const { request } = await simulateContract(wagmiConfig, {
-    chainId: tx.net.chain.id,
-    account: tx.user,
-    address: token,
-    abi: erc20Abi,
-    functionName: 'approve',
-    args: [tx.executor, amount],
-  })
-  const hash = await writeContract(wagmiConfig, request)
-  await waitForTransactionReceipt(wagmiConfig, { chainId: tx.net.chain.id, hash })
-}
+const sender = (tx: MorphoTx) => ({ chainId: tx.net.chain.id, user: tx.user })
 
 /**
  * Sends the action. `batch`: one atomic confirmation. Otherwise: capital approval (transaction) when needed, the two
@@ -285,46 +261,25 @@ export async function executeMorpho(
   opts: { batch: boolean; nonce: bigint; capital?: { token: Address; amount: bigint; allowance: bigint } },
   onStep: Progress,
 ): Promise<Hash> {
-  const chainId = tx.net.chain.id
-  if (opts.batch) {
-    const hash = await sendBatch(chainId, tx.user, morphoBatchCalls(tx, a, opts.capital), onStep, tx.executor)
-    if (!hash) throw new Error('Lot envoyé, transaction introuvable')
-    return hash
-  }
+  if (opts.batch) return sendBatchTx(sender(tx), morphoBatchCalls(tx, a, opts.capital), onStep, tx.executor)
   if (opts.capital && opts.capital.amount > 0n && opts.capital.allowance < opts.capital.amount)
-    await approveTx(tx, opts.capital.token, opts.capital.amount, onStep)
+    await userTx(
+      sender(tx),
+      { address: opts.capital.token, abi: erc20Abi, functionName: 'approve', args: [tx.executor, opts.capital.amount] },
+      'Approbation du capital',
+      onStep,
+    )
   const auth = tx.authorized ? undefined : await signAuthorizations(tx, opts.nonce, onStep)
   return sendAction(tx, a, onStep, auth)
 }
 
 /** Simulates then sends the executor call, waits for it. */
-async function sendAction(tx: MorphoTx, a: Action, onStep: Progress, auth?: AuthSigs, aaveSig?: ExecutorSignature): Promise<Hash> {
-  const chainId = tx.net.chain.id
-  onStep('Simulation…')
-  const { request } = await simulateContract(wagmiConfig, {
-    chainId,
-    account: tx.user,
-    address: tx.executor,
-    abi: morphoExecutorAbi,
-    functionName: (auth ? `${a.name}WithAuth` : a.name) as 'open',
-    args: callArgs(a, auth, aaveSig),
-  })
-  onStep('Confirmation de la transaction dans le portefeuille…')
-  const hash = await writeContract(wagmiConfig, request as never)
-  onStep('En attente d’inclusion…')
-  const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId, hash })
-  if (receipt.status !== 'success') throw new Error('La transaction a échoué')
-  return hash
-}
-
-/** A transaction of the user's own on Aave (eMode, approval, delegation), waited for. */
-async function userTx(tx: MorphoTx, request: Parameters<typeof simulateContract>[1], what: string, onStep: Progress) {
-  onStep(`${what} (transaction)…`)
-  const sim = await simulateContract(wagmiConfig, { ...request, chainId: tx.net.chain.id, account: tx.user } as never)
-  const hash = await writeContract(wagmiConfig, sim.request as never)
-  const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: tx.net.chain.id, hash })
-  if (receipt.status !== 'success') throw new Error(`${what} : la transaction a échoué`)
-}
+const sendAction = (tx: MorphoTx, a: Action, onStep: Progress, auth?: AuthSigs, aaveSig?: ExecutorSignature): Promise<Hash> =>
+  sendExecutorCall(
+    sender(tx),
+    { address: tx.executor, abi: morphoExecutorAbi, functionName: auth ? `${a.name}WithAuth` : a.name, args: callArgs(a, auth, aaveSig) },
+    onStep,
+  )
 
 /**
  * Refinances. `batch`: one atomic confirmation. Otherwise: the eMode switch when needed (transaction), the Aave
@@ -334,20 +289,17 @@ async function userTx(tx: MorphoTx, request: Parameters<typeof simulateContract>
 export async function executeRefinance(p: MorphoRefinancePlan, opts: { batch: boolean; nonce: bigint }, onStep: Progress): Promise<Hash> {
   const a = refinanceAction(p) // checks the plan before anything is signed
   const chainId = p.net.chain.id
-  if (opts.batch) {
-    const hash = await sendBatch(chainId, p.user, refinanceBatchCalls(p), onStep, p.executor)
-    if (!hash) throw new Error('Lot envoyé, transaction introuvable')
-    return hash
-  }
+  if (opts.batch) return sendBatchTx(sender(p), refinanceBatchCalls(p), onStep, p.executor)
+  // transactions of the user's own on Aave: eMode, approval, delegation
   if (p.eModeTarget !== undefined)
-    await userTx(p, { address: p.pool, abi: poolAbi, functionName: 'setUserEMode', args: [p.eModeTarget] } as never, 'Activation de l’eMode', onStep)
+    await userTx(sender(p), { address: p.pool, abi: poolAbi, functionName: 'setUserEMode', args: [p.eModeTarget] }, 'Activation de l’eMode', onStep)
   let aaveSig: ExecutorSignature | undefined
   if (p.aave.need > p.aave.allowance) {
     if (p.authorized) {
       const call = p.toMorpho
         ? { address: p.aave.token, abi: erc20Abi, functionName: 'approve', args: [p.executor, p.aave.need] }
         : { address: p.aave.token, abi: debtTokenAbi, functionName: 'approveDelegation', args: [p.executor, p.aave.need] }
-      await userTx(p, call as never, p.toMorpho ? 'Approbation du collatéral Aave' : 'Délégation d’emprunt Aave', onStep)
+      await userTx(sender(p), call, p.toMorpho ? 'Approbation du collatéral Aave' : 'Délégation d’emprunt Aave', onStep)
     } else {
       onStep(p.toMorpho ? 'Signature : autoriser le contrat à prendre le collatéral sur Aave…' : 'Signature : déléguer l’emprunt sur Aave au contrat…')
       aaveSig = p.toMorpho
@@ -404,15 +356,9 @@ export function decodeMorphoOutcome(logs: Log[], executor: Address, user: Addres
 }
 
 export async function readMorphoOutcome(chainId: number, hash: Hash, executor: Address, user: Address): Promise<MorphoOutcome | undefined> {
-  try {
-    const receipt = await getPublicClient(wagmiConfig, { chainId })!.getTransactionReceipt({ hash })
-    return decodeMorphoOutcome(receipt.logs, executor, user)
-  } catch {
-    return undefined
-  }
+  const logs = await receiptLogs(chainId, hash)
+  return logs && decodeMorphoOutcome(logs, executor, user)
 }
-
-const hf = (x: bigint) => (x >= maxUint256 / 2n ? '∞' : (Number(x / 10n ** 14n) / 10_000).toFixed(2).replace('.', ','))
 
 export function morphoOutcomeLines(o: MorphoOutcome, collateral: TokenInfo, loan: TokenInfo, to?: TokenInfo): string[] {
   const c = (x: bigint, t = collateral) => `${fmtAmount(x, t.decimals)} ${t.symbol}`

@@ -8,6 +8,7 @@ import { aTokensToApprove, swapCollateralArgs, type SwapCollateralPlan } from '.
 import { swapDebtArgs, type SwapDebtPlan } from './swapDebt'
 
 import type { Progress } from '../../chain/tx'
+import { deadlineFromNow } from '../common'
 
 export type OpenPlan = {
   chainId: number
@@ -61,9 +62,6 @@ export type ClosePlan = {
   quote: Quote
 }
 
-/** Each call's deadline: the signatures used with it expire after 20 minutes too. */
-const callDeadline = () => BigInt(Math.floor(Date.now() / 1000) + 20 * 60)
-
 /** v1 parameters (executors deployed before v2). */
 export function openArgsV1(p: OpenPlan) {
   if (p.quote.route) throw new Error('Le contrat v1 ne fait qu’un swap : route Pendle impossible')
@@ -100,7 +98,7 @@ export function openArgs(p: OpenPlan) {
     capitalSteps: swapped ? quoteSteps(cq!, p.collateral) : [],
     debtAmount: p.debtAmount,
     steps: quoteSteps(p.quote, p.collateral),
-    guard: { minHealthFactor: p.minHealthFactor ?? 0n, deadline: callDeadline() },
+    guard: { minHealthFactor: p.minHealthFactor ?? 0n, deadline: deadlineFromNow() },
   } as const
 }
 
@@ -125,7 +123,7 @@ export function closeArgs(p: ClosePlan) {
     collateralToSell: p.collateralToSell,
     steps: quoteSteps(p.quote, p.debt),
     flashLender: p.flashLender ?? zeroAddress,
-    guard: { minHealthFactor: p.full ? 0n : (p.minHealthFactor ?? 0n), deadline: callDeadline() },
+    guard: { minHealthFactor: p.full ? 0n : (p.minHealthFactor ?? 0n), deadline: deadlineFromNow() },
   } as const
 }
 

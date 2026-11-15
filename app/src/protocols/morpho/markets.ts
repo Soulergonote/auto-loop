@@ -312,8 +312,6 @@ export const toAssetsUp = (shares: bigint, totalAssets: bigint, totalShares: big
 
 /** Loan units the collateral is worth at the oracle price. */
 export const collateralInLoan = (collateral: bigint, price: bigint) => (collateral * price) / ORACLE_SCALE
-/** Collateral units worth `loan` at the oracle price. */
-export const loanInCollateral = (loan: bigint, price: bigint) => (price === 0n ? 0n : (loan * ORACLE_SCALE) / price)
 
 /** Morpho's health factor: collateral value x LLTV / debt (Infinity without debt). */
 export function morphoHf(collateral: bigint, debt: bigint, price: bigint, lltv: bigint): number {

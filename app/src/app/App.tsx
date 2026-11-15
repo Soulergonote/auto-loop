@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAccount } from 'wagmi'
-import { type Address } from 'viem'
+import type { Address, Chain } from 'viem'
 import {
   DEFAULT_COLLATERAL_SYMBOLS,
   DEFAULT_DEBT_SYMBOLS,
@@ -12,7 +12,6 @@ import {
   getV4Net,
   v4NetOfSpoke,
   isV4Id,
-  QUOTE_MODE,
   getMarket,
   getMorphoNet,
   isMorphoId,
@@ -29,12 +28,12 @@ import {
 } from '../config'
 import { useReserveTokens } from '../protocols/aave/useMarket'
 import { merklQuery } from '../services/merkl'
-import { fmtAddress } from '../ui/format'
 import { useBalances } from '../chain/walletTokens'
 import { Picker } from '../ui/Picker'
 import { Logo } from '../ui/Logo'
 import { PrivateRpc } from '../features/loop/shared/PrivateRpc'
 import { AggregatorPicker, Card, LoopLayout, Notice, Segmented, Skel, Summary } from '../ui/primitives'
+import { ExecutorCheckNote, MockQuotesNote, PlatformLine } from './ExecutorInfo'
 import { DeployPanel } from '../features/loop/shared/DeployPanel'
 import {
   deployExecutor,
@@ -192,54 +191,22 @@ export function App() {
   const isSharedMorpho = !!morphoNet.executor && morphoNet.executor === sharedMorphoExecutorAddress(morphoNet)
 
   // what the summary's single button walks through before the screen's own action (charte v2, rule 2)
-  const { isPending: checkPending, isError: checkError } = check
-  const { isPending: morphoCheckPending, isError: morphoCheckError } = morphoCheck
-  const { isPending: v4CheckPending, isError: v4CheckError } = v4Check
+  const { isPending: checkPending, isError: checkError } = morpho ? morphoCheck : v4 ? v4Check : check
   const gate = useMemo<Gate | undefined>(() => {
     if (DEMO) return undefined
-    const statusOf = (executor: Address | undefined, c: { isPending: boolean; isError: boolean }): Gate['executor'] =>
-      !executor ? 'missing' : c.isError ? 'refused' : c.isPending ? 'checking' : 'ok'
-    if (morpho)
-      return {
-        chain: declaredMorpho.chain,
-        label: declaredMorpho.label,
-        executor:
-          executorRouters(declaredMorpho.chain.id).length === 0
-            ? 'none'
-            : statusOf(declaredMorpho.executor, { isPending: morphoCheckPending, isError: morphoCheckError }),
-        deploy: (onStep) => deployMorphoExecutor(declaredMorpho, onStep),
-        onDeployed: (a) => setLocalExecutor(declaredMorpho.id, a),
-      }
-    if (v4)
-      return {
-        chain: declaredV4.chain,
-        label: declaredV4.label,
-        executor:
-          executorRouters(declaredV4.chain.id).length === 0 ? 'none' : statusOf(declaredV4.executor, { isPending: v4CheckPending, isError: v4CheckError }),
-        deploy: (onStep) => deployV4Executor(declaredV4, onStep),
-        onDeployed: (a) => setLocalExecutor(declaredV4.id, a),
-      }
+    const [net, deploy]: [{ id: string; chain: Chain; label: string; executor?: Address }, Gate['deploy']] = morpho
+      ? [declaredMorpho, (onStep) => deployMorphoExecutor(declaredMorpho, onStep)]
+      : v4
+        ? [declaredV4, (onStep) => deployV4Executor(declaredV4, onStep)]
+        : [declared, (onStep) => deployExecutor(declared, onStep)]
     return {
-      chain: declared.chain,
-      label: declared.label,
-      executor: executorRouters(declared.chain.id).length === 0 ? 'none' : statusOf(declared.executor, { isPending: checkPending, isError: checkError }),
-      deploy: (onStep) => deployExecutor(declared, onStep),
-      onDeployed: (a) => setLocalExecutor(declared.id, a),
+      chain: net.chain,
+      label: net.label,
+      executor: executorRouters(net.chain.id).length === 0 ? 'none' : !net.executor ? 'missing' : checkError ? 'refused' : checkPending ? 'checking' : 'ok',
+      deploy,
+      onDeployed: (a) => setLocalExecutor(net.id, a),
     }
-  }, [
-    morpho,
-    v4,
-    declared,
-    declaredMorpho,
-    declaredV4,
-    checkPending,
-    checkError,
-    morphoCheckPending,
-    morphoCheckError,
-    v4CheckPending,
-    v4CheckError,
-    setLocalExecutor,
-  ])
+  }, [morpho, v4, declared, declaredMorpho, declaredV4, checkPending, checkError, setLocalExecutor])
   const [morphoSeed, setMorphoSeed] = useState<MorphoSeed>()
   function openMorpho(m: MorphoMarket, tab?: MorphoTab, leverage?: number, opts?: { amount?: string; target?: number }) {
     const net = MORPHO_NETWORKS.find((n) => n.chain.id === m.chainId)
@@ -498,127 +465,43 @@ export function App() {
   )
 
   // settings shared by both panels, shown in their collapsed "Réglages" block
-  const common = (
+  const settings = (net: Parameters<typeof PlatformLine>[0]['net'], platform: string, shared: boolean, note?: string) => (
     <>
-      <AggregatorPicker chainId={market.chain.id} value={aggregator} onChange={setAggregator} />
-      <PrivateRpc chainId={market.chain.id} />
-      <p className="muted small">
-        Plateforme : {market.fork ? `${market.fork}Lend, fork d’Aave v3` : 'Aave v3'}.{' '}
-        {market.executor && (
-          <>
-            Contrat Auto-loop vérifié :{' '}
-            <a href={`${market.chain.blockExplorers?.default.url}/address/${market.executor}`} target="_blank" rel="noreferrer" title={market.executor}>
-              <span className="addr">{fmtAddress(market.executor)}</span>
-            </a>
-            {market.executorVersion === 1 && ' (v1)'}
-            {isShared(market) ? ' (contrat commun, même adresse pour tous)' : market.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
-          </>
-        )}
-      </p>
+      <AggregatorPicker chainId={net.chain.id} value={aggregator} onChange={setAggregator} />
+      <PrivateRpc chainId={net.chain.id} />
+      <PlatformLine platform={platform} net={net} shared={shared} note={note} />
     </>
   )
+  const common = settings(
+    market,
+    market.fork ? `${market.fork}Lend, fork d’Aave v3` : 'Aave v3',
+    isShared(market),
+    market.executorVersion === 1 ? ' (v1)' : undefined,
+  )
+  const morphoCommon = settings(morphoNet, 'Morpho Blue', isSharedMorpho)
+  const v4Common = settings(v4Net, 'Aave v4', isSharedV4)
 
   const notes = (
     <>
       {DEMO && <p className="muted small">Mode démo : prix et paramètres de marché fictifs, rien n’est lu on-chain.</p>}
-      {QUOTE_MODE === 'mock' && <p className="muted small">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</p>}
-      {!DEMO && declared.executor && check.isPending && <p className="muted small">Vérification du contrat Auto-loop sur {market.label}…</p>}
-      {!DEMO && declared.executor && check.isError && (
-        <Notice tone="bad">
-          <span>
-            Contrat <span className="addr">{fmtAddress(declared.executor)}</span> refusé : {check.error.message}. Aucune transaction ne sera proposée avec lui.
-          </span>
-          {declared.executorSource === 'wallet' && (
-            <button className="btn" onClick={() => setLocalExecutor(market.id)}>
-              Oublier cette adresse
-            </button>
-          )}
-        </Notice>
-      )}
+      <MockQuotesNote />
+      {!DEMO && <ExecutorCheckNote declared={declared} check={check} onForget={() => setLocalExecutor(declared.id)} />}
       {!DEMO && !declared.executor && <DeployPanel market={market} onReady={(a) => setLocalExecutor(market.id, a)} />}
       {!DEMO && market.executorVersion === 1 && market.executorSource === 'wallet' && (
         <DeployPanel market={market} upgrade shared={sharedAave.data ?? undefined} onReady={(a) => setLocalExecutor(market.id, a)} />
       )}
     </>
   )
-
-  const morphoCommon = (
+  const morphoNotes = (
     <>
-      <AggregatorPicker chainId={morphoNet.chain.id} value={aggregator} onChange={setAggregator} />
-      <PrivateRpc chainId={morphoNet.chain.id} />
-      <p className="muted small">
-        Plateforme : Morpho Blue.{' '}
-        {morphoNet.executor && (
-          <>
-            Contrat Auto-loop vérifié :{' '}
-            <a
-              href={`${morphoNet.chain.blockExplorers?.default.url}/address/${morphoNet.executor}`}
-              target="_blank"
-              rel="noreferrer"
-              title={morphoNet.executor}
-            >
-              <span className="addr">{fmtAddress(morphoNet.executor)}</span>
-            </a>
-            {isSharedMorpho ? ' (contrat commun, même adresse pour tous)' : morphoNet.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
-          </>
-        )}
-      </p>
-    </>
-  )
-  const v4Common = (
-    <>
-      <AggregatorPicker chainId={v4Net.chain.id} value={aggregator} onChange={setAggregator} />
-      <PrivateRpc chainId={v4Net.chain.id} />
-      <p className="muted small">
-        Plateforme : Aave v4.{' '}
-        {v4Net.executor && (
-          <>
-            Contrat Auto-loop vérifié :{' '}
-            <a href={`${v4Net.chain.blockExplorers?.default.url}/address/${v4Net.executor}`} target="_blank" rel="noreferrer" title={v4Net.executor}>
-              <span className="addr">{fmtAddress(v4Net.executor)}</span>
-            </a>
-            {isSharedV4 ? ' (contrat commun, même adresse pour tous)' : v4Net.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
-          </>
-        )}
-      </p>
+      <MockQuotesNote />
+      <ExecutorCheckNote declared={declaredMorpho} check={morphoCheck} onForget={() => setLocalExecutor(declaredMorpho.id)} />
     </>
   )
   const v4Notes = (
     <>
-      {QUOTE_MODE === 'mock' && <p className="muted small">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</p>}
-      {declaredV4.executor && v4Check.isPending && <p className="muted small">Vérification du contrat Auto-loop sur {declaredV4.label}…</p>}
-      {declaredV4.executor && v4Check.isError && (
-        <Notice tone="bad">
-          <span>
-            Contrat <span className="addr">{fmtAddress(declaredV4.executor)}</span> refusé : {v4Check.error.message}. Aucune transaction ne sera proposée avec
-            lui.
-          </span>
-          {declaredV4.executorSource === 'wallet' && (
-            <button className="btn" onClick={() => setLocalExecutor(declaredV4.id)}>
-              Oublier cette adresse
-            </button>
-          )}
-        </Notice>
-      )}
-    </>
-  )
-  const morphoNotes = (
-    <>
-      {QUOTE_MODE === 'mock' && <p className="muted small">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</p>}
-      {declaredMorpho.executor && morphoCheck.isPending && <p className="muted small">Vérification du contrat Auto-loop sur {declaredMorpho.label}…</p>}
-      {declaredMorpho.executor && morphoCheck.isError && (
-        <Notice tone="bad">
-          <span>
-            Contrat <span className="addr">{fmtAddress(declaredMorpho.executor)}</span> refusé : {morphoCheck.error.message}. Aucune transaction ne sera
-            proposée avec lui.
-          </span>
-          {declaredMorpho.executorSource === 'wallet' && (
-            <button className="btn" onClick={() => setLocalExecutor(declaredMorpho.id)}>
-              Oublier cette adresse
-            </button>
-          )}
-        </Notice>
-      )}
+      <MockQuotesNote />
+      <ExecutorCheckNote declared={declaredV4} check={v4Check} onForget={() => setLocalExecutor(declaredV4.id)} />
     </>
   )
 

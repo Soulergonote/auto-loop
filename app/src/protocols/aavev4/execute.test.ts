@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { decodeFunctionData, hashTypedData, type Address } from 'viem'
 import { v4ExecutorAbi, v4SpokeAbi, v4TakerAbi } from '../../chain/abi'
 import { getV4Net, V4_NETWORKS, v4NetOfSpoke, v4Serves } from '../../config'
-import { setupCalls, setupMissing, takerPermitTypedData, v4CloseBatch, v4OpenArgs, v4OpenBatch, V4_ALL, type V4ClosePlan, type V4OpenPlan } from './execute'
+import { setupCalls, takerPermitTypedData, v4CloseBatch, v4OpenArgs, v4OpenBatch, V4_ALL, type V4ClosePlan, type V4OpenPlan } from './execute'
 
 const EXECUTOR: Address = '0x00000000000000000000000000000000000000e1'
 const USER: Address = '0x00000000000000000000000000000000000000a1'
@@ -70,7 +70,6 @@ describe('v4 setup', () => {
   it('only sends what is missing', () => {
     expect(names(setupCalls(open()))).toEqual(['setUserPositionManager', 'setUserPositionManager', 'setUsingAsCollateral'])
     expect(setupCalls(open({ setup: { giver: false, taker: false, collateral: true } }))).toHaveLength(1)
-    expect(setupMissing({ giver: false, taker: false, collateral: false })).toBe(false)
   })
 })
 

@@ -7,6 +7,7 @@ import { maxUint256, type Address } from 'viem'
 import { getQuote, quoteSteps, type Quote, type QuoteRequest } from '../../services/quotes/quotes'
 import type { Account } from '../../domain/math'
 import type { EModeCategory, Reserve } from './useMarket'
+import { deadlineFromNow } from '../common'
 
 const BPS = 10_000n
 
@@ -34,8 +35,6 @@ export type SwapDebtPlan = {
   borrowAllowance: bigint
 }
 
-const callDeadline = () => BigInt(Math.floor(Date.now() / 1000) + 20 * 60)
-
 export function swapDebtArgs(p: Pick<SwapDebtPlan, 'from' | 'to' | 'full' | 'newDebtAmount' | 'quote' | 'minRepaid' | 'minHealthFactor'>) {
   if (p.quote.simulated) throw new Error('Devis simulé : impossible à exécuter')
   if (p.quote.sellAmount !== p.newDebtAmount) throw new Error('Devis pour un autre montant que la nouvelle dette')
@@ -46,7 +45,7 @@ export function swapDebtArgs(p: Pick<SwapDebtPlan, 'from' | 'to' | 'full' | 'new
     newDebtAmount: p.newDebtAmount,
     minRepaid: p.full ? maxUint256 : p.minRepaid,
     steps: quoteSteps(p.quote, p.from),
-    guard: { minHealthFactor: p.minHealthFactor, deadline: callDeadline() },
+    guard: { minHealthFactor: p.minHealthFactor, deadline: deadlineFromNow() },
   } as const
 }
 

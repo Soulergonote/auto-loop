@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { campaignsForPair, campaignYields, daysLeft, eligibleForPosition, parseNetOf, rewardsOnEquity, rewardsOverHorizon, toCampaign } from './merkl'
+import { campaignsForPair, campaignYields, daysLeft, eligibleForPosition, parseNetOf, rewardsOverHorizon, toCampaign } from './merkl'
 
 // Shapes copied from api.merkl.xyz/v4/opportunities (2026-11-01), addresses shortened to test ones.
 const A_USDE = '0x00000000000000000000000000000000000000a1'
 const D_USDC = '0x00000000000000000000000000000000000000d2'
 const USDE = '0x00000000000000000000000000000000000000c1'
 const op = (o: Record<string, unknown>) => toCampaign({ action: 'LEND', name: 'x', identifier: '', tokens: [], ...o } as never)
+
+const rewardsOnEquity = (...a: Parameters<typeof campaignYields>) => campaignYields(...a).reduce((s, y) => s + y.apy, 0)
 
 const collateral = { token: { address: USDE, symbol: 'USDe' }, aToken: A_USDE, variableDebtToken: '0x00000000000000000000000000000000000000e1' } as const
 const debt = {

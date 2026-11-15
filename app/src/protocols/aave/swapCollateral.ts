@@ -7,6 +7,7 @@ import { maxUint256, zeroAddress, type Address } from 'viem'
 import { quoteSteps, type Quote } from '../../services/quotes/quotes'
 import type { Account } from '../../domain/math'
 import type { EModeCategory, Reserve } from './useMarket'
+import { deadlineFromNow } from '../common'
 
 const BPS = 10_000n
 
@@ -42,8 +43,6 @@ export function flashAmountFor(minOut: bigint, premiumBps: bigint): bigint {
   return x > 1n ? x - 1n : 0n
 }
 
-const callDeadline = () => BigInt(Math.floor(Date.now() / 1000) + 20 * 60)
-
 export function swapCollateralArgs(
   p: Pick<SwapCollateralPlan, 'from' | 'to' | 'full' | 'fromAmount' | 'quote' | 'toAmount' | 'flashLender' | 'minHealthFactor'>,
 ) {
@@ -58,7 +57,7 @@ export function swapCollateralArgs(
     toAmount: p.toAmount,
     steps: quoteSteps(p.quote, p.to),
     flashLender: p.flashLender,
-    guard: { minHealthFactor: p.minHealthFactor, deadline: callDeadline() },
+    guard: { minHealthFactor: p.minHealthFactor, deadline: deadlineFromNow() },
   } as const
 }
 

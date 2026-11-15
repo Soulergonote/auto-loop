@@ -17,13 +17,6 @@ export function fromBase(value: bigint, side: Side): bigint {
   return (value * 10n ** BigInt(side.decimals)) / side.price
 }
 
-/** Debt to flash-borrow so that equity `initial` (in collateral) ends up levered `leverageBps / 10000` times. */
-export function debtForLeverage(initial: bigint, leverageBps: bigint, collat: Side, debt: Side): bigint {
-  if (leverageBps <= BPS) return 0n
-  const value = (toBase(initial, collat) * (leverageBps - BPS)) / BPS
-  return fromBase(value, debt)
-}
-
 /** A position on the pair, in oracle base units. */
 export type PairPosition = { collateralBase: bigint; debtBase: bigint }
 

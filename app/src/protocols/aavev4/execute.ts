@@ -11,24 +11,20 @@
  * (`permit: false`), and takes a withdraw allowance back after the close.
  */
 import { decodeEventLog, encodeFunctionData, maxUint256, type Address, type Hash, type Hex, type Log } from 'viem'
-import { getPublicClient, sendTransaction, signTypedData, simulateContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
+import { sendTransaction, signTypedData, waitForTransactionReceipt } from '@wagmi/core'
 import { wagmiConfig } from '../../chain/wagmi'
 import { erc20Abi, v4ExecutorAbi, v4SpokeAbi, v4TakerAbi } from '../../chain/abi'
 import type { V4Net } from '../../config'
 import { quoteSteps, type Quote } from '../../services/quotes/quotes'
-import { allowanceCalls, sendBatch, type BatchCall } from '../../chain/batch'
+import { allowanceCalls, type BatchCall } from '../../chain/batch'
+import { receiptLogs, sendBatchTx, sendExecutorCall, userTx as sendUserTx, type ContractCall } from '../../chain/send'
+import { deadlineFromNow, guardOf as guard, hfText as hf, liveQuote as live, sameAddress as same, type Step } from '../common'
 import type { Progress } from '../../chain/tx'
 import type { TokenInfo } from '../../chain/outcome'
 import { fmtAmount } from '../../ui/format'
 
-export const V4_DEADLINE_SECONDS = 20 * 60
-
-type Step = { router: Address; tokenOut: Address; data: Hex; minOut: bigint }
-type Guard = { minHealthFactor: bigint; deadline: bigint }
-
 /** What the once-per-spoke setup still lacks for this user. */
 export type V4Setup = { giver: boolean; taker: boolean; collateral: boolean }
-export const setupMissing = (s: V4Setup) => s.giver || s.taker || s.collateral
 
 /** What every v4 action needs to be sent. */
 export type V4Tx = {
@@ -65,15 +61,6 @@ export type V4ClosePlan = V4Tx & {
   collateralToSell: bigint
   quote?: Quote
   withdrawAllowance: bigint
-}
-
-const guard = (minHealthFactor: bigint): Guard => ({ minHealthFactor, deadline: BigInt(Math.floor(Date.now() / 1000) + V4_DEADLINE_SECONDS) })
-const same = (a: Address, b: Address) => a.toLowerCase() === b.toLowerCase()
-
-function live(q: Quote | undefined, what: string): Quote {
-  if (!q) throw new Error(`Devis ${what} manquant`)
-  if (q.simulated) throw new Error('Devis simulé : impossible à exécuter')
-  return q
 }
 
 export function v4OpenArgs(p: V4OpenPlan) {
@@ -158,7 +145,7 @@ export function takerPermitTypedData(
 }
 
 async function signPermit(tx: V4Tx, kind: 'BorrowPermit' | 'WithdrawPermit', reserveId: number, amount: bigint, nonce: bigint): Promise<V4Permit> {
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + V4_DEADLINE_SECONDS)
+  const deadline = deadlineFromNow()
   const data = takerPermitTypedData(kind, tx.net.chain.id, tx.net.taker, {
     spoke: tx.spoke,
     reserveId: BigInt(reserveId),
@@ -253,14 +240,8 @@ export function v4CloseBatch(p: V4ClosePlan): BatchCall[] {
   ]
 }
 
-/** A transaction of the user's own, simulated, sent and waited for. */
-async function userTx(tx: V4Tx, request: { address: Address; abi: unknown; functionName: string; args: unknown[] }, what: string, onStep: Progress) {
-  onStep(`${what} (transaction)…`)
-  const sim = await simulateContract(wagmiConfig, { ...request, chainId: tx.net.chain.id, account: tx.user } as never)
-  const hash = await writeContract(wagmiConfig, sim.request as never)
-  const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: tx.net.chain.id, hash })
-  if (receipt.status !== 'success') throw new Error(`${what} : la transaction a échoué`)
-}
+const sender = (tx: V4Tx) => ({ chainId: tx.net.chain.id, user: tx.user })
+const userTx = (tx: V4Tx, call: ContractCall, what: string, onStep: Progress) => sendUserTx(sender(tx), call, what, onStep)
 
 /** The setup in one transaction of the user: a `multicall` of the spoke (the caller stays the user), or the single call. */
 async function sendSetup(tx: V4Tx, onStep: Progress) {
@@ -278,30 +259,14 @@ async function sendSetup(tx: V4Tx, onStep: Progress) {
 }
 
 /** Simulates then sends the executor call, waits for it. */
-async function sendAction(tx: V4Tx, a: Action, onStep: Progress, permit?: V4Permit): Promise<Hash> {
-  const chainId = tx.net.chain.id
-  onStep('Simulation…')
-  const { request } = await simulateContract(wagmiConfig, {
-    chainId,
-    account: tx.user,
-    address: tx.executor,
-    abi: v4ExecutorAbi,
-    functionName: (permit ? `${a.name}WithPermit` : a.name) as 'open',
-    args: (permit ? [a.args, permit] : [a.args]) as never,
-  })
-  onStep('Confirmation de la transaction dans le portefeuille…')
-  const hash = await writeContract(wagmiConfig, request as never)
-  onStep('En attente d’inclusion…')
-  const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId, hash })
-  if (receipt.status !== 'success') throw new Error('La transaction a échoué')
-  return hash
-}
+const sendAction = (tx: V4Tx, a: Action, onStep: Progress, permit?: V4Permit): Promise<Hash> =>
+  sendExecutorCall(
+    sender(tx),
+    { address: tx.executor, abi: v4ExecutorAbi, functionName: permit ? `${a.name}WithPermit` : a.name, args: permit ? [a.args, permit] : [a.args] },
+    onStep,
+  )
 
-async function batch(tx: V4Tx, calls: BatchCall[], onStep: Progress): Promise<Hash> {
-  const hash = await sendBatch(tx.net.chain.id, tx.user, calls, onStep, tx.executor)
-  if (!hash) throw new Error('Lot envoyé, transaction introuvable')
-  return hash
-}
+const batch = (tx: V4Tx, calls: BatchCall[], onStep: Progress): Promise<Hash> => sendBatchTx(sender(tx), calls, onStep, tx.executor)
 
 /**
  * Opens. `batch`: one atomic confirmation. Otherwise: the setup (transaction) when missing, the capital approval
@@ -392,15 +357,9 @@ export function decodeV4Outcome(logs: Pick<Log, 'address' | 'data' | 'topics'>[]
 }
 
 export async function readV4Outcome(chainId: number, hash: Hash, executor: Address, user: Address): Promise<V4Outcome | undefined> {
-  try {
-    const receipt = await getPublicClient(wagmiConfig, { chainId })!.getTransactionReceipt({ hash })
-    return decodeV4Outcome(receipt.logs, executor, user)
-  } catch {
-    return undefined
-  }
+  const logs = await receiptLogs(chainId, hash)
+  return logs && decodeV4Outcome(logs, executor, user)
 }
-
-const hf = (x: bigint) => (x >= maxUint256 / 2n ? '∞' : (Number(x / 10n ** 14n) / 10_000).toFixed(2).replace('.', ','))
 
 export function v4OutcomeLines(o: V4Outcome, collateral: TokenInfo, debt: TokenInfo): string[] {
   const c = (x: bigint) => `${fmtAmount(x, collateral.decimals)} ${collateral.symbol}`
