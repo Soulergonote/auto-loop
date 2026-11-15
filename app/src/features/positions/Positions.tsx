@@ -12,6 +12,8 @@ import { daysToMaturity, isExpired, needsRenewal } from '../../protocols/pendle/
 import { Card, Fold, Metric, Notice, useSlow } from '../../ui/primitives'
 import type { Pick } from '../scanner/Scanner'
 import { MorphoPositions, type MorphoTotals } from './MorphoPositions'
+import { V4Positions } from './V4Positions'
+import type { V4Seed } from '../loop/aavev4/V4View'
 import { PositionHistory } from './PositionHistory'
 import { HfProjection } from './HfProjection'
 import { thresholdOf } from '../../domain/positionBar'
@@ -25,6 +27,20 @@ import { Shares } from '../../ui/Shares'
 import { Place } from '../../ui/Logo'
 
 const READABLE = MARKETS.filter((m) => !m.soon)
+/** Totals of the protocols listed under the Aave v3 cards, as one; undefined until each has reported. */
+function mergeTotals(a?: MorphoTotals, b?: MorphoTotals): MorphoTotals | undefined {
+  if (!a || !b) return undefined
+  const lowest = a.lowest && b.lowest ? (a.lowest.hf <= b.lowest.hf ? a.lowest : b.lowest) : (a.lowest ?? b.lowest)
+  return {
+    equity: a.equity + b.equity,
+    weightedApy: a.weightedApy + b.weightedApy,
+    lowest,
+    count: a.count + b.count,
+    pending: a.pending || b.pending,
+    parts: [...a.parts, ...b.parts],
+  }
+}
+
 /** Balances under a cent (leftover interest after a close) are not a position. */
 const DUST = 1_000_000n
 
@@ -35,18 +51,23 @@ export function Positions({
   account,
   onManage,
   onManageMorpho,
+  onManageV4,
   onScan,
   onEmpty,
 }: {
   account?: Address
   onManage: (p: Pick) => void
   onManageMorpho: (m: MorphoMarket, tab?: MorphoTab, leverage?: number, opts?: { amount?: string; target?: number }) => void
+  onManageV4: (p: Omit<V4Seed, 'nonce'>) => void
   onScan: () => void
   /** called once the connected wallet is read on every network and holds nothing (arrival on the app) */
   onEmpty?: () => void
 }) {
   const [typed, setTyped] = useState('')
-  const [morpho, setMorpho] = useState<MorphoTotals>()
+  const [morphoOnly, setMorpho] = useState<MorphoTotals>()
+  const [v4, setV4] = useState<MorphoTotals>()
+  // Morpho Blue and Aave v4 report their totals the same way: counted as one once both are read
+  const morpho = useMemo(() => mergeTotals(morphoOnly, v4), [morphoOnly, v4])
   // each position's « Gain réel », reported by its fold (J5)
   const [gains, setGains] = useState<Record<string, GainState>>({})
   const reportGain = useCallback(
@@ -218,6 +239,8 @@ export function Positions({
           canReinvest={!!account && user === account && claim.some((c) => c.chain.id === x.market.chain.id && c.balances.some((b) => b.claimable > 0))}
         />
       ))}
+
+      {user && <V4Positions key={`v4-${user}`} user={user} onManage={onManageV4} onTotals={setV4} />}
 
       {user && <MorphoPositions key={user} user={user} onManage={onManageMorpho} onTotals={setMorpho} />}
 
