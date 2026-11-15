@@ -28,6 +28,7 @@ import { networkProgress, sourceStatus } from './sources'
 import { AAVE_V4_CHAINS } from '../../config'
 import { v4ReservesQuery } from '../../protocols/aavev4/reserves'
 import { scanV4 } from './v4Scan'
+import { apyLines, type ApyParts } from '../../domain/apyParts'
 
 /** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (positions' Merkl rewards) or « Renouveler » (a PT near maturity). */
 export type Pick = {
@@ -90,6 +91,8 @@ type Line = {
   collateralYield: number
   borrowCost: number
   spread: number
+  /** the net APY contribution by contribution, for « Détail » */
+  parts: ApyParts
   /** tells apart the markets of one group (Morpho: the oracle) */
   note?: string
   pair: string
@@ -132,34 +135,31 @@ const flagTags = (flags: (ScanFlag | MorphoScanFlag)[]) =>
     </Tag>
   ))
 
-/** The net APY of a line, leg by leg: collateral yield × leverage, − borrow cost × (leverage − 1), + bonuses. */
+/** The net APY of a line, one row per contribution (deposit rate apart from the token's own yield), the net APY last. */
 function ApyBreakdown({ line: l }: { line: Line }) {
-  const L = l.leverage
+  const { lines, total } = apyLines(l.parts, { lends: l.protocol === 'aave' })
+  const signed = (x: number) => `${x > 0 ? '+' : ''}${fmtPct(x)}`
   return (
-    <dl className="breakdown">
-      <div>
-        <dt>Rendement du collatéral</dt>
-        <dd>
-          {fmtPct(l.collateralYield)} × {fmtX(L, true)} = {fmtPct(l.collateralYield * L)}
-        </dd>
-      </div>
-      <div>
-        <dt>Coût de l’emprunt</dt>
-        <dd className={l.borrowCost > 0 ? 'bad' : undefined}>
-          {fmtPct(l.borrowCost)} × {fmtX(L - 1, true)} = −{fmtPct(l.borrowCost * (L - 1))}
-        </dd>
-      </div>
-      {l.rewardsApy > 0 && (
-        <div>
-          <dt>Bonus Merkl</dt>
-          <dd className="good">+{fmtPct(l.rewardsApy)}</dd>
+    <div className="contribs" role="table" aria-label="Décomposition de l’APY net">
+      {lines.map((c) => (
+        <div role="row" key={c.label}>
+          <span role="rowheader">{c.label}</span>
+          <span role="cell" className="num muted">
+            {c.rate !== undefined && c.factor !== undefined && `${fmtPct(c.rate)} × ${fmtX(c.factor, true)}`}
+          </span>
+          <span role="cell" className={`num ${c.value < 0 ? 'bad' : c.value > 0 ? 'good' : ''}`}>
+            {signed(c.value)}
+          </span>
         </div>
-      )}
-      <div className="total">
-        <dt>APY net</dt>
-        <dd className={l.apy < 0 ? 'bad' : 'good'}>{fmtPct(l.apy)}</dd>
+      ))}
+      <div role="row" className="total">
+        <span role="rowheader">APY net</span>
+        <span role="cell" />
+        <span role="cell" className={`num ${total < 0 ? 'bad' : 'good'}`}>
+          {fmtPct(total)}
+        </span>
       </div>
-    </dl>
+    </div>
   )
 }
 
@@ -242,6 +242,15 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           collateralYield: r.collateralYield,
           borrowCost: r.borrowCost,
           spread: spreadOf(r),
+          parts: {
+            leverage: r.leverage,
+            deposit: r.collateralYield - (r.collateral.native?.apy ?? 0),
+            native: r.collateral.native?.apy ?? 0,
+            nativeFixed: !!r.collateral.pt,
+            borrow: r.borrowCost - (r.debt.native?.apy ?? 0),
+            debtNative: r.debt.native?.apy ?? 0,
+            rewards: r.rewardsApy,
+          },
           pair: `${r.collateral.token.symbol} / ${r.debt.token.symbol}`,
           place: marketPlace(snapshot.market),
           protocol: 'aave',
@@ -296,6 +305,14 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           collateralYield: r.collateralYield,
           borrowCost: r.grossBorrowApy,
           spread: r.collateralYield - r.grossBorrowApy,
+          parts: {
+            leverage: r.leverage,
+            deposit: 0,
+            native: r.collateralYield,
+            nativeFixed: !!r.pt,
+            borrow: r.grossBorrowApy,
+            rewards: r.market.borrowRewardsApr * (r.leverage - 1),
+          },
           note: `oracle ${r.market.oracleType ? `${r.market.oracleType} ` : ''}${fmtAddress(r.market.params.oracle)}`,
           pair: `${ptShortSymbol(r.market.collateral.symbol)} / ${r.market.loan.symbol}`,
           place: `Morpho · ${n.label}`,
@@ -334,6 +351,14 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
         collateralYield: r.collateralYield,
         borrowCost: r.borrowCost,
         spread: r.collateralYield - r.borrowCost,
+        parts: {
+          leverage: r.leverage,
+          deposit: C.supplyApy,
+          native: C.underlyingApy,
+          borrow: D.borrowApy,
+          riskPremium: D.borrowApy * C.collateralRisk,
+          rewards: r.rewardsApy,
+        },
         note: `spoke ${C.spoke.name}`,
         pair: `${C.token.symbol} / ${D.token.symbol}`,
         place: `Aave v4 · ${C.network}`,
@@ -739,7 +764,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           syrupUSDC…), pris à la source la plus récente qui connaît le token (taux publié on-chain, Pendle, API Morpho, sinon moyenne de l’adaptateur de prix
           Aave) ; le coût de l’emprunt retranche celui d’une dette qui en a un. Sans source, l’étiquette « rendement du token non compté » le signale. Pour un
           PT Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe de son marché Pendle, valable jusqu’à l’échéance. « Détail » montre l’APY
-          net jambe par jambe ; « + N marchés » regroupe les autres marchés Morpho de la même paire sur le même réseau (autre LLTV ou autre oracle).
+          net, une ligne par contribution ; « + N marchés » regroupe les autres marchés Morpho de la même paire sur le même réseau (autre LLTV ou autre oracle).
         </p>
         <p className="muted small">
           Avec un montant : l’APY est celui juste après cette boucle, la dette ajoutée faisant monter le taux d’emprunt (courbe de taux de la réserve Aave,

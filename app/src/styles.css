@@ -414,3 +414,18 @@ tr.dim > td { opacity: 0.55; }
 /* J4: network and protocol logos, 14 px, in the colour of their text */
 .logo { flex: none; vertical-align: -2px; margin-right: 4px; }
 .with-logo { white-space: nowrap; }
+
+/* Scanner « Détail »: one row per contribution, the net APY last */
+.contribs { display: grid; grid-template-columns: repeat(3, max-content); gap: 4px 0; font-size: 13px; font-variant-numeric: tabular-nums; margin: 0 0 8px; text-align: left; font-weight: 400; }
+.contribs span + span { padding-left: 24px; }
+.contribs > div { display: contents; }
+.contribs [role='rowheader'] { color: var(--muted); }
+.contribs .num { text-align: right; white-space: nowrap; }
+.contribs .good { color: var(--good); }
+.contribs .bad { color: var(--bad); }
+.contribs .total > span { border-top: 1px solid var(--border); padding-top: 4px; font-weight: 600; }
+.contribs .total [role='rowheader'] { color: var(--text); }
+@media (max-width: 640px) {
+  .contribs { grid-template-columns: 1fr max-content max-content; }
+  .contribs span + span { padding-left: 12px; }
+}

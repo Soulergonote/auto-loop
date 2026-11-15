@@ -49,7 +49,7 @@ export type ScanRow = {
   nativeApy: number
   rewardsApy: number
   apy: number
-  /** unlevered legs: collateral supply APY + its own yield, borrow APY − the debt token's own yield (apy = collateralYield × L − borrowCost × (L − 1) + rewardsApy) */
+  /** unlevered legs: collateral supply APY + its own yield, borrow APY + the debt token's own yield (apy = collateralYield × L − borrowCost × (L − 1) + rewardsApy) */
   collateralYield: number
   borrowCost: number
   /** with an amount (opts.equityBase): the net APY before the loop's own effect on the rates */
@@ -161,7 +161,8 @@ export function scanMarket(snapshot: Snapshot, campaigns: Campaign[] | undefined
           apy: ratesApy + nativeApy + rewardsApy,
           apyBefore: E > 0 ? ratesBefore + nativeApy + rewardsApy : undefined,
           collateralYield: supplyApy + (C0.native?.apy ?? 0),
-          borrowCost: borrowApy - (D.native?.apy ?? 0),
+          // a yield-bearing debt grows by its own yield: it adds to the cost
+          borrowCost: borrowApy + (D.native?.apy ?? 0),
           campaigns: yields.map((y) => y.campaign),
           rewardsEnd: ends.length ? Math.min(...ends) : undefined,
           capacityBase,
