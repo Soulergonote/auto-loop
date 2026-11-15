@@ -25,7 +25,8 @@ import { Sparkline } from '../../ui/Sparkline'
 import { Logo, Place } from '../../ui/Logo'
 import { Picker } from '../../ui/Picker'
 import { networkProgress, sourceStatus } from './sources'
-import { AAVE_V4_CHAINS } from '../../config'
+import { AAVE_V4_CHAINS, executorRouters, v4NetOfSpoke } from '../../config'
+import type { V4Seed } from '../loop/aavev4/V4View'
 import { v4ReservesQuery } from '../../protocols/aavev4/reserves'
 import { scanV4 } from './v4Scan'
 import { apyLines, type ApyParts } from '../../domain/apyParts'
@@ -118,7 +119,7 @@ type Line = {
   tokens: { chainId: number; collateral: Address; debt: Address }
   /** where its rate history is read (mini-curve); none for a fork of Aave the API does not follow */
   series?: SeriesSource
-  /** opens the pair in the Boucle; none for a read-only line (Aave v4: no contract yet) */
+  /** opens the pair in the Boucle; none for a read-only line (Aave v4 where no aggregator quotes) */
   open?: () => void
 }
 
@@ -167,7 +168,15 @@ function ApyBreakdown({ line: l }: { line: Line }) {
  * Every pair of every Aave market and every listed Morpho Blue market, looped at a target health factor, ranked by
  * yield (rates + token yield + eligible Merkl on Aave).
  */
-export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; onPickMorpho: (m: MorphoMarket, tab?: MorphoTab, leverage?: number) => void }) {
+export function Scanner({
+  onPick,
+  onPickMorpho,
+  onPickV4,
+}: {
+  onPick: (p: Pick) => void
+  onPickMorpho: (m: MorphoMarket, tab?: MorphoTab, leverage?: number) => void
+  onPickV4: (p: Omit<V4Seed, 'nonce'>) => void
+}) {
   // filters: from a shared link, else as left in this browser; kept in the address and the browser
   const [initial] = useState(loadScanner)
   const [scope, setScope] = useState<number | 'all'>(initial.scope)
@@ -214,9 +223,9 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
   const targetHf = Number(hfText)
 
   // the parent's handlers are new at every render: the rows call the latest ones without being rebuilt for them
-  const picks = useRef({ onPick, onPickMorpho })
+  const picks = useRef({ onPick, onPickMorpho, onPickV4 })
   useEffect(() => {
-    picks.current = { onPick, onPickMorpho }
+    picks.current = { onPick, onPickMorpho, onPickV4 }
   })
 
   const rows = useMemo(() => {
@@ -345,6 +354,8 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
     for (const r of v4.data ? scanV4(v4.data, { targetHf }) : []) {
       const C = r.collateral
       const D = r.debt
+      // executable where the spoke has position managers known to the app and an aggregator quotes on the chain
+      const executable = !!v4NetOfSpoke(C.chainId, C.spoke.address) && executorRouters(C.chainId).length > 0
       out.push({
         key: `v4-${C.chainId}-${C.spoke.address}-${C.token.address}-${D.token.address}-${D.borrowApy}`,
         group: `v4-${C.chainId}-${C.token.address}-${D.token.address}`,
@@ -365,7 +376,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
         protocol: 'aave',
         tags: [
           <Tag key="spoke">{C.spoke.name}</Tag>,
-          <Tag key="ro">non exécutable</Tag>,
+          !executable && <Tag key="ro">non exécutable</Tag>,
           r.rewardsApy > 0 && (
             <Tag key="bonus" tone="good">
               bonus
@@ -384,6 +395,18 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
         correlated: r.correlated,
         nativeUnknown: r.nativeUnknown,
         tokens: { chainId: C.chainId, collateral: C.token.address, debt: D.token.address },
+        open: executable
+          ? () =>
+              picks.current.onPickV4({
+                chainId: C.chainId,
+                spoke: C.spoke.address,
+                collateralId: C.reserveId,
+                debtId: D.reserveId,
+                tab: 'open',
+                leverage: r.leverage,
+                amount: amountUsd !== undefined ? tokensFor(amountUsd, C.price) : undefined,
+              })
+          : undefined,
       })
     }
     return out.sort((a, b) => b.apy - a.apy)
@@ -783,9 +806,9 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           bouclable » avant que l’actif emprunté manque de liquidité ou atteigne un plafond.
         </p>
         <p className="muted small">
-          Aave v4 (lecture seule, étiquette « non exécutable ») : chaque paire collatéral / dette d’un même spoke, d’après l’API publique d’Aave, au levier qui
-          donne ce health factor avec le facteur de collatéral du spoke. Le coût de l’emprunt compte la prime de risque que ce collatéral ajoute au taux de base
-          ; les bonus Merkl de l’API sont comptés sans vérifier leurs conditions. Aucun contrat Auto-loop n’y existe : la ligne ne s’ouvre pas.
+          Aave v4 : chaque paire collatéral / dette d’un même spoke, d’après l’API publique d’Aave, au levier qui donne ce health factor avec le facteur de
+          collatéral du spoke. Le coût de l’emprunt compte la prime de risque que ce collatéral ajoute au taux de base ; les bonus Merkl de l’API sont comptés
+          sans vérifier leurs conditions. La ligne s’ouvre dans la Boucle ; l’étiquette « non exécutable » marque un réseau où aucun agrégateur ne cote.
         </p>
         <p className="muted small">
           Morpho Blue : chaque marché listé par Morpho (un collatéral, un actif emprunté, une LLTV), au levier qui donne ce health factor, plafonné au levier
