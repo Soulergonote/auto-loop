@@ -5,8 +5,10 @@ import { parseV4Reserves, type V4Reserve } from '../../protocols/aavev4/reserves
 const reserve = (over: Partial<V4Reserve>): V4Reserve => ({
   chainId: 1,
   network: 'Ethereum',
+  reserveId: 0,
+  hub: 'Core',
   spoke: { name: 'Ethena Ecosystem', address: '0x00000000000000000000000000000000000000a1' },
-  token: { address: '0x00000000000000000000000000000000000000c1', symbol: 'USDe' },
+  token: { address: '0x00000000000000000000000000000000000000c1', symbol: 'USDe', decimals: 18 },
   price: 100_000_000n,
   supplyApy: 0,
   underlyingApy: 0,
@@ -35,14 +37,14 @@ describe('v4LeverageAtHf', () => {
 describe('scanV4', () => {
   const usde = reserve({ canCollateral: true, collateralFactor: 0.93, supplyRewardApy: 0.059, collateralRisk: 0.1, suppliableUsd: 10_000_000, rewardsEnd: 500 })
   const usdt = reserve({
-    token: { address: '0x00000000000000000000000000000000000000d1', symbol: 'USDt' },
+    token: { address: '0x00000000000000000000000000000000000000d1', symbol: 'USDt', decimals: 18 },
     canBorrow: true,
     borrowApy: 0.048,
     borrowableUsd: 340_000,
   })
   const other = reserve({
     spoke: { name: 'Main', address: '0x00000000000000000000000000000000000000a2' },
-    token: { address: '0x00000000000000000000000000000000000000d2', symbol: 'USDC' },
+    token: { address: '0x00000000000000000000000000000000000000d2', symbol: 'USDC', decimals: 18 },
     canBorrow: true,
     borrowApy: 0.01,
     borrowableUsd: 1e9,
@@ -63,7 +65,11 @@ describe('scanV4', () => {
     expect(r.stable && r.correlated).toBe(true)
   })
   it('flags a PT, whose yield the API does not give', () => {
-    const pt = reserve({ token: { address: '0x00000000000000000000000000000000000000c2', symbol: 'PT USDe' }, canCollateral: true, collateralFactor: 0.9 })
+    const pt = reserve({
+      token: { address: '0x00000000000000000000000000000000000000c2', symbol: 'PT USDe', decimals: 18 },
+      canCollateral: true,
+      collateralFactor: 0.9,
+    })
     expect(scanV4([pt, usdt], { targetHf: 1.1 })[0].nativeUnknown).toBe(true)
   })
 })
@@ -71,12 +77,13 @@ describe('scanV4', () => {
 describe('parseV4Reserves', () => {
   const raw = (over: object) => ({
     chain: { chainId: 1, name: 'Ethereum' },
+    onChainId: 7,
     spoke: { name: 'Main', address: '0x00000000000000000000000000000000000000a2' as const },
     status: { frozen: false, paused: false, active: true },
     canBorrow: true,
     canSupply: true,
     canUseAsCollateral: true,
-    asset: { underlying: { address: '0x00000000000000000000000000000000000000d2' as const, info: { symbol: 'USDC' } } },
+    asset: { hub: { name: 'Core' }, underlying: { address: '0x00000000000000000000000000000000000000d2' as const, info: { symbol: 'USDC', decimals: 6 } } },
     summary: {
       supplyApy: { value: '0.04' },
       borrowApy: { value: '0.05' },
@@ -94,7 +101,17 @@ describe('parseV4Reserves', () => {
   })
   it('reads rates, Merkl on both sides and the price', () => {
     const [r] = parseV4Reserves([raw({})])
-    expect(r).toMatchObject({ supplyApy: 0.04, borrowApy: 0.05, underlyingApy: 0, supplyRewardApy: 0.017, borrowRewardApy: 0.018, price: 100_010_000n })
+    expect(r).toMatchObject({
+      reserveId: 7,
+      hub: 'Core',
+      token: { symbol: 'USDC', decimals: 6 },
+      supplyApy: 0.04,
+      borrowApy: 0.05,
+      underlyingApy: 0,
+      supplyRewardApy: 0.017,
+      borrowRewardApy: 0.018,
+      price: 100_010_000n,
+    })
     expect(r.canCollateral).toBe(false)
     expect(r.rewardsEnd).toBe(Date.parse('2026-11-20T00:00:00Z') / 1000)
   })

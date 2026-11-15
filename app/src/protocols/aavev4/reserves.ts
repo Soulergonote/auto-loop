@@ -1,7 +1,7 @@
 /**
- * Aave v4 reserves, read-only (O3): every reserve of every spoke on the chains where v4 is live, in one request to
- * Aave's public GraphQL API (no key, CORS open). Nothing here is signed or executed: the Scanner only shows what a
- * loop would earn there, to tell whether a v4 executor is worth writing.
+ * Aave v4 reserves: every reserve of every spoke on the chains where v4 is live, in one request to Aave's public
+ * GraphQL API (no key, CORS open). Rates, caps and ids for the Scanner and the Boucle screen; the position itself is
+ * read on chain (state.ts).
  */
 import type { Address } from 'viem'
 import { DEMO } from '../../config'
@@ -12,7 +12,10 @@ export type V4Reserve = {
   chainId: number
   network: string
   spoke: { name: string; address: Address }
-  token: { address: Address; symbol: string }
+  /** the reserve's id in its spoke: a spoke can list the same token twice (two hubs), so this is the key */
+  reserveId: number
+  hub: string
+  token: { address: Address; symbol: string; decimals: number }
   /** USD price, 8 decimals like an Aave oracle */
   price: bigint
   /** lending rate of the reserve, and the token's own yield when the API knows it (wstETH, sUSDe…) */
@@ -36,8 +39,8 @@ export type V4Reserve = {
 }
 
 const QUERY = `query($chainIds: [ChainId!]!) { reserves(request: { query: { chainIds: $chainIds }, filter: ALL, orderBy: { assetName: ASC } }) {
-  chain { chainId name } spoke { name address } status { frozen paused active } canBorrow canSupply canUseAsCollateral
-  asset { underlying { address info { symbol } } }
+  onChainId chain { chainId name } spoke { name address } status { frozen paused active } canBorrow canSupply canUseAsCollateral
+  asset { hub { name } underlying { address info { symbol decimals } } }
   summary { supplyApy { value } borrowApy { value } underlyingApy { value }
     borrowable { exchange { value } exchangeRate { value } } suppliable { exchange { value } }
     rewards { __typename ... on MerklSupplyReward { extraApy { value } endDate } ... on MerklBorrowReward { discountApy { value } endDate } } }
@@ -46,13 +49,14 @@ const QUERY = `query($chainIds: [ChainId!]!) { reserves(request: { query: { chai
 
 type Num = { value: string } | null
 type Raw = {
+  onChainId: number | string
   chain: { chainId: number; name: string }
   spoke: { name: string; address: Address }
   status: { frozen: boolean; paused: boolean; active: boolean }
   canBorrow: boolean
   canSupply: boolean
   canUseAsCollateral: boolean
-  asset: { underlying: { address: Address; info: { symbol: string } } }
+  asset: { hub?: { name: string }; underlying: { address: Address; info: { symbol: string; decimals: number } } }
   summary: {
     supplyApy: Num
     borrowApy: Num
@@ -80,7 +84,9 @@ export function parseV4Reserves(raw: Raw[]): V4Reserve[] {
         chainId: r.chain.chainId,
         network: r.chain.name,
         spoke: r.spoke,
-        token: { address: r.asset.underlying.address, symbol: r.asset.underlying.info.symbol },
+        reserveId: Number(r.onChainId),
+        hub: r.asset.hub?.name ?? '',
+        token: { address: r.asset.underlying.address, symbol: r.asset.underlying.info.symbol, decimals: r.asset.underlying.info.decimals },
         price: BigInt(Math.round(num(r.summary.borrowable.exchangeRate) * 1e8)),
         supplyApy: num(r.summary.supplyApy),
         underlyingApy: num(r.summary.underlyingApy),
@@ -97,6 +103,9 @@ export function parseV4Reserves(raw: Raw[]): V4Reserve[] {
       }
     })
 }
+
+/** One reserve among those of the API, by chain, spoke and id. */
+export const v4ReserveKey = (r: Pick<V4Reserve, 'chainId' | 'spoke' | 'reserveId'>) => `${r.chainId}:${r.spoke.address.toLowerCase()}:${r.reserveId}`
 
 export async function fetchV4Reserves(chainIds: number[], signal?: AbortSignal): Promise<V4Reserve[]> {
   const res = await fetch(AAVE_V4_API, {

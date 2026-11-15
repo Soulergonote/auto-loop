@@ -198,3 +198,81 @@ export const rateStrategyAbi = parseAbi([
 
 /** Wrapped native token (WETH, WXPL, WMON…): `deposit` wraps the value sent. */
 export const wrappedNativeAbi = parseAbi(['function deposit() payable'])
+
+const openV4 = `(address spoke, uint256 collateralId, uint256 debtId, address capitalToken, uint256 capitalAmount, ${step}[] capitalSteps, uint256 debtAmount, ${step}[] steps, ${guard} guard)`
+const closeV4 = `(address spoke, uint256 collateralId, uint256 debtId, uint256 repayAmount, uint256 collateralToWithdraw, uint256 collateralToSell, ${step}[] steps, ${guard} guard)`
+const permitV4 = '(uint256 amount, uint256 nonce, uint256 deadline, bytes signature)'
+const closeV4Result = '(uint256 debtRepaid, uint256 collateralWithdrawn, uint256 collateralReturned, uint256 debtAssetReturned, uint256 healthFactor)'
+
+/** LeverageExecutorV4: the same swap steps against Aave v4 spokes, through Aave's Giver and Taker position managers. */
+export const v4ExecutorAbi = parseAbi([
+  'constructor(address morpho, address giver, address taker, address[] routers)',
+  'function MORPHO() view returns (address)',
+  'function GIVER() view returns (address)',
+  'function TAKER() view returns (address)',
+  `function open(${openV4} p) returns (uint256 collateralSupplied, uint256 debtBorrowed, uint256 hf)`,
+  `function openWithPermit(${openV4} p, ${permitV4} permit) returns (uint256 collateralSupplied, uint256 debtBorrowed, uint256 hf)`,
+  `function close(${closeV4} p) returns (${closeV4Result})`,
+  `function closeWithPermit(${closeV4} p, ${permitV4} permit) returns (${closeV4Result})`,
+  'function healthFactor(address spoke, address user) view returns (uint256)',
+  'function isRouterAllowed(address) view returns (bool)',
+  'event PositionOpened(address indexed user, address indexed spoke, uint256 collateralId, uint256 debtId, address capitalToken, uint256 capitalAmount, uint256 collateralSupplied, uint256 debtBorrowed, uint256 healthFactor)',
+  `event PositionClosed(address indexed user, address indexed spoke, uint256 collateralId, uint256 debtId, ${closeV4Result} result)`,
+  'event Swapped(address indexed user, address indexed router, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut)',
+  'error ZeroAddress()',
+  'error SameAsset()',
+  'error ZeroAmount()',
+  'error Expired(uint256 deadline)',
+  'error SpokeNotRegistered(address spoke)',
+  'error CollateralNotEnabled(uint256 reserveId)',
+  'error HealthFactorTooLow(uint256 healthFactor, uint256 minHealthFactor)',
+  'error InvalidRouter(address router)',
+  'error RouterNotAllowed(address router)',
+  'error CallerNotLender()',
+  'error UnexpectedFlashLoan()',
+  'error FlashLoanNotExecuted()',
+  'error InvalidSteps()',
+  'error UnexpectedSteps()',
+  'error WrongFinalToken(address tokenOut, address expected)',
+  'error InsufficientOutput(uint256 received, uint256 minOut)',
+  'error ExcessiveInput(uint256 spent, uint256 maxIn)',
+  'error SellExceedsWithdrawn(uint256 toSell, uint256 withdrawn)',
+  'error InsufficientToRepayFlashLoan(uint256 balance, uint256 owed)',
+  // what the spoke, the hub and the Taker answer when they refuse (aave-v4)
+  'error Unauthorized()',
+  'error HealthFactorBelowThreshold()',
+  'error InsufficientBorrowAllowance(uint256 allowance, uint256 amount)',
+  'error InsufficientWithdrawAllowance(uint256 allowance, uint256 amount)',
+  'error AddCapExceeded(uint256 addCap)',
+  'error DrawCapExceeded(uint256 drawCap)',
+  'error InsufficientLiquidity(uint256 liquidity)',
+  'error ReservePaused()',
+  'error ReserveFrozen()',
+  'error ReserveNotBorrowable()',
+])
+
+/** An Aave v4 Spoke: the reads of a position and the user's own setup calls. */
+export const v4SpokeAbi = parseAbi([
+  'function ORACLE() view returns (address)',
+  'function getUserReserveStatus(uint256 reserveId, address user) view returns (bool, bool)',
+  'function getUserSuppliedAssets(uint256 reserveId, address user) view returns (uint256)',
+  'function getUserTotalDebt(uint256 reserveId, address user) view returns (uint256)',
+  'function getUserAccountData(address user) view returns ((uint256 riskPremium, uint256 avgCollateralFactor, uint256 healthFactor, uint256 totalCollateralValue, uint256 totalDebtValueRay, uint256 activeCollateralCount, uint256 borrowCount))',
+  'function getReserveCount() view returns (uint256)',
+  'function isPositionManager(address user, address positionManager) view returns (bool)',
+  'function setUserPositionManager(address positionManager, bool approve)',
+  'function setUsingAsCollateral(uint256 reserveId, bool usingAsCollateral, address onBehalfOf)',
+  'function multicall(bytes[] data) returns (bytes[])',
+])
+
+export const v4OracleAbi = parseAbi(['function getReservePrice(uint256 reserveId) view returns (uint256)'])
+
+/** Aave v4 TakerPositionManager: the allowances the executor borrows and withdraws within. */
+export const v4TakerAbi = parseAbi([
+  'function isSpokeRegistered(address spoke) view returns (bool)',
+  'function approveBorrow(address spoke, uint256 reserveId, address spender, uint256 amount)',
+  'function approveWithdraw(address spoke, uint256 reserveId, address spender, uint256 amount)',
+  'function borrowAllowance(address spoke, uint256 reserveId, address owner, address spender) view returns (uint256)',
+  'function withdrawAllowance(address spoke, uint256 reserveId, address owner, address spender) view returns (uint256)',
+  'function nonces(address owner, uint192 key) view returns (uint256)',
+])

@@ -15,6 +15,19 @@ const REVERT_MESSAGES: Record<string, string> = {
   Expired: 'Délai dépassé : recoter et signer à nouveau.',
   FlashLenderNotAllowed: 'Ce prêteur de flash loan n’est pas enregistré dans le contrat.',
   WrongFinalToken: 'Le swap ne finit pas dans le bon token.',
+  // Aave v4 (LeverageExecutorV4, spoke, hub, Taker)
+  SpokeNotRegistered: 'Ce spoke n’est pas servi par les gestionnaires de position de ce contrat.',
+  CollateralNotEnabled: 'La réserve n’est pas marquée comme collatéral sur ce spoke : refaire l’activation.',
+  Unauthorized: 'Les gestionnaires de position d’Aave ne sont pas activés sur ce spoke pour cette adresse.',
+  HealthFactorBelowThreshold: 'Aave refuse : le health factor passerait sous 1. Baisser le levier ou retirer moins.',
+  InsufficientBorrowAllowance: 'L’autorisation d’emprunt donnée au contrat ne couvre pas ce montant.',
+  InsufficientWithdrawAllowance: 'L’autorisation de retrait donnée au contrat ne couvre pas ce montant.',
+  AddCapExceeded: 'Le plafond de dépôt de cette réserve est atteint.',
+  DrawCapExceeded: 'Le plafond d’emprunt de cette réserve est atteint.',
+  InsufficientLiquidity: 'Liquidité insuffisante dans le hub pour cet emprunt ou ce retrait.',
+  ReservePaused: 'Cette réserve est en pause.',
+  ReserveFrozen: 'Cette réserve est gelée : plus de nouveau dépôt ni emprunt.',
+  ReserveNotBorrowable: 'Cette réserve ne s’emprunte pas.',
 }
 
 /** Human-readable error, decoding LeverageExecutor custom errors when present. */

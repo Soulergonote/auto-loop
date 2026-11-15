@@ -3,10 +3,10 @@ import { CREATE2_PROXY, create2Address, create2Calldata } from './create2'
 import { deployContract, getPublicClient, sendTransaction, waitForTransactionReceipt } from '@wagmi/core'
 import { useQuery } from '@tanstack/react-query'
 import { wagmiConfig } from './wagmi'
-import { executorAbi, executorAbiV1, morphoExecutorAbi } from './abi'
-import { EXECUTOR_BYTECODE_MORPHO, EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../generated/executorBytecode'
+import { executorAbi, executorAbiV1, morphoExecutorAbi, v4ExecutorAbi } from './abi'
+import { EXECUTOR_BYTECODE_AAVE_V4, EXECUTOR_BYTECODE_MORPHO, EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../generated/executorBytecode'
 import { EXECUTOR_BYTECODE_MORPHO_0, EXECUTOR_BYTECODE_V2_0, EXECUTOR_BYTECODE_V2_1 } from '../generated/executorBytecodeLegacy'
-import { AGGREGATORS, MARKETS, executorLenders, executorRouters, type Market, type MorphoNet } from '../config'
+import { AGGREGATORS, MARKETS, executorLenders, executorRouters, type Market, type MorphoNet, type V4Net } from '../config'
 
 export type ExecutorVersion = 1 | 2
 /**
@@ -243,5 +243,68 @@ export async function deployMorphoExecutor(net: MorphoNet, onStep: (s: string) =
   )
   onStep('Vérification du contrat déployé…')
   await verifyMorphoExecutor(net, address)
+  return address
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// LeverageExecutorV4 (one per set of Aave v4 position managers, for every spoke they serve)
+// ---------------------------------------------------------------------------------------------------------------------
+
+const v4Args = (net: V4Net) => [net.morpho, net.giver, net.taker, executorRouters(net.chain.id).map((r) => r.router)] as const
+export const v4InitCode = (net: V4Net) => encodeDeployData({ abi: v4ExecutorAbi, bytecode: EXECUTOR_BYTECODE_AAVE_V4, args: v4Args(net) })
+
+/**
+ * Same check as `verifyExecutor` for the v4 executor: code equal to the constructor's output for this entry's Morpho,
+ * Giver, Taker and routers (so no owner, no admin function, the right position managers), and every router registered.
+ */
+export async function verifyV4Executor(net: V4Net, address: Address): Promise<true> {
+  const client = getPublicClient(wagmiConfig, { chainId: net.chain.id })
+  if (!client) throw new Error(`pas de connexion à ${net.chain.name}`)
+  const code = await client.getCode({ address })
+  if (!code || code === '0x') throw new Error(`aucun contrat à cette adresse sur ${net.chain.name}`)
+  const expected = await client.call({ data: v4InitCode(net) }).catch(() => undefined)
+  if (!expected?.data || expected.data.toLowerCase() !== code.toLowerCase()) throw new Error('le code de ce contrat n’est pas celui d’Auto-loop pour Aave v4')
+  for (const r of executorRouters(net.chain.id)) {
+    const ok = await client.readContract({ address, abi: v4ExecutorAbi, functionName: 'isRouterAllowed', args: [r.router] })
+    if (!ok && (r.id === 'pendle' || !AGGREGATORS[r.id].optional)) throw new Error(`le routeur ${r.label} n’est pas autorisé dans ce contrat`)
+  }
+  return true
+}
+
+export function useV4ExecutorCheck(net: V4Net) {
+  return useQuery({
+    queryKey: ['v4-executor-check', net.id, net.executor],
+    queryFn: () => verifyV4Executor(net, net.executor!),
+    enabled: !!net.executor,
+    staleTime: Infinity,
+    retry: 1,
+  })
+}
+
+/** the shared v4 executor address of this set of position managers (CREATE2 through the deterministic proxy) */
+export const sharedV4ExecutorAddress = (net: V4Net) => create2Address(v4InitCode(net))
+
+export function useSharedV4Executor(net: V4Net, enabled: boolean) {
+  return useQuery({
+    queryKey: ['shared-v4-executor', net.id],
+    queryFn: async () => {
+      const a = sharedV4ExecutorAddress(net)
+      if (!(await hasCode(net.chain.id, a))) return null
+      await verifyV4Executor(net, a)
+      return a
+    },
+    enabled,
+    staleTime: 5 * 60_000,
+    retry: 1,
+  })
+}
+
+/** Deploys the shared v4 executor from the connected wallet, waits for it, then verifies it on chain. */
+export async function deployV4Executor(net: V4Net, onStep: (s: string) => void): Promise<Address> {
+  const address = await deployShared(net.chain.id, v4InitCode(net), onStep, () =>
+    deployContract(wagmiConfig, { abi: v4ExecutorAbi, bytecode: EXECUTOR_BYTECODE_AAVE_V4, args: v4Args(net), chainId: net.chain.id }),
+  )
+  onStep('Vérification du contrat déployé…')
+  await verifyV4Executor(net, address)
   return address
 }
