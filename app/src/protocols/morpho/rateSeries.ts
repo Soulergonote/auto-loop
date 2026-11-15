@@ -24,3 +24,25 @@ export function useMorphoBorrowSeries(chainId: number, marketId: string, enabled
     retry: 1,
   })
 }
+
+/** Daily borrow rates of several markets over the last 31 days in one request (one alias each): the Scanner's mini-curves (J3). */
+export async function readMorphoBorrowBatch(markets: { chainId: number; marketId: string }[], signal?: AbortSignal, now = Date.now()) {
+  const out = new Map<string, RatePoint[]>()
+  if (!markets.length) return out
+  const end = Math.floor(now / 1000)
+  const start = end - 31 * (DAY_MS / 1000)
+  const fields = markets.map(
+    (m, i) =>
+      `m${i}: marketById(marketId: "${m.marketId}", chainId: ${m.chainId}) { historicalState { borrowApy(options: { startTimestamp: ${start}, endTimestamp: ${end}, interval: DAY }) { x y } } }`,
+  )
+  type Answer = Record<string, { historicalState?: { borrowApy?: { x: number; y: number | null }[] | null } | null } | null>
+  const data = await gql<Answer>(`query { ${fields.join(' ')} }`, {}, signal)
+  markets.forEach((m, i) =>
+    out.set(
+      morphoSeriesKey(m),
+      (data[`m${i}`]?.historicalState?.borrowApy ?? []).flatMap((p) => (p.y !== null && Number.isFinite(p.y) ? [{ t: p.x * 1000, v: p.y }] : [])),
+    ),
+  )
+  return out
+}
+export const morphoSeriesKey = (m: { chainId: number; marketId: string }) => `${m.chainId}:${m.marketId}`.toLowerCase()

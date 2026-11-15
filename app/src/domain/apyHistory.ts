@@ -66,3 +66,23 @@ export function apyRegime(stats: SeriesStats): 'spike' | 'dip' | 'steady' {
   if (gap <= -0.05 && stats.last.v < stats.average / 1.5) return 'dip'
   return 'steady'
 }
+
+/**
+ * Mini-curve of a Scanner line (J3): the loop's net APY over the last `days` days at today's leverage, shifted so its
+ * last point is today's APY (token yield and Merkl kept at today's level, as in the history of the loop). Empty under
+ * two points.
+ */
+export function sparkSeries(
+  borrow: RatePoint[],
+  supply: RatePoint[] | undefined,
+  leverage: number,
+  todayApy: number,
+  days = 30,
+  now = Date.now(),
+): RatePoint[] {
+  if (!Number.isFinite(leverage) || !Number.isFinite(todayApy)) return []
+  const points = lastDays(loopApyHistory(borrow, supply, leverage), days, now)
+  if (points.length < 2) return []
+  const shift = todayApy - points[points.length - 1].v
+  return points.map((p) => ({ t: p.t, v: p.v + shift }))
+}

@@ -34,3 +34,30 @@ export function useAaveRateSeries(chainId: number, pool: Address, collateral: Ad
     retry: 1,
   })
 }
+
+/** One reserve leg of a batch: its daily supply or borrow rate. */
+export type AaveSeriesLeg = { chainId: number; pool: Address; token: Address; side: 'supply' | 'borrow' }
+export const aaveLegKey = (l: AaveSeriesLeg) => `${l.chainId}:${l.pool}:${l.token}:${l.side}`.toLowerCase()
+
+/** Several legs in one request (one GraphQL alias each, duplicates read once): the Scanner's mini-curves (J3). */
+export async function readAaveSeriesBatch(legs: AaveSeriesLeg[], signal?: AbortSignal): Promise<Map<string, RatePoint[]>> {
+  const unique = [...new Map(legs.map((l) => [aaveLegKey(l), l])).values()]
+  const out = new Map<string, RatePoint[]>()
+  if (!unique.length) return out
+  const fields = unique.map(
+    (l, i) =>
+      `l${i}: ${l.side}APYHistory(request: { market: "${l.pool}", underlyingToken: "${l.token}", chainId: ${l.chainId}, window: LAST_MONTH }) { date avgRate { value } }`,
+  )
+  const res = await fetch(AAVE_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: `{ ${fields.join(' ')} }` }),
+    signal,
+  })
+  if (!res.ok) throw new Error(`API Aave : HTTP ${res.status}`)
+  const body = (await res.json()) as { data?: Record<string, Row[] | null> }
+  // a reserve the API does not know answers an error for its alias only: the others are kept
+  unique.forEach((l, i) => out.set(aaveLegKey(l), toPoints(body.data?.[`l${i}`] ?? undefined)))
+  if (!body.data) throw new Error('API Aave : réponse vide')
+  return out
+}

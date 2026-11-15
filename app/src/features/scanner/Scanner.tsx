@@ -20,6 +20,9 @@ import type { MorphoTab } from '../loop/morpho/MorphoView'
 import { priceChartsQuery } from '../../services/priceHistory'
 import { tokenKey } from '../../services/yield/copies'
 import { depegTone, maxDrawdown, ratioSeries } from '../../domain/riskSignals'
+import { useSparklines, type SeriesSource } from './sparklines'
+import { Sparkline } from '../../ui/Sparkline'
+import { networkProgress, sourceStatus } from './sources'
 
 /** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (positions' Merkl rewards) or « Renouveler » (a PT near maturity). */
 export type Pick = {
@@ -105,6 +108,8 @@ type Line = {
   nativeUnknown: boolean
   /** the pair's tokens, for its price history */
   tokens: { chainId: number; collateral: Address; debt: Address }
+  /** where its rate history is read (mini-curve); none for a fork of Aave the API does not follow */
+  series?: SeriesSource
   open: () => void
 }
 
@@ -188,7 +193,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
   })
   // a PT's yield is its Pendle implied APY: read for the PT collaterals of each network's listed markets
   const ptTokens = morphoListData.map((list) => [...new Set((list ?? []).filter((m) => /^PT-/i.test(m.collateral.symbol)).map((m) => m.collateral.address))])
-  const { data: morphoPts } = useQueries({ queries: morphoNets.map((n, i) => ptInfosQuery(n.chain.id, ptTokens[i])), combine: withData })
+  const { queries: ptQueries, data: morphoPts } = useQueries({ queries: morphoNets.map((n, i) => ptInfosQuery(n.chain.id, ptTokens[i])), combine: withData })
   // one Merkl query per chain (Ethereum Core and Prime share it)
   const chainIds = useMemo(() => [...new Set(markets.map((m) => m.chain.id))], [markets])
   const { queries: merkl, data: merklData } = useQueries({ queries: chainIds.map((id) => merklQuery(id)), combine: withData })
@@ -247,6 +252,15 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           correlated: r.correlated,
           nativeUnknown: r.flags.includes('nativeUnknown'),
           tokens: { chainId: snapshot.market.chain.id, collateral: r.collateral.token.address, debt: r.debt.token.address },
+          series: snapshot.market.fork
+            ? undefined
+            : {
+                kind: 'aave',
+                chainId: snapshot.market.chain.id,
+                pool: snapshot.market.pool,
+                collateral: r.collateral.token.address,
+                debt: r.debt.token.address,
+              },
           open: () =>
             picks.current.onPick({
               marketId: r.marketId,
@@ -292,6 +306,8 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           correlated: r.correlated,
           nativeUnknown: r.flags.includes('nativeUnknown'),
           tokens: { chainId: n.chain.id, collateral: r.market.collateral.address, debt: r.market.loan.address },
+          // markets read on-chain only (O2) are not in the API
+          series: n.onchain ? undefined : { kind: 'morpho', chainId: n.chain.id, marketId: r.market.id },
           open: () => picks.current.onPickMorpho(r.market, 'open', r.leverage),
         })
     })
@@ -363,6 +379,22 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
   const retry = () => [...snapshots, ...morphoLists].forEach((q) => (q.isError || q.isPending) && void q.refetch())
   const visible = all ? groups : groups.slice(0, ROWS)
   const [opened, setOpened] = useState<string>()
+  // J3: 30-day mini-curve of each shown line; per-network progress while reading. I7: what was read, what did not answer
+  const sparks = useSparklines(visible.map((g) => g.head))
+  const progress = networkProgress([
+    ...markets.map((m, i) => ({ label: networkName(m.label), pending: snapshots[i].isPending, failed: snapshots[i].isError })),
+    ...morphoNets.map((n, i) => ({ label: n.label, pending: morphoLists[i].isPending, failed: morphoLists[i].isError })),
+  ])
+  const status = sourceStatus({
+    networks: progress,
+    readAt: Math.max(0, ...snapshots.map((q) => q.dataUpdatedAt), ...morphoLists.map((q) => q.dataUpdatedAt)),
+    silent: [
+      ptQueries.some((q) => q.isError) && 'Pendle',
+      charts.isError && 'DefiLlama',
+      sparks.failed.aave && 'historique Aave',
+      sparks.failed.morpho && 'historique Morpho',
+    ],
+  })
   const hf = hfText.replace('.', ',')
 
   return (
@@ -456,6 +488,18 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
       {filter === 'all' && targetHf < 1.2 && (
         <Notice tone="bad">Un health factor de {hf} sur une paire non corrélée se fait liquider au premier mouvement de prix.</Notice>
       )}
+      {loading > 0 && (
+        <p className="scan-progress small" aria-live="polite">
+          {progress.map((n, i) => (
+            <Fragment key={n.label}>
+              {i > 0 && ' · '}
+              <span className={n.state === 'failed' ? 'warn-text' : n.state === 'pending' ? 'muted' : undefined}>
+                {n.label} {n.state === 'failed' ? 'échec' : n.state === 'pending' ? 'en cours' : 'lu'}
+              </span>
+            </Fragment>
+          ))}
+        </p>
+      )}
       {visible.length > 0 || loading > 0 ? (
         <table className="reserves scan cards">
           <thead>
@@ -505,6 +549,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                     </td>
                     <td data-label="APY net" className={`num ${r.apy < 0 ? 'bad' : 'good'}`}>
                       <strong>{fmtPct(r.apy)}</strong>
+                      {sparks.points.has(r.key) && <Sparkline points={sparks.points.get(r.key)!} />}
                       {r.apyBefore !== undefined && Math.abs(r.apyBefore - r.apy) >= 0.001 && (
                         <div className="muted small" title="APY avant l’effet de cet emprunt sur les taux">
                           avant : {fmtPct(r.apyBefore)}
@@ -624,6 +669,7 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
           </button>
         </div>
       )}
+      {status && <p className="muted small scan-status">{status}</p>}
       <Fold title="Méthode" value={`levier à un health factor de ${hf}, meilleur eMode, Merkl si éligible, Morpho listé`}>
         <p className="muted small">
           Le levier de chaque paire donne un health factor de {hf}, plafonné comme le curseur de la boucle, dans la configuration eMode qui rapporte le plus.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DAY_MS, apyRegime, lastDays, loopApyHistory, seriesStats } from './apyHistory'
+import { DAY_MS, apyRegime, lastDays, loopApyHistory, seriesStats, sparkSeries } from './apyHistory'
 
 const d = (n: number, v: number) => ({ t: n * DAY_MS + 3_600_000, v })
 
@@ -43,5 +43,23 @@ describe('lastDays and seriesStats', () => {
     expect(apyRegime(seriesStats(lastDays(pts, 30, now))!)).toBe('spike')
     expect(apyRegime(seriesStats(pts.slice(0, 50))!)).toBe('steady')
     expect(apyRegime(seriesStats([d(1, 0.2), d(2, 0.2), d(3, 0.05)])!)).toBe('dip')
+  })
+})
+
+describe('sparkSeries', () => {
+  const now = 40 * DAY_MS + 3600_000
+  const at = (d: number, v: number) => ({ t: d * DAY_MS, v })
+  it('keeps the last 30 days and ends on today’s APY', () => {
+    const borrow = Array.from({ length: 40 }, (_, d) => at(d + 1, 0.04))
+    const supply = Array.from({ length: 40 }, (_, d) => at(d + 1, d === 39 ? 0.06 : 0.05))
+    const s = sparkSeries(borrow, supply, 3, 0.2, 30, now)
+    expect(s).toHaveLength(30)
+    expect(s[s.length - 1].v).toBeCloseTo(0.2)
+    // 0.05 × 3 − 0.04 × 2 = 0.07 before the last day (0.10), shifted by 0.10
+    expect(s[0].v).toBeCloseTo(0.17)
+  })
+  it('is empty without enough history', () => {
+    expect(sparkSeries([at(40, 0.04)], undefined, 3, 0.1, 30, now)).toEqual([])
+    expect(sparkSeries([at(39, 0.04), at(40, 0.04)], undefined, Infinity, 0.1, 30, now)).toEqual([])
   })
 })
