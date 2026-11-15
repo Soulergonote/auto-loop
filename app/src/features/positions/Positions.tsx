@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { getAddress, isAddress, type Address } from 'viem'
-import { MARKETS, getMarket, marketPlace, type Market } from '../../config'
+import { MARKETS, getMarket, marketPlace, networkName, type Market } from '../../config'
 import { daysLeft, merklQuery, type Campaign } from '../../services/merkl'
 import { snapshotQuery, userPositionQuery, type Snapshot, type UserPosition } from '../../protocols/aave/snapshot'
 import { merklBalances, summarizePosition, userRewardsQuery, type PositionSummary } from './positions'
@@ -19,6 +19,9 @@ import { HfTargetBlock } from './HfTarget'
 import { aaveHistory } from './history'
 import type { MorphoTab } from '../loop/morpho/MorphoView'
 import type { MorphoMarket } from '../../protocols/morpho/markets'
+import { shares, totalGain, type GainState, type PortfolioPart } from '../../domain/portfolio'
+import { GainReport } from './gainReport'
+import { Shares } from '../../ui/Shares'
 
 const READABLE = MARKETS.filter((m) => !m.soon)
 /** Balances under a cent (leftover interest after a close) are not a position. */
@@ -43,6 +46,22 @@ export function Positions({
 }) {
   const [typed, setTyped] = useState('')
   const [morpho, setMorpho] = useState<MorphoTotals>()
+  // each position's « Gain réel », reported by its fold (J5)
+  const [gains, setGains] = useState<Record<string, GainState>>({})
+  const reportGain = useCallback(
+    (key: string, state: GainState | undefined) =>
+      setGains((g) => {
+        if (state === undefined) {
+          if (!(key in g)) return g
+          const { [key]: _, ...rest } = g
+          return rest
+        }
+        const was = g[key]
+        if (was === state || (typeof was === 'object' && typeof state === 'object' && was.usd === state.usd && was.since === state.since)) return g
+        return { ...g, [key]: state }
+      }),
+    [],
+  )
   const user: Address | undefined = isAddress(typed.trim()) ? getAddress(typed.trim()) : account
   const markets: Market[] = useMemo(() => READABLE.map((m) => getMarket(m.id)), [])
   const snapshots = useQueries({ queries: markets.map((m) => ({ ...snapshotQuery(m), enabled: !!user })) })
@@ -89,6 +108,13 @@ export function Positions({
       ? m.lowest
       : lowestAave && { hf: lowestAave.position.healthFactor, correlated: lowestAave.correlated, label: lowestAave.market.label }
   const count = open.length + (m?.count ?? 0)
+  const parts: PortfolioPart[] = [
+    ...open.map((x) => ({ network: networkName(x.market.label), protocol: x.market.fork ?? 'Aave v3', usd: Number(x.summary.equityBase) / 1e8 })),
+    ...(m?.parts ?? []),
+  ]
+  const byNetwork = shares(parts, 'network')
+  const byProtocol = shares(parts, 'protocol')
+  const gain = totalGain(Object.values(gains))
   const claimUsd = claim.reduce((s, c) => s + c.balances.reduce((t, b) => t + b.usd, 0), 0)
   // the total shows as soon as one network is read; unreachable networks are named in a banner
   const read = markets.length - pending
@@ -100,7 +126,7 @@ export function Positions({
   }, [empty, onEmpty])
 
   return (
-    <>
+    <GainReport.Provider value={reportGain}>
       <Card>
         <label className="field">
           <span>Adresse {account && !typed ? '(portefeuille connecté)' : '(lecture seule)'}</span>
@@ -115,7 +141,15 @@ export function Positions({
             <Metric
               label="Valeur nette"
               value={done ? fmtUsd(equity) : undefined}
-              sub={done ? (pending > 0 ? `${read} réseaux Aave lus sur ${markets.length}` : `${count} position${count > 1 ? 's' : ''}`) : undefined}
+              sub={
+                done
+                  ? pending > 0
+                    ? `${read} réseaux Aave lus sur ${markets.length}`
+                    : claimUsd > 0
+                      ? `+ ${fmtDollars(claimUsd)} à réclamer`
+                      : `${count} position${count > 1 ? 's' : ''}`
+                  : undefined
+              }
             />
             <Metric
               label="APY moyen"
@@ -129,7 +163,20 @@ export function Positions({
               tone={lowest && hfTone(lowest.hf, lowest.correlated)}
               sub={lowest?.label}
             />
-            <Metric label="Merkl à réclamer" value={done ? fmtDollars(claimUsd) : undefined} sub={done ? 'réclamable et en cours' : undefined} />
+            <Metric
+              label="Gain réel"
+              value={done && gain.counted > 0 ? `${gain.usd >= 0 ? '+' : ''}${fmtDollars(gain.usd)}` : done && gain.pending === 0 ? null : undefined}
+              tone={gain.counted > 0 ? apyTone(gain.usd) : undefined}
+              sub={
+                done && gain.counted > 0 ? (gain.counted < count ? `${gain.counted} positions sur ${count}` : `depuis le ${fmtDate(gain.since!)}`) : undefined
+              }
+            />
+          </div>
+        )}
+        {user && done && (byNetwork.length > 1 || byProtocol.length > 1) && (
+          <div className="split-grid">
+            {byNetwork.length > 1 && <Shares title="Par réseau" shares={byNetwork} />}
+            {byProtocol.length > 1 && <Shares title="Par protocole" shares={byProtocol} />}
           </div>
         )}
         {done && count === 0 && !morpho?.pending && failed.length < markets.length && (
@@ -224,7 +271,7 @@ export function Positions({
           <p className="muted small">« En cours » devient réclamable à la prochaine mise à jour de Merkl, en général toutes les 8 h.</p>
         </Card>
       )}
-    </>
+    </GainReport.Provider>
   )
 }
 

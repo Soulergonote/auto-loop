@@ -26,6 +26,7 @@ import { PositionHistory } from './PositionHistory'
 import { HfProjection } from './HfProjection'
 import { HfTargetBlock } from './HfTarget'
 import { morphoHistory } from './history'
+import type { PortfolioPart } from '../../domain/portfolio'
 
 const CHAIN_IDS = MORPHO_NETWORKS.map((n) => n.chain.id)
 /** Collateral under a cent's worth is leftover dust, not a position. */
@@ -116,14 +117,16 @@ export function MorphoPositions({
     let equity = 0n
     let weightedApy = 0
     let lowest: MorphoTotals['lowest']
+    const parts: PortfolioPart[] = []
     for (const r of rows) {
       const f = figures(r)
       equity += f.equity
+      parts.push({ network: MORPHO_NETWORKS.find((n) => n.chain.id === r.market.chainId)!.label, protocol: 'Morpho Blue', usd: Number(f.equity) / 1e8 })
       if (f.apy !== undefined) weightedApy += f.apy * Number(f.equity)
       if (r.state.user!.debt > 0n && (!lowest || f.hf < lowest.hf))
         lowest = { hf: f.hf, correlated: f.correlated, label: `Morpho · ${MORPHO_NETWORKS.find((n) => n.chain.id === r.market.chainId)!.label}` }
     }
-    return { equity, weightedApy, lowest, count: rows.length, pending }
+    return { equity, weightedApy, lowest, count: rows.length, pending, parts }
   }, [rows, pending])
   useEffect(() => onTotals(totals), [totals, onTotals])
   // a revert (the market's oracle, typically a PT feed after maturity) is not an RPC outage: retrying does not help
@@ -190,7 +193,14 @@ function figures({ market: m, state, pt }: Row) {
 }
 
 /** Totals of the Morpho positions, added to the Positions screen's own: net value (USD, 1e8), APY x value, lowest health factor. */
-export type MorphoTotals = { equity: bigint; weightedApy: number; lowest?: { hf: number; correlated: boolean; label: string }; count: number; pending: boolean }
+export type MorphoTotals = {
+  equity: bigint
+  weightedApy: number
+  lowest?: { hf: number; correlated: boolean; label: string }
+  count: number
+  pending: boolean
+  parts: PortfolioPart[]
+}
 
 function MorphoPosition({
   onManage,

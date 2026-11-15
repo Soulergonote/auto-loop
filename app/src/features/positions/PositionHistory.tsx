@@ -2,12 +2,14 @@
  * "Gain réel" fold of a position card: what the position earned since its first deposit (flows valued at the price of
  * their day, against its worth now), the realised rate, and one line per transaction with its explorer link.
  */
+import { useContext, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Address, Chain } from 'viem'
 import { historicalPrices, historyLines, positionGain, type Flow } from './history'
 import { fmtDate, fmtDollars, fmtNum, fmtPct } from '../../ui/format'
 import { apyTone } from '../../ui/tone'
 import { Fold, Metric, TxLink } from '../../ui/primitives'
+import { GainReport } from './gainReport'
 
 /** transactions listed, newest first */
 const MAX_LINES = 30
@@ -65,6 +67,17 @@ export function PositionHistory({
         : gain
           ? `${gain.gainUsd >= 0 ? '+' : ''}${fmtDollars(gain.gainUsd)} depuis le ${fmtDate(gain.since)}`
           : 'aucun mouvement trouvé'
+  // the overview at the top of Positions adds every position's gain up
+  const report = useContext(GainReport)
+  const key = JSON.stringify(queryKey)
+  const reading = history.isPending || (!!flows && flows.length > 0 && prices.isPending)
+  const state = failed || partial ? 'none' : reading ? 'pending' : gain ? `${gain.gainUsd}@${gain.since}` : 'none'
+  useEffect(() => {
+    if (!report) return
+    const [usd, since] = state.split('@').map(Number)
+    report(key, state === 'none' || state === 'pending' ? state : { usd, since })
+    return () => report(key, undefined)
+  }, [report, key, state])
   const lines = flows ? historyLines(flows) : []
   const shown = lines.slice(0, MAX_LINES)
 
