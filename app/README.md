@@ -270,20 +270,21 @@ Chaque dossier de `src/` a un rôle unique ; les dépendances vont de haut en ba
 
 | Dossier | Rôle |
 |---|---|
-| `app/` | Coquille : `App.tsx` (vues, adresse de la page, choix du réseau), bouton portefeuille, `wallets.ts` (EIP-6963). |
+| `app/` | Coquille : `App.tsx` (vues, adresse de la page, choix du réseau), état du contrat (`ExecutorInfo.tsx`), bouton portefeuille, `wallets.ts` (EIP-6963). |
 | `features/scanner/` | Écran Scanner : `Scanner.tsx`, lignes Aave (`aaveScan.ts`) et Morpho (`morphoScan.ts`), regroupement, montant (`sizing.ts`), filtres retenus (`prefs.ts`). |
 | `features/loop/aave/` | Écran Boucle Aave : `AaveView.tsx`, `AaveOpenPanel`, `AaveClosePanel`, `SwapCollateralPanel`, `ReinvestPanel`. |
 | `features/loop/aavev4/` | Écran Boucle Aave v4 : `V4View.tsx` (spoke, réserves), `V4OpenPanel`, `V4ClosePanel`, étapes d'activation (`setup.ts`). |
 | `features/loop/morpho/` | Écran Boucle Morpho : `MorphoView.tsx`, `MorphoOpenPanel`, `MorphoClosePanel`, `MorphoRollPanel`. |
-| `features/loop/shared/` | Blocs communs aux deux : risques, campagnes Merkl, prix du PT, déploiement du contrat, choix du token. |
+| `features/loop/shared/` | Blocs communs aux trois : risques, campagnes Merkl, prix du PT, déploiement du contrat, choix du token, blocs Réglages / Route / Étapes (`folds.tsx`), calcul de « Fermer ou réduire » d'une paire isolée (`useCloseSizing.ts`, Morpho et Aave v4). |
 | `features/positions/` | Écran Positions : positions Aave v3, Aave v4 et Morpho, historique et gain réel (`history.ts`). |
 | `protocols/aave/` | Lecture du marché (`useMarket.ts`, `snapshot.ts`, `rateHistory.ts`), plans et envoi des transactions (`execute.ts`, `batch.ts`, `signatures.ts`, `swapCollateral.ts`, `swapDebt.ts`), réinvestissement Merkl (`reinvest*.ts`). |
 | `protocols/aavev4/` | Réserves des spokes (API, `reserves.ts`), paire lue on-chain (`state.ts`), positions (`positions.ts`), appels du contrat v4, permis du Taker et lots (`execute.ts`). |
 | `protocols/morpho/` | Marchés (API vérifiée on-chain, `markets.ts`), appels du contrat Morpho (`execute.ts`). |
+| `protocols/common.ts` | Ce que les appels des trois contrats partagent : étapes de swap, garde (health factor minimum, échéance de 20 minutes), devis réel exigé. |
 | `protocols/pendle/` | PT : marchés, devis RouterStatic, calldata du routeur, échéances (`pt.ts`). |
 | `services/` | Données tierces : devis Velora / KyberSwap / 1inch (`quotes/`), Merkl, rendement propre des tokens (`yield/`). |
 | `domain/` | Calculs purs, sans réseau : levier et health factor (`math.ts`), coûts et seuil de rentabilité (`economics.ts`), courbes de taux (`irm.ts`), slippage, contrôle de sortie, familles d'actifs (`pairs.ts`). |
-| `chain/` | Portefeuille et contrats : ABI, config wagmi, déploiement CREATE2, lots EIP-5792 (`batch.ts`), erreurs lisibles (`tx.ts`), soldes du portefeuille, lecture du résultat d'une transaction. |
+| `chain/` | Portefeuille et contrats : ABI, config wagmi, déploiement CREATE2, lots EIP-5792 (`batch.ts`), envoi d'une transaction (`send.ts`), erreurs lisibles (`tx.ts`), soldes du portefeuille, lecture du résultat d'une transaction. |
 | `ui/` | Composants de la charte (`primitives.tsx`, `Picker`, bouton de résumé `gate.tsx`), formats (`format.ts`) et couleurs (`tone.ts`). |
 | `config/` | Un fichier par sujet : marchés Aave, réseaux Morpho, Pendle, agrégateurs, RPC, contrats, variables d'environnement. |
 | `generated/` | Bytecode des contrats, écrit par `contracts/script/export-bytecode.cjs`. Ne pas modifier à la main. |

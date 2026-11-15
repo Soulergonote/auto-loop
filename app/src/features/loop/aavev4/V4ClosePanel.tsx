@@ -1,10 +1,7 @@
-import { useEffect, useState } from 'react'
-import { collateralInLoan, dropToLiquidation, morphoHf, morphoLeverage, repayForMorphoLeverage } from '../../../protocols/morpho/markets'
+import { dropToLiquidation, morphoHf } from '../../../protocols/morpho/markets'
 import { V4_ALL, encodeV4Action, executeV4Close, readV4Outcome, v4CloseAction, v4OutcomeLines, type V4ClosePlan } from '../../../protocols/aavev4/execute'
-import { useQuote } from '../../../services/quotes/useQuote'
-import { useDebounced } from '../../../ui/useDebounced'
 import { getQuote, quoteLabel } from '../../../services/quotes/quotes'
-import { collateralToSellForRepay, roundSignificant, toBase } from '../../../domain/math'
+import { toBase } from '../../../domain/math'
 import { swapLoss, swapLossProblem } from '../../../domain/economics'
 import { fmtAmount, fmtHf, fmtPct, fmtUsd, fmtX } from '../../../ui/format'
 import { isCorrelated } from '../../../domain/pairs'
@@ -16,6 +13,7 @@ import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
 import { v4SetupOf, v4SetupSteps } from './setup'
 import { QuoteRoute, SettingsFold, SlippageField, StepsFold } from '../shared/folds'
+import { useCloseSizing } from '../shared/useCloseSizing'
 
 export function V4ClosePanel({ ctx, seedTarget }: { ctx: V4Ctx; seedTarget?: number }) {
   const { net, pair, state, sides, account } = ctx
@@ -25,8 +23,6 @@ export function V4ClosePanel({ ctx, seedTarget }: { ctx: V4Ctx; seedTarget?: num
   const user = state.user
   const coll = user?.collateral ?? 0n
   const debt = user?.debt ?? 0n
-  // target leverage of the position; 1 = close everything
-  const [target, setTarget] = useState(seedTarget ? Math.floor(seedTarget * 20) / 20 : 1)
   const usdOf = (price: bigint) => Number(price) / 1e8
   const {
     slippage,
@@ -34,47 +30,15 @@ export function V4ClosePanel({ ctx, seedTarget }: { ctx: V4Ctx; seedTarget?: num
     auto: autoSlip,
   } = useSlippage(pairKind({ symbol: C.symbol, usd: usdOf(state.collateralPrice) }, { symbol: L.symbol, usd: usdOf(state.debtPrice) }))
   const { busy, setBusy, result, setResult, run } = useTxAction()
-
-  const currentLev = coll > 0n ? morphoLeverage(coll, debt, state.price) : 1
-  const sliderMax = Number.isFinite(currentLev) ? Math.max(1, Math.floor(currentLev * 20) / 20 - 0.05) : 1
-  const full = target <= 1 || sliderMax <= 1
-  const debouncedTarget = useDebounced(target)
-  const value = collateralInLoan(coll, state.price)
-
-  // full: the whole debt (capped at what is owed at execution), collateral sold to cover it with a margin.
-  // Partial: the repayment that brings the leverage down, and what covers it.
-  const repay = full ? debt : roundSignificant(repayForMorphoLeverage(value, debt, BigInt(Math.round(debouncedTarget * 10_000))), 5)
-  // sized at the oracle's price, then corrected by the quote (effect below) until its minimum just covers the repayment
-  const [scale, setScale] = useState(1)
-  const sized = repay > 0n ? collateralToSellForRepay(repay, 0n, BigInt(slippage), sides.collateral, sides.loan) : 0n
-  const needed = (sized * BigInt(Math.round(scale * 1e6))) / 1_000_000n
-  const sell = roundSignificant(needed > coll ? coll : needed, 6) + (needed > 0n ? 1n : 0n)
-  const toSell = sell > coll ? coll : sell
-  const withdraw = full ? coll : toSell
-
-  const quoteReq =
-    toSell > 0n
-      ? {
-          aggregator: ctx.aggregator,
-          chainId: net.chain.id,
-          sell: C,
-          buy: L,
-          sellAmount: toSell,
-          taker: net.quoteTaker,
-          slippageBps: BigInt(slippage),
-          oracle: { sell: sides.collateral, buy: sides.loan },
-        }
-      : undefined
-  const quote = useQuote(quoteReq)
-  const q = quote.data
-  // full close: the debt accrues until execution, keep a small margin over it
-  const required = full ? (repay * 10_005n) / 10_000n : repay
-  useEffect(() => {
-    if (!q || q.simulated || q.sellAmount !== toSell || q.minOut === 0n || required === 0n) return
-    const ratio = Number(required) / Number(q.minOut)
-    // short of the repayment, or selling more than 1 % too much: resize (0,1 % of room), at most the whole balance
-    if ((ratio > 1 && toSell < coll) || (ratio < 0.99 && !full)) setScale((x) => Math.min(x * ratio * 1.001, 10))
-  }, [q, toSell, required, full, coll])
+  const { target, setTarget, currentLev, sliderMax, full, repay, toSell, withdraw, quoteReq, quote, q, stale } = useCloseSizing({
+    coll,
+    debt,
+    price: state.price,
+    sides,
+    slippage,
+    seedTarget,
+    swap: { aggregator: ctx.aggregator, chainId: net.chain.id, sell: C, buy: L, taker: net.quoteTaker },
+  })
 
   if (coll === 0n)
     return (
@@ -167,7 +131,6 @@ export function V4ClosePanel({ ctx, seedTarget }: { ctx: V4Ctx; seedTarget?: num
       return undefined
     }
   })()
-  const stale = quote.isFetching || target !== debouncedTarget
   const canSign = !!executor && !!account && (toSell === 0n || (!!q && !q.simulated)) && !!preview && problems.length === 0 && !stale && !busy
   const disabledReason = signBlocker({ executor, account, simulated: q?.simulated, problems })
 
