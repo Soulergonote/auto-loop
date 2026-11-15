@@ -410,3 +410,7 @@ tr.dim > td { opacity: 0.55; }
 @media (max-width: 640px) {
   .spark { display: inline-block; margin: 0 0 0 8px; vertical-align: middle; }
 }
+
+/* J4: network and protocol logos, 14 px, in the colour of their text */
+.logo { flex: none; vertical-align: -2px; margin-right: 4px; }
+.with-logo { white-space: nowrap; }

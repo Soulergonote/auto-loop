@@ -22,6 +22,7 @@ import { tokenKey } from '../../services/yield/copies'
 import { depegTone, maxDrawdown, ratioSeries } from '../../domain/riskSignals'
 import { useSparklines, type SeriesSource } from './sparklines'
 import { Sparkline } from '../../ui/Sparkline'
+import { Logo, Place } from '../../ui/Logo'
 import { networkProgress, sourceStatus } from './sources'
 
 /** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (positions' Merkl rewards) or « Renouveler » (a PT near maturity). */
@@ -113,7 +114,12 @@ type Line = {
   open: () => void
 }
 
-const ptTag = (expiry: number) => <Tag tone={expiry - Date.now() / 1000 < 14 * 86_400 ? 'warn' : undefined}>PT · {fmtMaturity(expiry)}</Tag>
+const ptTag = (expiry: number) => (
+  <Tag tone={expiry - Date.now() / 1000 < 14 * 86_400 ? 'warn' : undefined}>
+    <Logo name="Pendle" />
+    PT · {fmtMaturity(expiry)}
+  </Tag>
+)
 const flagTags = (flags: (ScanFlag | MorphoScanFlag)[]) =>
   flags.map((f) => (
     <Tag key={f} tone={FLAG_TAG[f].tone}>
@@ -522,7 +528,12 @@ export function Scanner({ onPick, onPickMorpho }: { onPick: (p: Pick) => void; o
                   <tr className={`clickable ${r.fits ? '' : 'dim'}`} onClick={r.open}>
                     <td className="lead">
                       {r.pair}
-                      {(chain === 'all' || protocol === 'all') && <span className="muted"> · {r.place}</span>}
+                      {(chain === 'all' || protocol === 'all') && (
+                        <span className="muted">
+                          {' · '}
+                          <Place text={r.place} />
+                        </span>
+                      )}
                       <div className="tags">
                         {r.tags}
                         {depegTag(r)}

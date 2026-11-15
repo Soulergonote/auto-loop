@@ -22,6 +22,7 @@ import type { MorphoMarket } from '../../protocols/morpho/markets'
 import { shares, totalGain, type GainState, type PortfolioPart } from '../../domain/portfolio'
 import { GainReport } from './gainReport'
 import { Shares } from '../../ui/Shares'
+import { Place } from '../../ui/Logo'
 
 const READABLE = MARKETS.filter((m) => !m.soon)
 /** Balances under a cent (leftover interest after a close) are not a position. */
@@ -321,7 +322,9 @@ function MarketPosition({
         <>
           {collateral.reserve.token.symbol}
           {s.debtBase > 0n && ` / ${debt.reserve.token.symbol}`}
-          <span className="card-sub">{marketPlace(market)}</span>
+          <span className="card-sub">
+            <Place text={marketPlace(market)} />
+          </span>
         </>
       }
       aside={

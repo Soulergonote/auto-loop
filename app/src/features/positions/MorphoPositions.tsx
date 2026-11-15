@@ -26,6 +26,7 @@ import { PositionHistory } from './PositionHistory'
 import { HfProjection } from './HfProjection'
 import { HfTargetBlock } from './HfTarget'
 import { morphoHistory } from './history'
+import { Place } from '../../ui/Logo'
 import type { PortfolioPart } from '../../domain/portfolio'
 
 const CHAIN_IDS = MORPHO_NETWORKS.map((n) => n.chain.id)
@@ -227,7 +228,7 @@ function MorphoPosition({
         <>
           {ptShortSymbol(m.collateral.symbol)} / {m.loan.symbol}
           <span className="card-sub">
-            Morpho · {net.label} · LLTV {fmtLltv(m.lltv)}
+            <Place text={`Morpho · ${net.label}`} /> · LLTV {fmtLltv(m.lltv)}
             {!m.listed && (m.source === 'chain' ? ' · marché lu sur la chaîne' : ' · marché non listé')}
           </span>
         </>
