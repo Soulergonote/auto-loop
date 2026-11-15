@@ -1,5 +1,5 @@
 import type { Address, Chain } from 'viem'
-import { arbitrum, avalanche, base, bsc, linea, mainnet, mantle, megaeth, monad, optimism, plasma, polygon, sonic } from 'viem/chains'
+import { arbitrum, avalanche, base, bsc, gnosis, linea, mainnet, mantle, megaeth, monad, optimism, plasma, polygon, sonic } from 'viem/chains'
 import { BUILD_EXECUTORS, FORK_EXECUTOR } from './executors'
 
 /**
@@ -42,6 +42,9 @@ export const MARKETS: MarketDef[] = [
   { id: 'monad', label: 'Monad', chain: monad, pool: '0x69a5F9AD4f96ebf0a0C792dD42a01cC5C0102fef' },
   // MegaETH: Pool from @bgd-labs/aave-address-book 4.44.22 (AaveV3MegaEth), KyberSwap only; added 2026-11-11
   { id: 'megaeth', label: 'MegaETH', chain: megaeth, pool: '0x7e324AbC5De01d112AfC03a584966ff199741C28' },
+  // Gnosis: Pool from @bgd-labs/aave-address-book 4.44.22 (AaveV3Gnosis), Velora only; PUSH0, MCOPY and TSTORE answer
+  // by eth_call, PublicNode RPC with CORS open; added 2026-11-15 (O6)
+  { id: 'gnosis', label: 'Gnosis', chain: gnosis, pool: '0xb50201558B00496A145fE76f7424749556E326D8' },
   // SparkLend (Sky), a fork of Aave v3.1 (POOL_REVISION 4): eModes read the pre-3.2 way, no flash loan premium, no flash
   // loan into debt. Pool from Spark's address registry, checked on chain 2026-11-13. SparkLend Gnosis is left out:
   // every reserve there is frozen (checked 2026-11-13)

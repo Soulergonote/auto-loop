@@ -7,6 +7,7 @@ export const LLAMA_CHAIN: Record<number, string> = {
   10: 'optimism',
   137: 'polygon',
   56: 'bsc',
+  100: 'xdai',
   5000: 'mantle',
   9745: 'plasma',
   59144: 'linea',

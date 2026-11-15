@@ -15,6 +15,7 @@
 # taken from their aTokens (USDe/GHO is the pair used for real there). NET=monad: Monad (anvil --chain-id 143), same with
 # 5000 USDC and 1 WETH. On Monad, run vite with VITE_KYBER_INCLUDED_SOURCES=uniswapv3,uniswap-v4,pancake-v3,curve-stable-ng
 # (its prop AMMs and order books revert on a fork) and use SLIP='1 %' in run.cjs (the fork drifts from live quotes).
+# NET=gnosis: Gnosis (anvil --chain-id 100), same with 5000 sDAI and 5000 USDC.e (sDAI / USDC.e in eMode, Velora only).
 # Optional: SOLC=/path/to/solc-0.8.27 when forge cannot download solc.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -55,6 +56,10 @@ elif [ "${NET:-base}" = plasma ]; then
   POOL=0x925a2A7214Ed92428B5b1B090F80b25700095e12
   DEFAULT_FORK=https://rpc.plasma.to
   FUNDS="0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34:5000000000000000000000 0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb:5000000000"
+elif [ "${NET:-base}" = gnosis ]; then
+  POOL=0xb50201558B00496A145fE76f7424749556E326D8
+  DEFAULT_FORK=https://gnosis-rpc.publicnode.com
+  FUNDS="0xaf204776c7245bF4147c2612BF6e5972Ee483701:5000000000000000000000 0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0:5000000000"
 elif [ "${NET:-base}" = monad ]; then
   POOL=0x69a5F9AD4f96ebf0a0C792dD42a01cC5C0102fef
   DEFAULT_FORK=https://rpc.monad.xyz
@@ -74,7 +79,7 @@ if [ "${NET:-base}" = morpho ]; then
   echo "fork block $(cast block-number --rpc-url $R), user $U: 20 000 USDC (Morpho Blue, executor to deploy from the app)"
   exit 0
 fi
-if [ "${NET:-base}" = plasma ] || [ "${NET:-base}" = monad ]; then
+if [ "${NET:-base}" = plasma ] || [ "${NET:-base}" = monad ] || [ "${NET:-base}" = gnosis ]; then
   for T in $FUNDS; do
     A=$(cast call --rpc-url $R $POOL "getReserveAToken(address)(address)" ${T%%:*})
     cast rpc --rpc-url $R anvil_impersonateAccount $A >/dev/null
