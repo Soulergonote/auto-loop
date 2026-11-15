@@ -15,7 +15,7 @@ export type V4Reserve = {
   /** the reserve's id in its spoke: a spoke can list the same token twice (two hubs), so this is the key */
   reserveId: number
   hub: string
-  token: { address: Address; symbol: string; decimals: number }
+  token: { address: Address; symbol: string; name: string; decimals: number }
   /** USD price, 8 decimals like an Aave oracle */
   price: bigint
   /** lending rate of the reserve, and the token's own yield when the API knows it (wstETH, sUSDe…) */
@@ -86,7 +86,12 @@ export function parseV4Reserves(raw: Raw[]): V4Reserve[] {
         spoke: r.spoke,
         reserveId: Number(r.onChainId),
         hub: r.asset.hub?.name ?? '',
-        token: { address: r.asset.underlying.address, symbol: r.asset.underlying.info.symbol, decimals: r.asset.underlying.info.decimals },
+        token: {
+          address: r.asset.underlying.address,
+          symbol: r.asset.underlying.info.symbol,
+          name: r.asset.underlying.info.symbol,
+          decimals: r.asset.underlying.info.decimals,
+        },
         price: BigInt(Math.round(num(r.summary.borrowable.exchangeRate) * 1e8)),
         supplyApy: num(r.summary.supplyApy),
         underlyingApy: num(r.summary.underlyingApy),

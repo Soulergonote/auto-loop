@@ -8,7 +8,7 @@ const reserve = (over: Partial<V4Reserve>): V4Reserve => ({
   reserveId: 0,
   hub: 'Core',
   spoke: { name: 'Ethena Ecosystem', address: '0x00000000000000000000000000000000000000a1' },
-  token: { address: '0x00000000000000000000000000000000000000c1', symbol: 'USDe', decimals: 18 },
+  token: { address: '0x00000000000000000000000000000000000000c1', symbol: 'USDe', name: 'USDe', decimals: 18 },
   price: 100_000_000n,
   supplyApy: 0,
   underlyingApy: 0,
@@ -37,14 +37,14 @@ describe('v4LeverageAtHf', () => {
 describe('scanV4', () => {
   const usde = reserve({ canCollateral: true, collateralFactor: 0.93, supplyRewardApy: 0.059, collateralRisk: 0.1, suppliableUsd: 10_000_000, rewardsEnd: 500 })
   const usdt = reserve({
-    token: { address: '0x00000000000000000000000000000000000000d1', symbol: 'USDt', decimals: 18 },
+    token: { address: '0x00000000000000000000000000000000000000d1', symbol: 'USDt', name: 'USDt', decimals: 18 },
     canBorrow: true,
     borrowApy: 0.048,
     borrowableUsd: 340_000,
   })
   const other = reserve({
     spoke: { name: 'Main', address: '0x00000000000000000000000000000000000000a2' },
-    token: { address: '0x00000000000000000000000000000000000000d2', symbol: 'USDC', decimals: 18 },
+    token: { address: '0x00000000000000000000000000000000000000d2', symbol: 'USDC', name: 'USDC', decimals: 18 },
     canBorrow: true,
     borrowApy: 0.01,
     borrowableUsd: 1e9,
@@ -66,7 +66,7 @@ describe('scanV4', () => {
   })
   it('flags a PT, whose yield the API does not give', () => {
     const pt = reserve({
-      token: { address: '0x00000000000000000000000000000000000000c2', symbol: 'PT USDe', decimals: 18 },
+      token: { address: '0x00000000000000000000000000000000000000c2', symbol: 'PT USDe', name: 'PT USDe', decimals: 18 },
       canCollateral: true,
       collateralFactor: 0.9,
     })

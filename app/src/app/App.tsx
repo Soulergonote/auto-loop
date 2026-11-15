@@ -8,6 +8,10 @@ import {
   DEMO,
   MARKETS,
   MORPHO_NETWORKS,
+  V4_NETWORKS,
+  getV4Net,
+  v4NetOfSpoke,
+  isV4Id,
   QUOTE_MODE,
   getMarket,
   getMorphoNet,
@@ -35,6 +39,10 @@ import { DeployPanel } from '../features/loop/shared/DeployPanel'
 import {
   deployExecutor,
   deployMorphoExecutor,
+  deployV4Executor,
+  sharedV4ExecutorAddress,
+  useSharedV4Executor,
+  useV4ExecutorCheck,
   sharedExecutorAddress,
   sharedMorphoExecutorAddress,
   useExecutorCheck,
@@ -44,6 +52,7 @@ import {
 } from '../chain/deploy'
 import { GateProvider, type Gate } from '../ui/gate'
 import { MorphoView, type MorphoSeed, type MorphoTab } from '../features/loop/morpho/MorphoView'
+import { V4View, type V4Seed } from '../features/loop/aavev4/V4View'
 import type { MorphoMarket } from '../protocols/morpho/markets'
 import { Scanner, type Pick } from '../features/scanner/Scanner'
 import { Positions } from '../features/positions/Positions'
@@ -63,7 +72,7 @@ function viewFromHash(): View | undefined {
   return (Object.keys(HASHES) as View[]).find((v) => HASHES[v] === h)
 }
 
-type Protocol = 'aave' | 'morpho'
+type Protocol = 'aave' | 'v4' | 'morpho'
 const AAVE_MARKETS = MARKETS.filter((m) => !m.soon)
 /** Networks of each protocol, one entry per chain; an Aave network leads to its first market. */
 const PLACES: Record<Protocol, { id: string; chainId: number; label: string }[]> = {
@@ -71,6 +80,12 @@ const PLACES: Record<Protocol, { id: string; chainId: number; label: string }[]>
     id: m.id,
     chainId: m.chain.id,
     label: networkName(m.label),
+  })),
+  // Aave v4: one entry per chain; Ethereum has two sets of position managers (the « Marché » choice)
+  v4: V4_NETWORKS.filter((n, i) => V4_NETWORKS.findIndex((x) => x.chain.id === n.chain.id) === i).map((n) => ({
+    id: n.id,
+    chainId: n.chain.id,
+    label: networkName(n.label),
   })),
   morpho: MORPHO_NETWORKS.map((n) => ({ id: n.id, chainId: n.chain.id, label: n.label })),
 }
@@ -85,7 +100,8 @@ function hashParts(): string[] {
     return []
   }
 }
-const isNetworkId = (id?: string) => !!id && (MARKETS.some((m) => m.id === id && !m.soon) || MORPHO_NETWORKS.some((n) => n.id === id))
+const isNetworkId = (id?: string) =>
+  !!id && (MARKETS.some((m) => m.id === id && !m.soon) || MORPHO_NETWORKS.some((n) => n.id === id) || V4_NETWORKS.some((n) => n.id === id))
 
 function savedMarketId(): string {
   // a link to a pair opens its network, whatever was chosen last in this browser
@@ -133,6 +149,7 @@ export function App() {
   }, [])
   // Morpho Blue: a network of the selector whose id starts with morpho-; the executor is checked the same way
   const morpho = isMorphoId(marketId)
+  const v4 = isV4Id(marketId)
   const declaredMorpho = useMemo(() => getMorphoNet(marketId, localExecutors), [marketId, localExecutors])
   const morphoCheck = useMorphoExecutorCheck(morpho ? declaredMorpho : { ...declaredMorpho, executor: undefined })
   const morphoNet = useMemo(
@@ -142,19 +159,42 @@ export function App() {
   // the shared executor of the network (CREATE2, same address for everyone): used as soon as someone deployed it
   const sharedAave = useSharedExecutor(
     declared,
-    !DEMO && !morpho && (!declared.executor || check.data?.version === 1 || (check.data !== undefined && (!check.data.pendle || !check.data.debtSwap))),
+    !DEMO && !morpho && !v4 && (!declared.executor || check.data?.version === 1 || (check.data !== undefined && (!check.data.pendle || !check.data.debtSwap))),
   )
   const sharedMorpho = useSharedMorphoExecutor(declaredMorpho, !DEMO && morpho && !declaredMorpho.executor)
+  // Aave v4: a network whose id starts with v4-; one executor per set of Aave position managers, checked the same way
+  const declaredV4 = useMemo(() => getV4Net(marketId, localExecutors), [marketId, localExecutors])
+  const v4Check = useV4ExecutorCheck(v4 ? declaredV4 : { ...declaredV4, executor: undefined })
+  const v4Net = useMemo(() => (v4Check.data ? declaredV4 : { ...declaredV4, executor: undefined }), [declaredV4, v4Check.data])
+  const sharedV4 = useSharedV4Executor(declaredV4, !DEMO && v4 && !declaredV4.executor)
+  const isSharedV4 = !!v4Net.executor && v4Net.executor === sharedV4ExecutorAddress(v4Net)
+  /** neither Aave v3 nor its token list: Morpho and Aave v4 bring their own screen */
+  const other = morpho || v4
   useEffect(() => {
-    if (!morpho && !declared.executor && sharedAave.data) setLocalExecutor(declared.id, sharedAave.data)
+    if (!morpho && !v4 && !declared.executor && sharedAave.data) setLocalExecutor(declared.id, sharedAave.data)
     if (morpho && !declaredMorpho.executor && sharedMorpho.data) setLocalExecutor(declaredMorpho.id, sharedMorpho.data)
-  }, [morpho, declared.id, declared.executor, declaredMorpho.id, declaredMorpho.executor, sharedAave.data, sharedMorpho.data, setLocalExecutor])
+    if (v4 && !declaredV4.executor && sharedV4.data) setLocalExecutor(declaredV4.id, sharedV4.data)
+  }, [
+    morpho,
+    v4,
+    declared.id,
+    declared.executor,
+    declaredMorpho.id,
+    declaredMorpho.executor,
+    declaredV4.id,
+    declaredV4.executor,
+    sharedAave.data,
+    sharedMorpho.data,
+    sharedV4.data,
+    setLocalExecutor,
+  ])
   const isShared = (m: Market) => !!m.executor && m.executor === sharedExecutorAddress(m)
   const isSharedMorpho = !!morphoNet.executor && morphoNet.executor === sharedMorphoExecutorAddress(morphoNet)
 
   // what the summary's single button walks through before the screen's own action (charte v2, rule 2)
   const { isPending: checkPending, isError: checkError } = check
   const { isPending: morphoCheckPending, isError: morphoCheckError } = morphoCheck
+  const { isPending: v4CheckPending, isError: v4CheckError } = v4Check
   const gate = useMemo<Gate | undefined>(() => {
     if (DEMO) return undefined
     const statusOf = (executor: Address | undefined, c: { isPending: boolean; isError: boolean }): Gate['executor'] =>
@@ -170,6 +210,15 @@ export function App() {
         deploy: (onStep) => deployMorphoExecutor(declaredMorpho, onStep),
         onDeployed: (a) => setLocalExecutor(declaredMorpho.id, a),
       }
+    if (v4)
+      return {
+        chain: declaredV4.chain,
+        label: declaredV4.label,
+        executor:
+          executorRouters(declaredV4.chain.id).length === 0 ? 'none' : statusOf(declaredV4.executor, { isPending: v4CheckPending, isError: v4CheckError }),
+        deploy: (onStep) => deployV4Executor(declaredV4, onStep),
+        onDeployed: (a) => setLocalExecutor(declaredV4.id, a),
+      }
     return {
       chain: declared.chain,
       label: declared.label,
@@ -177,13 +226,35 @@ export function App() {
       deploy: (onStep) => deployExecutor(declared, onStep),
       onDeployed: (a) => setLocalExecutor(declared.id, a),
     }
-  }, [morpho, declared, declaredMorpho, checkPending, checkError, morphoCheckPending, morphoCheckError, setLocalExecutor])
+  }, [
+    morpho,
+    v4,
+    declared,
+    declaredMorpho,
+    declaredV4,
+    checkPending,
+    checkError,
+    morphoCheckPending,
+    morphoCheckError,
+    v4CheckPending,
+    v4CheckError,
+    setLocalExecutor,
+  ])
   const [morphoSeed, setMorphoSeed] = useState<MorphoSeed>()
   function openMorpho(m: MorphoMarket, tab?: MorphoTab, leverage?: number, opts?: { amount?: string; target?: number }) {
     const net = MORPHO_NETWORKS.find((n) => n.chain.id === m.chainId)
     if (!net) return
     chooseMarket(net.id)
     setMorphoSeed({ market: m, tab, leverage, amount: opts?.amount, target: opts?.target, nonce: Date.now() })
+    setView('loop')
+    window.scrollTo({ top: 0 })
+  }
+  const [v4Seed, setV4Seed] = useState<V4Seed>()
+  function openV4(p: Omit<V4Seed, 'nonce'>) {
+    const net = v4NetOfSpoke(p.chainId, p.spoke)
+    if (!net) return
+    chooseMarket(net.id)
+    setV4Seed({ ...p, nonce: Date.now() })
     setView('loop')
     window.scrollTo({ top: 0 })
   }
@@ -196,11 +267,11 @@ export function App() {
     return () => clearTimeout(t)
   }, [market.id])
   const tokens = reserveTokens.tokens
-  const balances = useBalances(market.chain.id, morpho ? undefined : tokens, address)
+  const balances = useBalances(market.chain.id, other ? undefined : tokens, address)
   const [preferredAggregator, setAggregator] = useState<AggregatorChoice>('best')
   // keep the choice when it quotes on this chain, otherwise compare all those that do
   const aggregator: AggregatorChoice =
-    preferredAggregator === 'best' || supportsChain(preferredAggregator, (morpho ? morphoNet : market).chain.id) ? preferredAggregator : 'best'
+    preferredAggregator === 'best' || supportsChain(preferredAggregator, (morpho ? morphoNet : v4 ? v4Net : market).chain.id) ? preferredAggregator : 'best'
   // arrival without an address in the link: Positions when a wallet reconnects, the Scanner otherwise
   const [view, setViewState] = useState<View | undefined>(() => (DEMO ? 'loop' : viewFromHash()))
   // set while Positions was chosen for the visitor: an empty list then moves on to the Scanner
@@ -269,8 +340,8 @@ export function App() {
   // nothing picked on this network yet: the last pair opened there in this browser, else the scanner's best
   // correlated pair (positive yield, room to loop) at the scanner's target health factor, else WETH / USDC
   // read at every render: a pair just picked is saved, and must count at once
-  const remembered = morpho ? undefined : savedPair(market.id)
-  const wantBest = !morpho && !DEMO && view === 'loop' && !remembered && picked?.market !== market.id && !linked.current
+  const remembered = other ? undefined : savedPair(market.id)
+  const wantBest = !other && !DEMO && view === 'loop' && !remembered && picked?.market !== market.id && !linked.current
   const bestSnapshot = useQuery({ ...snapshotQuery(market), enabled: wantBest })
   const bestCampaigns = useQuery({ ...merklQuery(market.chain.id), enabled: wantBest })
   const bests = useRef(new Map<string, ScanRow | null>())
@@ -302,16 +373,16 @@ export function App() {
     return top ?? defaultPair(tokens)
   }, [tokens, picked, market.id, remembered, best])
   useEffect(() => {
-    if (pair && picked?.market === market.id && !morpho) savePair(market.id, pair.collateral.symbol, pair.debt.symbol)
-  }, [pair, picked, market.id, morpho])
+    if (pair && picked?.market === market.id && !other) savePair(market.id, pair.collateral.symbol, pair.debt.symbol)
+  }, [pair, picked, market.id, other])
 
   // the address follows the screen: network and pair of the Boucle, so a reload or a shared link reopens them
   useEffect(() => {
-    if (view !== 'loop' || DEMO || (linked.current && !morpho)) return
-    const parts = [HASHES.loop, marketId, ...(!morpho && pair ? [pair.collateral.symbol, pair.debt.symbol] : [])]
+    if (view !== 'loop' || DEMO || (linked.current && !other)) return
+    const parts = [HASHES.loop, marketId, ...(!other && pair ? [pair.collateral.symbol, pair.debt.symbol] : [])]
     const target = `#${parts.map(encodeURIComponent).join('/')}`
     if (window.location.hash !== target) window.history.replaceState(null, '', target)
-  }, [view, marketId, morpho, pair])
+  }, [view, marketId, other, pair])
 
   function chooseMarket(id: string) {
     setMarketId(id)
@@ -352,10 +423,10 @@ export function App() {
     })
 
   // protocol and network are chosen apart; a network with several Aave markets (Ethereum Core / Prime) adds a third choice
-  const protocol: Protocol = morpho ? 'morpho' : 'aave'
-  const placeChain = (morpho ? morphoNet : market).chain.id
+  const protocol: Protocol = morpho ? 'morpho' : v4 ? 'v4' : 'aave'
+  const placeChain = (morpho ? morphoNet : v4 ? v4Net : market).chain.id
   const places = PLACES[protocol]
-  const instances = morpho ? [] : AAVE_MARKETS.filter((m) => m.chain.id === placeChain)
+  const instances = morpho ? [] : v4 ? V4_NETWORKS.filter((n) => n.chain.id === placeChain) : AAVE_MARKETS.filter((m) => m.chain.id === placeChain)
   const choosePlace = (p: Protocol, chainId: number) => chooseMarket((PLACES[p].find((x) => x.chainId === chainId) ?? PLACES[p][0]).id)
   const placeSelect = (
     <div className="place-row">
@@ -366,6 +437,7 @@ export function App() {
           onChange={(p) => choosePlace(p, placeChain)}
           options={[
             { value: 'aave' as Protocol, label: 'Aave v3' },
+            { value: 'v4' as Protocol, label: 'Aave v4' },
             { value: 'morpho' as Protocol, label: 'Morpho Blue' },
           ]}
         />
@@ -379,7 +451,7 @@ export function App() {
       {instances.length > 1 && (
         <div className="field">
           <span>Marché</span>
-          <Segmented value={market.id} onChange={chooseMarket} options={instances.map((m) => ({ value: m.id, label: marketInstance(m.label) ?? m.label }))} />
+          <Segmented value={marketId} onChange={chooseMarket} options={instances.map((m) => ({ value: m.id, label: marketInstance(m.label) ?? m.label }))} />
         </div>
       )}
     </div>
@@ -493,6 +565,43 @@ export function App() {
       </p>
     </>
   )
+  const v4Common = (
+    <>
+      <AggregatorPicker chainId={v4Net.chain.id} value={aggregator} onChange={setAggregator} />
+      <PrivateRpc chainId={v4Net.chain.id} />
+      <p className="muted small">
+        Plateforme : Aave v4.{' '}
+        {v4Net.executor && (
+          <>
+            Contrat Auto-loop vérifié :{' '}
+            <a href={`${v4Net.chain.blockExplorers?.default.url}/address/${v4Net.executor}`} target="_blank" rel="noreferrer" title={v4Net.executor}>
+              <span className="addr">{fmtAddress(v4Net.executor)}</span>
+            </a>
+            {isSharedV4 ? ' (contrat commun, même adresse pour tous)' : v4Net.executorSource === 'wallet' && ' (ajouté depuis ce navigateur)'}.
+          </>
+        )}
+      </p>
+    </>
+  )
+  const v4Notes = (
+    <>
+      {QUOTE_MODE === 'mock' && <p className="muted small">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</p>}
+      {declaredV4.executor && v4Check.isPending && <p className="muted small">Vérification du contrat Auto-loop sur {declaredV4.label}…</p>}
+      {declaredV4.executor && v4Check.isError && (
+        <Notice tone="bad">
+          <span>
+            Contrat <span className="addr">{fmtAddress(declaredV4.executor)}</span> refusé : {v4Check.error.message}. Aucune transaction ne sera proposée avec
+            lui.
+          </span>
+          {declaredV4.executorSource === 'wallet' && (
+            <button className="btn" onClick={() => setLocalExecutor(declaredV4.id)}>
+              Oublier cette adresse
+            </button>
+          )}
+        </Notice>
+      )}
+    </>
+  )
   const morphoNotes = (
     <>
       {QUOTE_MODE === 'mock' && <p className="muted small">Cotations simulées au prix de l’oracle (VITE_QUOTE_MODE=mock).</p>}
@@ -520,7 +629,7 @@ export function App() {
           <img className="app-icon" src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" />
           Auto-loop
         </h1>
-        <WalletButton market={morpho ? morphoNet : market} />
+        <WalletButton market={morpho ? morphoNet : v4 ? v4Net : market} />
       </header>
       <nav className="nav">
         {(
@@ -536,12 +645,13 @@ export function App() {
         ))}
       </nav>
 
-      {view === 'scan' && !DEMO && <Scanner onPick={openPick} onPickMorpho={openMorpho} />}
+      {view === 'scan' && !DEMO && <Scanner onPick={openPick} onPickMorpho={openMorpho} onPickV4={openV4} />}
       {view === 'positions' && !DEMO && (
         <Positions
           account={address}
           onManage={openPick}
           onManageMorpho={openMorpho}
+          onManageV4={openV4}
           onScan={() => setView('scan')}
           onEmpty={
             arrival
@@ -568,8 +678,21 @@ export function App() {
             onExecutor={(a) => setLocalExecutor(morphoNet.id, a)}
           />
         )}
+        {view === 'loop' && v4 && !DEMO && (
+          <V4View
+            key={v4Net.id}
+            net={v4Net}
+            networkSelect={placeSelect}
+            account={address}
+            aggregator={aggregator}
+            common={v4Common}
+            notes={v4Notes}
+            seed={v4Seed && v4NetOfSpoke(v4Seed.chainId, v4Seed.spoke)?.id === v4Net.id ? v4Seed : undefined}
+            onExecutor={(a) => setLocalExecutor(v4Net.id, a)}
+          />
+        )}
         {view === 'loop' &&
-          !morpho &&
+          !other &&
           (pair ? (
             <AaveView
               key={`${market.id}-${seed?.nonce ?? ''}`}
