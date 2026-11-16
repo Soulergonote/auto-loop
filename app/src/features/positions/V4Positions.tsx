@@ -10,7 +10,7 @@ import { isCorrelated } from '../../domain/pairs'
 import { apyTone, hfTone } from '../../ui/tone'
 import { fmtAmount, fmtDollars, fmtHf, fmtLltv, fmtPct, fmtUsd, fmtX } from '../../ui/format'
 import { Card, Fold, Metric, Notice } from '../../ui/primitives'
-import type { V4Seed } from '../loop/aavev4/V4View'
+import type { V4Seed, V4Tab } from '../loop/aavev4/V4View'
 import { HfProjection } from './HfProjection'
 import { HfTargetBlock } from './HfTarget'
 import { Place } from '../../ui/Logo'
@@ -105,7 +105,7 @@ function V4Position({ position: p, summary: s, onManage }: { position: V4SpokePo
   const C = s.collateral
   const D = s.debt
   // the Boucle screen works on one pair: the biggest collateral against the biggest debt
-  const manage = (tab: 'open' | 'close', leverage?: number, opts?: { amount?: string; target?: number }) =>
+  const manage = (tab: V4Tab, leverage?: number, opts?: { amount?: string; target?: number }) =>
     C && D && onManage({ chainId: p.chainId, spoke: p.spoke.address, collateralId: C.reserve.reserveId, debtId: D.reserve.reserveId, tab, leverage, ...opts })
   const single = supplies.length === 1 && debts.length === 1
   const title = single ? `${supplies[0].reserve.token.symbol} / ${debts[0].reserve.token.symbol}` : p.spoke.name
@@ -127,6 +127,11 @@ function V4Position({ position: p, summary: s, onManage }: { position: V4SpokePo
             <button className="btn" onClick={() => manage('close', Number.isFinite(s.leverage) ? s.leverage : undefined)}>
               Gérer
             </button>
+            {levered && (
+              <button className="btn" onClick={() => manage('refinance')} title="Déplacer la position vers un autre spoke, Aave v3 ou Morpho">
+                Refinancer
+              </button>
+            )}
           </div>
         )
       }

@@ -13,8 +13,11 @@ import { Picker } from '../../../ui/Picker'
 import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, useSlow } from '../../../ui/primitives'
 import { V4OpenPanel } from './V4OpenPanel'
 import { V4ClosePanel } from './V4ClosePanel'
+import { V4SwapCollateralPanel } from './V4SwapCollateralPanel'
+import { V4SwapDebtPanel } from './V4SwapDebtPanel'
+import { V4RefinancePanel } from './V4RefinancePanel'
 
-export type V4Tab = 'open' | 'close'
+export type V4Tab = 'open' | 'close' | 'collateral' | 'debt' | 'refinance'
 /** How the Aave v4 screen opens: a pair of a spoke (from the scanner or the positions), its tab and leverage. */
 export type V4Seed = {
   chainId: number
@@ -53,6 +56,10 @@ export type V4Ctx = {
   common: ReactNode
   head: ReactNode
   onDone: () => void
+  /** every reserve these position managers serve, all spokes of the network */
+  reserves: V4Reserve[]
+  /** shows another pair (after a switch, or the place a refinance lands) */
+  onPick: (p: SavedPair, tab?: V4Tab) => void
 }
 
 const usd = (x: number) => fmtDollars(x, true)
@@ -60,7 +67,7 @@ const errText = (e: unknown) => explainError(e).split('\n')[0]
 const same = (a: Address, b: Address) => a.toLowerCase() === b.toLowerCase()
 
 const PAIR_KEY = 'auto-loop.v4-pair.'
-type SavedPair = { spoke: Address; collateralId: number; debtId: number }
+export type SavedPair = { spoke: Address; collateralId: number; debtId: number }
 function savedV4Pair(netId: string): SavedPair | undefined {
   try {
     const raw = localStorage.getItem(PAIR_KEY + netId)
@@ -336,6 +343,9 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
           options={[
             { value: 'open', label: 'Ouvrir / augmenter' },
             { value: 'close', label: 'Fermer / réduire' },
+            { value: 'collateral', label: 'Changer de collatéral' },
+            { value: 'debt', label: 'Changer de dette' },
+            { value: 'refinance', label: 'Refinancer' },
           ]}
         />
       </div>
@@ -377,6 +387,11 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
     common,
     head,
     onDone: () => void state.refetch(),
+    reserves,
+    onPick: (p, t) => {
+      choose(p)
+      if (t) setTab(t)
+    },
   }
   const key = `${pairKey}-${seed?.nonce ?? ''}`
   const mine =
@@ -384,6 +399,9 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
       ? seed
       : undefined
   if (tab === 'close') return <V4ClosePanel key={key} ctx={ctx} seedTarget={mine?.target} />
+  if (tab === 'collateral') return <V4SwapCollateralPanel key={key} ctx={ctx} />
+  if (tab === 'debt') return <V4SwapDebtPanel key={key} ctx={ctx} />
+  if (tab === 'refinance') return <V4RefinancePanel key={key} ctx={ctx} />
   return <V4OpenPanel key={key} ctx={ctx} seedLeverage={mine?.leverage} seedAmount={mine?.amount} />
 }
 

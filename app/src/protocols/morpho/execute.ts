@@ -186,7 +186,11 @@ function split(sig: Hex) {
 }
 
 /** Grant (nonce n) and revoke (nonce n + 1) signatures for the executor, valid 20 minutes. */
-export async function signAuthorizations(tx: MorphoTx, nonce: bigint, onStep: Progress): Promise<AuthSigs> {
+export async function signAuthorizations(
+  tx: Pick<MorphoTx, 'user' | 'executor'> & { net: Pick<MorphoNet, 'chain' | 'morpho'> },
+  nonce: bigint,
+  onStep: Progress,
+): Promise<AuthSigs> {
   const deadline = deadlineFromNow()
   const base = { authorizer: tx.user, authorized: tx.executor, deadline }
   onStep('Signature 1/2 : autoriser le contrat sur Morpho pour cette transaction…')

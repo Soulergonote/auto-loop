@@ -238,7 +238,7 @@ export async function deployMorphoExecutor(net: MorphoNet, onStep: (s: string) =
 // LeverageExecutorV4 (one per set of Aave v4 position managers, for every spoke they serve)
 // ---------------------------------------------------------------------------------------------------------------------
 
-const v4Args = (net: V4Net) => [net.morpho, net.giver, net.taker, executorRouters(net.chain.id).map((r) => r.router)] as const
+const v4Args = (net: V4Net) => [net.morpho, net.giver, net.taker, executorRouters(net.chain.id).map((r) => r.router), morphoAavePools(net.chain.id)] as const
 export const v4InitCode = (net: V4Net) => encodeDeployData({ abi: v4ExecutorAbi, bytecode: EXECUTOR_BYTECODE_AAVE_V4, args: v4Args(net) })
 
 /**

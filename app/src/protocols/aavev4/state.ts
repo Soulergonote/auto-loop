@@ -160,3 +160,49 @@ export async function readV4State(net: V4NetDef, pair: V4Pair, user?: Address, e
 }
 
 export { WAD as V4_WAD }
+
+/** One more reserve of a spoke, for a switch to it: oracle price, the user's position there, its flag and allowances. */
+export type V4ReserveUser = {
+  /** USD, 8 decimals */
+  price: bigint
+  supplied: bigint
+  debt: bigint
+  collateralEnabled: boolean
+  /** what the executor may borrow / withdraw on this reserve for the user through the Taker */
+  borrowAllowance: bigint
+  withdrawAllowance: bigint
+  /** of this reserve's token, what Morpho can flash-lend now */
+  flashLiquidity: bigint
+}
+
+export async function readV4ReserveUser(net: V4NetDef, reserve: V4Reserve, user: Address, executor?: Address): Promise<V4ReserveUser> {
+  const chainId = net.chain.id
+  const spoke = reserve.spoke.address
+  const id = BigInt(reserve.reserveId)
+  const ex = executor ?? user
+  const [oracle] = await readContracts(wagmiConfig, {
+    contracts: [{ chainId, address: spoke, abi: v4SpokeAbi, functionName: 'ORACLE' }],
+    allowFailure: false,
+  })
+  const r = await readContracts(wagmiConfig, {
+    allowFailure: false,
+    contracts: [
+      { chainId, address: oracle, abi: v4OracleAbi, functionName: 'getReservePrice', args: [id] },
+      { chainId, address: spoke, abi: v4SpokeAbi, functionName: 'getUserSuppliedAssets', args: [id, user] },
+      { chainId, address: spoke, abi: v4SpokeAbi, functionName: 'getUserTotalDebt', args: [id, user] },
+      { chainId, address: spoke, abi: v4SpokeAbi, functionName: 'getUserReserveStatus', args: [id, user] },
+      { chainId, address: net.taker, abi: v4TakerAbi, functionName: 'borrowAllowance', args: [spoke, id, user, ex] },
+      { chainId, address: net.taker, abi: v4TakerAbi, functionName: 'withdrawAllowance', args: [spoke, id, user, ex] },
+      { chainId, address: reserve.token.address, abi: erc20Abi, functionName: 'balanceOf', args: [net.morpho] },
+    ],
+  })
+  return {
+    price: r[0],
+    supplied: r[1],
+    debt: r[2],
+    collateralEnabled: r[3][0],
+    borrowAllowance: executor ? r[4] : 0n,
+    withdrawAllowance: executor ? r[5] : 0n,
+    flashLiquidity: r[6],
+  }
+}

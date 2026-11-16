@@ -203,27 +203,43 @@ const openV4 = `(address spoke, uint256 collateralId, uint256 debtId, address ca
 const closeV4 = `(address spoke, uint256 collateralId, uint256 debtId, uint256 repayAmount, uint256 collateralToWithdraw, uint256 collateralToSell, ${step}[] steps, ${guard} guard)`
 const permitV4 = '(uint256 amount, uint256 nonce, uint256 deadline, bytes signature)'
 const closeV4Result = '(uint256 debtRepaid, uint256 collateralWithdrawn, uint256 collateralReturned, uint256 debtAssetReturned, uint256 healthFactor)'
+const swapCollV4 = `(address spoke, uint256 fromId, uint256 toId, uint256 fromAmount, uint256 toAmount, ${step}[] steps, ${guard} guard)`
+const swapCollV4Result = '(uint256 withdrawn, uint256 supplied, uint256 healthFactor)'
+const swapDebtV4 = `(address spoke, uint256 fromId, uint256 toId, uint256 newDebtAmount, uint256 minRepaid, ${step}[] steps, ${guard} guard)`
+const placeV4 = `(uint8 venue, address target, uint256 collateralId, uint256 debtId, ${marketParams} market)`
+const refiV4 = `(${placeV4} from, ${placeV4} to, uint256 debtAmount, uint256 collateralAmount, ${guard} guard)`
+const refiAuthV4 = `(${permitV4} exit, ${permitV4} enter, ${authSigs} morpho)`
 
 /** LeverageExecutorV4: the same swap steps against Aave v4 spokes, through Aave's Giver and Taker position managers. */
 export const v4ExecutorAbi = parseAbi([
-  'constructor(address morpho, address giver, address taker, address[] routers)',
+  'constructor(address morpho, address giver, address taker, address[] routers, address[] aavePools)',
   'function MORPHO() view returns (address)',
   'function GIVER() view returns (address)',
   'function TAKER() view returns (address)',
-  `function open(${openV4} p) returns (uint256 collateralSupplied, uint256 debtBorrowed, uint256 hf)`,
-  `function openWithPermit(${openV4} p, ${permitV4} permit) returns (uint256 collateralSupplied, uint256 debtBorrowed, uint256 hf)`,
-  `function close(${closeV4} p) returns (${closeV4Result})`,
-  `function closeWithPermit(${closeV4} p, ${permitV4} permit) returns (${closeV4Result})`,
-  'function healthFactor(address spoke, address user) view returns (uint256)',
+  'function isAavePool(address) view returns (bool)',
+  `function open(${openV4} p, ${permitV4} permit) returns (uint256 collateralSupplied, uint256 debtBorrowed, uint256 hf)`,
+  `function close(${closeV4} p, ${permitV4} permit) returns (${closeV4Result})`,
+  `function swapCollateral(${swapCollV4} p, ${permitV4} permit) returns (${swapCollV4Result})`,
+  `function swapDebt(${swapDebtV4} p, ${permitV4} permit) returns (${swapDebtResult})`,
+  `function refinance(${refiV4} p, ${refiAuthV4} auth) returns (${refinanceResult})`,
   'function isRouterAllowed(address) view returns (bool)',
   'event PositionOpened(address indexed user, address indexed spoke, uint256 collateralId, uint256 debtId, address capitalToken, uint256 capitalAmount, uint256 collateralSupplied, uint256 debtBorrowed, uint256 healthFactor)',
   `event PositionClosed(address indexed user, address indexed spoke, uint256 collateralId, uint256 debtId, ${closeV4Result} result)`,
+  `event CollateralSwapped(address indexed user, address indexed spoke, uint256 fromId, uint256 toId, ${swapCollV4Result} result)`,
+  `event DebtSwapped(address indexed user, address indexed spoke, uint256 fromId, uint256 toId, ${swapDebtResult} result)`,
+  `event Refinanced(address indexed user, ${placeV4} from, ${placeV4} to, ${refinanceResult} result)`,
   'event Swapped(address indexed user, address indexed router, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut)',
   'error ZeroAddress()',
   'error SameAsset()',
   'error ZeroAmount()',
   'error Expired(uint256 deadline)',
   'error SpokeNotRegistered(address spoke)',
+  'error PoolNotAllowed(address pool)',
+  'error RepaidTooLittle(uint256 repaid, uint256 minRepaid)',
+  'error NoAaveV4Side()',
+  'error SamePlace()',
+  'error TokenMismatch()',
+  'error AuthorizationNotRevoked()',
   'error CollateralNotEnabled(uint256 reserveId)',
   'error HealthFactorTooLow(uint256 healthFactor, uint256 minHealthFactor)',
   'error InvalidRouter(address router)',

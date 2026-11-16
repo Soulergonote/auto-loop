@@ -16,6 +16,8 @@
 // (Core) → Morpho, Morpho → Aave …); the account needs the pair on Aave (to Morpho) or on that market (to Aave).
 // Aave v4: MARKET=v4-ethereum CHAIN_HEX=0x1 after NET=v4 fork.sh; deploy, then EXECUTOR=0x… with open (COLL=WETH DEBT=USDC
 // CAPITAL=USDC AMOUNT=1000), reduce and close on the default spoke (Main); BATCH=1 for the atomic batch instead of the permit.
+// Also swap (TARGET=wstETH), debt (TARGET=USDt) and refi (TARGET=Ce spoke → Aave Ethereum (Core), Morpho … → ce spoke, … ; no SLIP:
+// the refinance has no swap), PART='50 %' for a partial switch.
 // EXECUTOR=0x… preloads an executor as if deployed from this browser (app built without VITE_EXECUTORS).
 // E2E_STRICT=1 (weekly workflow): exit code 1 when the action cannot be signed or does not end with a success.
 // Writes <prefix>-avant.png / <prefix>-apres.png and prints the notices. Needs playwright (NODE_PATH=$(npm root -g)).
@@ -230,8 +232,14 @@ const anvil = async (method, params) =>
     await page.waitForTimeout(8000)
     if (process.env.TARGET) {
       const sel = page.locator('label:has-text("Déplacement") select')
-      const label = (await sel.locator('option').allTextContents()).find((t) => t.startsWith(process.env.TARGET))
-      console.log('target:', label)
+      // the routes come in as each place is read (spokes, Aave pools, Morpho markets)
+      let options = []
+      for (let i = 0; i < 30 && !options.some((t) => t.startsWith(process.env.TARGET)); i++) {
+        if (i) await page.waitForTimeout(2000)
+        options = await sel.locator('option').allTextContents()
+      }
+      const label = options.find((t) => t.startsWith(process.env.TARGET))
+      console.log('target:', label ?? `none of ${options.join(' | ')}`)
       await sel.selectOption({ label })
     }
   }
