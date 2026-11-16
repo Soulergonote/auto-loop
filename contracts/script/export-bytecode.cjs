@@ -1,4 +1,4 @@
-// Compiles LeverageExecutorV2 (and v1, LeverageExecutorMorpho and LeverageExecutorV4) with solc-js using foundry.toml's settings (0.8.27, cancun, optimizer 200 runs,
+// Compiles LeverageExecutorV2 (and v1, LeverageExecutorMorpho and LeverageExecutorV4, the latter via IR) with solc-js using foundry.toml's settings (0.8.27, cancun, optimizer 200 runs,
 // no metadata hash) and writes their creation bytecode to app/src/generated/executorBytecode.ts, which the app deploys from
 // the user's wallet. Needs lib/ (bash script/setup.sh) and the solc 0.8.27 npm package:
 //   NODE_PATH=/path/with/node_modules node script/export-bytecode.cjs
@@ -21,12 +21,13 @@ function findImports(p) {
   return { error: `introuvable : ${p}` }
 }
 
-function compile(file, name) {
+function compile(file, name, viaIR = false) {
   const input = {
     language: 'Solidity',
     sources: { [file]: { content: fs.readFileSync(path.join(root, file), 'utf8') } },
     settings: {
       evmVersion: 'cancun',
+      viaIR,
       optimizer: { enabled: true, runs: 200 },
       metadata: { bytecodeHash: 'none' },
       outputSelection: { [file]: { [name]: ['evm.bytecode.object'] } },
@@ -42,7 +43,8 @@ function compile(file, name) {
 const v1 = compile('src/LeverageExecutor.sol', 'LeverageExecutor')
 const v2 = compile('src/LeverageExecutorV2.sol', 'LeverageExecutorV2')
 const morpho = compile('src/LeverageExecutorMorpho.sol', 'LeverageExecutorMorpho')
-const v4 = compile('src/LeverageExecutorV4.sol', 'LeverageExecutorV4')
+// through the IR pipeline, as foundry.toml compiles it: the legacy one exceeds the 24 KB contract size limit
+const v4 = compile('src/LeverageExecutorV4.sol', 'LeverageExecutorV4', true)
 const target = path.join(root, '../app/src/generated/executorBytecode.ts')
 fs.writeFileSync(
   target,

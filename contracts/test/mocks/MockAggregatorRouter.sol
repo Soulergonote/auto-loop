@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 interface IPriceOracle {
@@ -12,6 +13,8 @@ interface IPriceOracle {
 /// AllowanceHolder do) and pays out at the Aave oracle price minus a configurable slippage.
 /// Must be pre-funded with the output tokens.
 contract MockAggregatorRouter {
+    using SafeERC20 for IERC20;
+
     IPriceOracle public immutable oracle;
     uint256 public slippageBps;
     /// @notice when > 0, only this share of amountIn is actually pulled (router "using less" than quoted)
@@ -40,9 +43,10 @@ contract MockAggregatorRouter {
         returns (uint256 out)
     {
         if (useInputBps != 0) amountIn = amountIn * useInputBps / 10_000;
-        IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn);
+        // safe transfers: tokens like USDT return nothing
+        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
         out = quote(tokenIn, tokenOut, amountIn);
-        IERC20(tokenOut).transfer(recipient, out);
+        IERC20(tokenOut).safeTransfer(recipient, out);
     }
 
     /// @notice Malicious route: tries to pull more than the approved amount.

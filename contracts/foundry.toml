@@ -11,6 +11,10 @@ bytecode_hash = "none"
 # required by the Aave test deployment helpers (they only read .env through sed + cast)
 ffi = true
 
+# LeverageExecutorV4 only: compiled through the IR pipeline, which keeps it under the 24 KB contract size limit
+additional_compiler_profiles = [{ name = "v4", via_ir = true }]
+compilation_restrictions = [{ paths = "src/LeverageExecutorV4.sol", via_ir = true }]
+
 [fuzz]
 runs = 256
 

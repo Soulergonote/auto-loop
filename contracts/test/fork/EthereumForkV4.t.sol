@@ -6,7 +6,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 import {LeverageExecutorV4} from "../../src/LeverageExecutorV4.sol";
-import {IMorphoFlashLender} from "../../src/interfaces/IFlashLenders.sol";
+import {IMorpho, MarketParams, Authorization, MorphoSignature} from "../../src/interfaces/IMorpho.sol";
+import {IAaveV3Pool} from "../../src/interfaces/IAaveV3.sol";
 import {IAaveV4Spoke, IAaveV4Giver, IAaveV4Taker} from "../../src/interfaces/IAaveV4.sol";
 import {MockAggregatorRouter, IPriceOracle} from "../mocks/MockAggregatorRouter.sol";
 import {UsdPrices} from "../morpho/MorphoMocks.sol";
@@ -21,6 +22,18 @@ interface ISpokeUser {
 
 interface ISpokeOracle {
     function getReservePrice(uint256 reserveId) external view returns (uint256);
+}
+
+interface ISigned {
+    function nonces(address owner) external view returns (uint256);
+    function DOMAIN_SEPARATOR() external view returns (bytes32);
+}
+
+interface IMorphoUser {
+    function nonce(address authorizer) external view returns (uint256);
+    function DOMAIN_SEPARATOR() external view returns (bytes32);
+    function position(bytes32 id, address user) external view returns (uint256, uint128, uint128);
+    function isAuthorized(address authorizer, address authorized) external view returns (bool);
 }
 
 interface ITakerUser {
@@ -42,6 +55,8 @@ contract EthereumForkV4Test is Test {
     address constant TAKER = 0x6c044c0D3801499bCAbfAd458B70880bc518e9F7;
     address constant GIVER_SENTORA = 0x4CF59b43ADC4A183d3f7ED5Ec9c0Aca1ce3f25A4;
     address constant TAKER_SENTORA = 0xa25963b913D69574290aFaC4A8202d43060b826f;
+
+    address constant AAVE_CORE = 0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2;
 
     address constant MAIN = 0x94e7A5dCbE816e498b89aB752661904E2F56c485; // 0 WETH (collateral), 7 USDC
     address constant LIDO = 0xe1900480ac69f0B296841Cd01cC37546d92F35Cd; // 0 wstETH, 1 WETH
@@ -77,9 +92,11 @@ contract EthereumForkV4Test is Test {
         router = new MockAggregatorRouter(IPriceOracle(address(prices)));
         address[] memory routers = new address[](1);
         routers[0] = address(router);
-        ex = new LeverageExecutorV4(IMorphoFlashLender(MORPHO), IAaveV4Giver(GIVER), IAaveV4Taker(TAKER), routers);
+        address[] memory pools = new address[](1);
+        pools[0] = AAVE_CORE;
+        ex = new LeverageExecutorV4(IMorpho(MORPHO), IAaveV4Giver(GIVER), IAaveV4Taker(TAKER), routers, pools);
         exSentora = new LeverageExecutorV4(
-            IMorphoFlashLender(MORPHO), IAaveV4Giver(GIVER_SENTORA), IAaveV4Taker(TAKER_SENTORA), routers
+            IMorpho(MORPHO), IAaveV4Giver(GIVER_SENTORA), IAaveV4Taker(TAKER_SENTORA), routers, pools
         );
     }
 
@@ -124,8 +141,10 @@ contract EthereumForkV4Test is Test {
         );
     }
 
+    function _noPermit() internal pure returns (LeverageExecutorV4.Permit memory p) {}
+
     function _guard(uint256 minHf) internal view returns (LeverageExecutorV4.Guard memory) {
-        return LeverageExecutorV4.Guard(minHf, block.timestamp + 20 minutes);
+        return LeverageExecutorV4.Guard(minHf, vm.getBlockTimestamp() + 20 minutes);
     }
 
     function _permit(LeverageExecutorV4 e, bytes32 typehash, address spoke, uint256 id, uint256 amount)
@@ -136,7 +155,7 @@ contract EthereumForkV4Test is Test {
         ITakerUser taker = ITakerUser(address(e.TAKER()));
         p.amount = amount;
         p.nonce = taker.nonces(user, 0);
-        p.deadline = block.timestamp + 20 minutes;
+        p.deadline = vm.getBlockTimestamp() + 20 minutes;
         bytes32 digest = keccak256(
             abi.encodePacked(
                 "\x19\x01",
@@ -205,7 +224,7 @@ contract EthereumForkV4Test is Test {
         LeverageExecutorV4.Permit memory permit = _permit(ex, BORROW_PERMIT_TYPEHASH, MAIN, 7, debtAmount);
         vm.startPrank(user);
         IERC20(weth).approve(address(ex), 10e18);
-        (uint256 supplied, uint256 borrowed, uint256 hf) = ex.openWithPermit(p, permit);
+        (uint256 supplied, uint256 borrowed, uint256 hf) = ex.open(p, permit);
         vm.stopPrank();
 
         assertApproxEqRel(supplied, 30e18, 0.002e18, "3x collateral");
@@ -217,11 +236,11 @@ contract EthereumForkV4Test is Test {
         assertEq(IAaveV4Taker(TAKER).borrowAllowance(MAIN, 7, user, address(ex)), 0, "borrow allowance renounced");
         _noDust(ex, weth, usdc);
 
-        vm.warp(block.timestamp + 30 days);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
         LeverageExecutorV4.CloseParams memory c = _closeAll(ex, MAIN, 0, 7);
         LeverageExecutorV4.Permit memory wPermit = _permit(ex, WITHDRAW_PERMIT_TYPEHASH, MAIN, 0, type(uint256).max);
         vm.prank(user);
-        LeverageExecutorV4.CloseResult memory r = ex.closeWithPermit(c, wPermit);
+        LeverageExecutorV4.CloseResult memory r = ex.close(c, wPermit);
 
         assertEq(IAaveV4Spoke(MAIN).getUserTotalDebt(7, user), 0, "debt cleared");
         assertEq(IAaveV4Spoke(MAIN).getUserSuppliedAssets(0, user), 0, "collateral out");
@@ -247,7 +266,7 @@ contract EthereumForkV4Test is Test {
         vm.startPrank(user);
         IERC20(weth).approve(address(ex), 10e18);
         ITakerUser(TAKER).approveBorrow(MAIN, 7, address(ex), debtAmount);
-        ex.open(p);
+        ex.open(p, _noPermit());
         ITakerUser(TAKER).approveWithdraw(MAIN, 0, address(ex), 10e18);
         vm.stopPrank();
 
@@ -261,7 +280,7 @@ contract EthereumForkV4Test is Test {
         c.steps = _one(ex, weth, usdc, 10e18);
         c.guard = _guard(1.2e18);
         vm.prank(user);
-        LeverageExecutorV4.CloseResult memory r = ex.close(c);
+        LeverageExecutorV4.CloseResult memory r = ex.close(c, _noPermit());
 
         assertEq(r.debtRepaid, debtAmount / 2);
         assertEq(r.collateralWithdrawn, 10e18);
@@ -283,7 +302,7 @@ contract EthereumForkV4Test is Test {
         LeverageExecutorV4.Permit memory permit = _permit(ex, BORROW_PERMIT_TYPEHASH, LIDO, 1, debtAmount);
         vm.startPrank(user);
         IERC20(wsteth).approve(address(ex), 10e18);
-        (uint256 supplied,, uint256 hf) = ex.openWithPermit(p, permit);
+        (uint256 supplied,, uint256 hf) = ex.open(p, permit);
         vm.stopPrank();
         assertApproxEqRel(supplied, 100e18, 0.002e18);
         assertGt(hf, 1.05e18);
@@ -292,7 +311,7 @@ contract EthereumForkV4Test is Test {
         LeverageExecutorV4.CloseParams memory c = _closeAll(ex, LIDO, 0, 1);
         LeverageExecutorV4.Permit memory wPermit = _permit(ex, WITHDRAW_PERMIT_TYPEHASH, LIDO, 0, type(uint256).max);
         vm.prank(user);
-        ex.closeWithPermit(c, wPermit);
+        ex.close(c, wPermit);
         assertEq(IAaveV4Spoke(LIDO).getUserTotalDebt(1, user), 0);
         _noDust(ex, wsteth, weth);
     }
@@ -312,7 +331,7 @@ contract EthereumForkV4Test is Test {
             _permit(exSentora, BORROW_PERMIT_TYPEHASH, BLUECHIP_SENTORA, 0, debtAmount);
         vm.startPrank(user);
         IERC20(kbtc).approve(address(exSentora), capital);
-        (uint256 supplied,,) = exSentora.openWithPermit(p, permit);
+        (uint256 supplied,,) = exSentora.open(p, permit);
         vm.stopPrank();
         assertApproxEqRel(supplied, 2 * capital, 0.002e18);
         _noDust(exSentora, kbtc, rlusd);
@@ -321,7 +340,7 @@ contract EthereumForkV4Test is Test {
         p.guard = _guard(0);
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV4.SpokeNotRegistered.selector, BLUECHIP_SENTORA));
-        ex.open(p);
+        ex.open(p, _noPermit());
     }
 
     /// Without the once-per-spoke setup nothing moves, with a readable error where the contract can give one.
@@ -336,18 +355,18 @@ contract EthereumForkV4Test is Test {
         vm.startPrank(user);
         IERC20(weth).approve(address(ex), 10e18);
         vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV4.CollateralNotEnabled.selector, 0));
-        ex.openWithPermit(p, permit);
+        ex.open(p, permit);
 
         // collateral enabled but no position manager: the spoke refuses the Giver
         ISpokeUser(MAIN).setUsingAsCollateral(0, true, user);
         vm.expectRevert();
-        ex.openWithPermit(p, permit);
+        ex.open(p, permit);
 
         // managers set, no borrow allowance: the Taker refuses
         ISpokeUser(MAIN).setUserPositionManager(GIVER, true);
         ISpokeUser(MAIN).setUserPositionManager(TAKER, true);
         vm.expectRevert();
-        ex.open(p);
+        ex.open(p, _noPermit());
         vm.stopPrank();
     }
 
@@ -363,7 +382,7 @@ contract EthereumForkV4Test is Test {
         IERC20(weth).approve(address(ex), 10e18);
         ITakerUser(TAKER).approveBorrow(MAIN, 7, address(ex), type(uint256).max);
         ITakerUser(TAKER).approveWithdraw(MAIN, 0, address(ex), type(uint256).max);
-        ex.open(p);
+        ex.open(p, _noPermit());
         vm.stopPrank();
 
         address thief = makeAddr("thief");
@@ -376,11 +395,244 @@ contract EthereumForkV4Test is Test {
         c.guard = _guard(0);
         vm.prank(thief);
         vm.expectRevert(); // the Taker looks up the thief's own (empty) allowance and position
-        ex.close(c);
+        ex.close(c, _noPermit());
 
         LeverageExecutorV4.OpenParams memory o = _openParams(ex, MAIN, 0, 7, 0, 1000e6);
         vm.prank(thief);
         vm.expectRevert(abi.encodeWithSelector(LeverageExecutorV4.CollateralNotEnabled.selector, 0));
-        ex.open(o);
+        ex.open(o, _noPermit());
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Collateral swap, debt swap and refinance (2026-11-16)
+    // ---------------------------------------------------------------------------------------------
+
+    /// @dev 10 WETH at 3x against USDC on the Main spoke, with plain allowances
+    function _open3xMain() internal returns (address weth, address usdc) {
+        (weth, usdc) = _market(MAIN, 0, 7);
+        _setup(ex, MAIN, 0);
+        deal(weth, user, 10e18);
+        uint256 debtAmount = router.quote(weth, usdc, 20e18);
+        LeverageExecutorV4.OpenParams memory p = _openParams(ex, MAIN, 0, 7, 10e18, debtAmount);
+        vm.startPrank(user);
+        IERC20(weth).approve(address(ex), 10e18);
+        ITakerUser(TAKER).approveBorrow(MAIN, 7, address(ex), debtAmount);
+        ex.open(p, _noPermit());
+        vm.stopPrank();
+    }
+
+    function _mainPlace() internal pure returns (LeverageExecutorV4.Place memory pl) {
+        pl.venue = LeverageExecutorV4.Venue.AaveV4;
+        pl.target = MAIN;
+        pl.collateralId = 0;
+        pl.debtId = 7;
+    }
+
+    function _refi(LeverageExecutorV4.Place memory from, LeverageExecutorV4.Place memory to)
+        internal
+        view
+        returns (LeverageExecutorV4.RefinanceParams memory p)
+    {
+        p.from = from;
+        p.to = to;
+        p.debtAmount = type(uint256).max;
+        p.collateralAmount = type(uint256).max;
+        p.guard = _guard(1.05e18);
+    }
+
+    function _eip2612(address token, uint256 value, bytes32 typehash)
+        internal
+        view
+        returns (LeverageExecutorV4.Permit memory p)
+    {
+        p.amount = value;
+        // not block.timestamp: through the IR pipeline it may keep its value from before a vm.warp
+        p.deadline = vm.getBlockTimestamp() + 20 minutes;
+        bytes32 structHash = typehash
+            == keccak256("DelegationWithSig(address delegatee,uint256 value,uint256 nonce,uint256 deadline)")
+            ? keccak256(abi.encode(typehash, address(ex), value, ISigned(token).nonces(user), p.deadline))
+            : keccak256(abi.encode(typehash, user, address(ex), value, ISigned(token).nonces(user), p.deadline));
+        (uint8 v, bytes32 r, bytes32 s) =
+            vm.sign(userKey, keccak256(abi.encodePacked("\x19\x01", ISigned(token).DOMAIN_SEPARATOR(), structHash)));
+        p.signature = abi.encodePacked(r, s, v);
+    }
+
+    function _morphoSig(bool grant, uint256 nonce, uint256 deadline) internal view returns (MorphoSignature memory s) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                keccak256(
+                    "Authorization(address authorizer,address authorized,bool isAuthorized,uint256 nonce,uint256 deadline)"
+                ),
+                user,
+                address(ex),
+                grant,
+                nonce,
+                deadline
+            )
+        );
+        (s.v, s.r, s.s) = vm.sign(
+            userKey, keccak256(abi.encodePacked("\x19\x01", IMorphoUser(MORPHO).DOMAIN_SEPARATOR(), structHash))
+        );
+    }
+
+    function _morphoAuth() internal view returns (LeverageExecutorV4.AuthSigs memory a) {
+        a.nonce = IMorphoUser(MORPHO).nonce(user);
+        a.deadline = vm.getBlockTimestamp() + 20 minutes;
+        a.grant = _morphoSig(true, a.nonce, a.deadline);
+        a.revoke = _morphoSig(false, a.nonce + 1, a.deadline);
+    }
+
+    /// The whole WETH collateral of a Main spoke loop becomes wstETH, the USDC debt untouched.
+    function test_fork_v4_swapCollateral_wethToWstEth() public {
+        if (noFork) return;
+        (address weth, address usdc) = _open3xMain();
+        (address wsteth,) = _market(MAIN, 1, 7);
+        vm.prank(user);
+        ISpokeUser(MAIN).setUsingAsCollateral(1, true, user);
+        uint256 debtBefore = IAaveV4Spoke(MAIN).getUserTotalDebt(7, user);
+        uint256 supplied = IAaveV4Spoke(MAIN).getUserSuppliedAssets(0, user);
+
+        LeverageExecutorV4.SwapCollateralParams memory p;
+        p.spoke = MAIN;
+        p.fromId = 0;
+        p.toId = 1;
+        p.fromAmount = type(uint256).max;
+        p.steps = _one(ex, weth, wsteth, supplied);
+        p.toAmount = p.steps[0].minOut;
+        p.guard = _guard(1.1e18);
+        LeverageExecutorV4.Permit memory permit = _permit(ex, WITHDRAW_PERMIT_TYPEHASH, MAIN, 0, type(uint256).max);
+        vm.prank(user);
+        LeverageExecutorV4.SwapCollateralResult memory r = ex.swapCollateral(p, permit);
+
+        assertEq(IAaveV4Spoke(MAIN).getUserSuppliedAssets(0, user), 0, "WETH left");
+        assertApproxEqAbs(IAaveV4Spoke(MAIN).getUserSuppliedAssets(1, user), r.supplied, 2);
+        assertGe(r.supplied, p.toAmount);
+        assertApproxEqAbs(IAaveV4Spoke(MAIN).getUserTotalDebt(7, user), debtBefore, 2, "debt untouched");
+        assertGt(r.healthFactor, 1.1e18);
+        assertEq(IAaveV4Taker(TAKER).withdrawAllowance(MAIN, 0, user, address(ex)), 0, "allowance renounced");
+        _noDust(ex, weth, wsteth);
+        _noDust(ex, usdc, wsteth);
+    }
+
+    /// The USDC debt of a Main spoke loop becomes USDT (flash loan of USDT from Morpho), collateral untouched.
+    function test_fork_v4_swapDebt_usdcToUsdt() public {
+        if (noFork) return;
+        (address weth, address usdc) = _open3xMain();
+        (, address usdt) = _market(MAIN, 0, 8);
+        prices.set(usdc, ISpokeOracle(ISpokeUser(MAIN).ORACLE()).getReservePrice(7));
+        uint256 owed = IAaveV4Spoke(MAIN).getUserTotalDebt(7, user);
+        // enough USDT that the router's minimum covers the whole USDC debt
+        uint256 newDebt = router.quote(usdc, usdt, owed) * 1005 / 1000;
+
+        LeverageExecutorV4.SwapDebtParams memory p;
+        p.spoke = MAIN;
+        p.fromId = 7;
+        p.toId = 8;
+        p.newDebtAmount = newDebt;
+        p.minRepaid = type(uint256).max;
+        p.steps = _one(ex, usdt, usdc, newDebt);
+        p.guard = _guard(1.1e18);
+        LeverageExecutorV4.Permit memory permit = _permit(ex, BORROW_PERMIT_TYPEHASH, MAIN, 8, newDebt);
+        vm.prank(user);
+        LeverageExecutorV4.SwapDebtResult memory r = ex.swapDebt(p, permit);
+
+        assertEq(IAaveV4Spoke(MAIN).getUserTotalDebt(7, user), 0, "USDC debt left");
+        assertApproxEqAbs(IAaveV4Spoke(MAIN).getUserTotalDebt(8, user), newDebt, 2);
+        assertEq(r.repaid, owed);
+        assertEq(IERC20(usdc).balanceOf(user), r.returned, "leftover USDC back to the user");
+        assertGt(r.healthFactor, 1.1e18);
+        assertEq(IAaveV4Taker(TAKER).borrowAllowance(MAIN, 8, user, address(ex)), 0, "allowance renounced");
+        _noDust(ex, weth, usdt);
+        _noDust(ex, usdc, usdt);
+    }
+
+    /// Main spoke -> Aave v3 Core (Taker permit + credit delegation signature), then back (aToken permit + Taker
+    /// permit).
+    function test_fork_v4_refinance_mainToAaveCoreAndBack() public {
+        if (noFork) return;
+        (address weth, address usdc) = _open3xMain();
+        IAaveV3Pool core = IAaveV3Pool(AAVE_CORE);
+        address aWeth = core.getReserveData(weth).aTokenAddress;
+        address vUsdc = core.getReserveData(usdc).variableDebtTokenAddress;
+        uint256 debt = IAaveV4Spoke(MAIN).getUserTotalDebt(7, user);
+        uint256 coll = IAaveV4Spoke(MAIN).getUserSuppliedAssets(0, user);
+        LeverageExecutorV4.Place memory aave;
+        aave.venue = LeverageExecutorV4.Venue.AaveV3;
+        aave.target = AAVE_CORE;
+
+        LeverageExecutorV4.RefinanceAuth memory a;
+        a.exit = _permit(ex, WITHDRAW_PERMIT_TYPEHASH, MAIN, 0, coll);
+        a.enter = _eip2612(
+            vUsdc, debt, keccak256("DelegationWithSig(address delegatee,uint256 value,uint256 nonce,uint256 deadline)")
+        );
+        vm.prank(user);
+        LeverageExecutorV4.RefinanceResult memory r = ex.refinance(_refi(_mainPlace(), aave), a);
+        assertEq(IAaveV4Spoke(MAIN).getUserTotalDebt(7, user), 0);
+        assertEq(IAaveV4Spoke(MAIN).getUserSuppliedAssets(0, user), 0);
+        assertApproxEqAbs(IERC20(vUsdc).balanceOf(user), debt, 2);
+        assertApproxEqAbs(IERC20(aWeth).balanceOf(user), coll, 2);
+        assertEq(r.debtMoved, debt);
+        assertGt(r.healthFactor, 1.1e18);
+        _noDust(ex, weth, usdc);
+
+        vm.warp(vm.getBlockTimestamp() + 7 days);
+        debt = IERC20(vUsdc).balanceOf(user);
+        a.exit = _eip2612(
+            aWeth,
+            IERC20(aWeth).balanceOf(user) + 1e9,
+            keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
+        );
+        a.enter = _permit(ex, BORROW_PERMIT_TYPEHASH, MAIN, 7, debt);
+        vm.prank(user);
+        r = ex.refinance(_refi(aave, _mainPlace()), a);
+        assertEq(IERC20(vUsdc).balanceOf(user), 0, "Aave debt left");
+        assertEq(IERC20(aWeth).balanceOf(user), 0, "Aave collateral left");
+        assertApproxEqAbs(IAaveV4Spoke(MAIN).getUserTotalDebt(7, user), debt, 2);
+        assertGt(r.healthFactor, 1.1e18);
+        assertEq(IAaveV4Taker(TAKER).borrowAllowance(MAIN, 7, user, address(ex)), 0);
+        _noDust(ex, weth, usdc);
+        assertEq(IERC20(aWeth).balanceOf(address(ex)), 0, "aTokens left");
+    }
+
+    /// Main spoke -> a Morpho Blue WETH / USDC market (LLTV 86 %) and back, with Morpho authorization signatures.
+    function test_fork_v4_refinance_mainToMorphoAndBack() public {
+        if (noFork) return;
+        (address weth, address usdc) = _open3xMain();
+        LeverageExecutorV4.Place memory morpho;
+        morpho.venue = LeverageExecutorV4.Venue.Morpho;
+        morpho.market = MarketParams(
+            usdc, weth, 0x0F948CBa8231Db7898ef36A4212581Ad7b1B4580, 0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC, 0.86e18
+        );
+        bytes32 id = keccak256(abi.encode(morpho.market));
+        assertEq(id, 0x94b823e6bd8ea533b4e33fbc307faea0b307301bc48763acc4d4aa4def7636cd);
+        uint256 coll = IAaveV4Spoke(MAIN).getUserSuppliedAssets(0, user);
+
+        LeverageExecutorV4.RefinanceAuth memory a;
+        a.exit = _permit(ex, WITHDRAW_PERMIT_TYPEHASH, MAIN, 0, coll);
+        a.morpho = _morphoAuth();
+        vm.prank(user);
+        LeverageExecutorV4.RefinanceResult memory r = ex.refinance(_refi(_mainPlace(), morpho), a);
+        (, uint128 shares, uint128 mColl) = IMorphoUser(MORPHO).position(id, user);
+        assertEq(IAaveV4Spoke(MAIN).getUserTotalDebt(7, user), 0);
+        assertEq(mColl, coll);
+        assertGt(shares, 0);
+        assertGt(r.healthFactor, 1.1e18);
+        assertFalse(IMorphoUser(MORPHO).isAuthorized(user, address(ex)));
+        _noDust(ex, weth, usdc);
+
+        vm.warp(vm.getBlockTimestamp() + 7 days);
+        a.exit = _noPermit();
+        a.enter = _permit(ex, BORROW_PERMIT_TYPEHASH, MAIN, 7, r.debtMoved * 101 / 100);
+        a.morpho = _morphoAuth();
+        vm.prank(user);
+        r = ex.refinance(_refi(morpho, _mainPlace()), a);
+        (, shares, mColl) = IMorphoUser(MORPHO).position(id, user);
+        assertEq(shares, 0, "Morpho debt left");
+        assertEq(mColl, 0, "Morpho collateral left");
+        assertApproxEqAbs(IAaveV4Spoke(MAIN).getUserSuppliedAssets(0, user), coll, 2);
+        assertApproxEqAbs(IAaveV4Spoke(MAIN).getUserTotalDebt(7, user), r.debtMoved, 2);
+        assertFalse(IMorphoUser(MORPHO).isAuthorized(user, address(ex)));
+        assertEq(IAaveV4Taker(TAKER).borrowAllowance(MAIN, 7, user, address(ex)), 0);
+        _noDust(ex, weth, usdc);
     }
 }
