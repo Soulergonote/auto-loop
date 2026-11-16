@@ -308,6 +308,8 @@ const anvil = async (method, params) =>
     await page.locator('summary', { hasText: 'Devis' }).click()
   }
   console.log('reason:', (await page.locator('.sum-reason').allTextContents()).join(' | '))
+  // the quotes refresh on a timer and the button is disabled while they do: give it a moment before calling it off
+  for (let i = 0; i < 30 && !(await btn.isEnabled()); i++) await page.waitForTimeout(2000)
   if (!(await btn.isEnabled())) fail(`bouton désactivé : ${await btn.getAttribute('title')}`)
   if (await btn.isEnabled()) {
     await btn.click()

@@ -59,6 +59,9 @@ jobs:
             hex: '0x1'
             fork: https://ethereum-rpc.publicnode.com
             env: "COLL=WETH DEBT=USDC CAPITAL=USDC AMOUNT=1000 LEV=3 SLIP='1 %'"
+            # plain AMMs only, as on Base: Velora routes USDC → WETH through metric-v1 (oracle-priced), which reverts on
+            # the frozen fork (16/11/2026)
+            vite: 'VITE_VELORA_INCLUDE_DEXS=UniswapV3,UniswapV4,UniswapV2,PancakeswapV3,SushiSwapV3 VITE_KYBER_INCLUDED_SOURCES=uniswapv3,uniswap-v4,uniswap,pancake-v3,sushiswap-v3'
     defaults:
       run:
         working-directory: app
@@ -84,7 +87,8 @@ jobs:
         run: |
           anvil --fork-url ${{ matrix.fork }} --chain-id ${{ matrix.chain }} --port 8545 > anvil.log 2>&1 &
           for i in $(seq 60); do cast block-number --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1 && break; sleep 2; done
-          NET=${{ matrix.net }} NO_DEPLOY=1 FORK_URL=${{ matrix.fork }} bash e2e/fork.sh
+          # public RPCs sometimes time out on the fork's first reads (15/11/2026): retried after a pause
+          for i in 1 2 3; do NET=${{ matrix.net }} NO_DEPLOY=1 FORK_URL=${{ matrix.fork }} bash e2e/fork.sh && break; [ $i = 3 ] && exit 1; sleep 20; done
       - name: App
         run: |
           env ${{ matrix.vite }} VITE_RPC_URL_${{ matrix.chain }}=http://127.0.0.1:8545 npx vite --port 5173 --strictPort --base / > vite.log 2>&1 &
