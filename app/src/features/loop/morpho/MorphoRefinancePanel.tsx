@@ -91,7 +91,8 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
   const L = M.loan
   const executor = net.executor
   const mUser = state.user
-  const { busy, setBusy, result, setResult, run } = useTxAction()
+  const tx = useTxAction()
+  const { busy, setBusy, result, setResult, run } = tx
   const [choice, setChoice] = useState<string>()
 
   const pools = useMemo(() => aaveMarketsOn(net.chain.id), [net.chain.id])
@@ -274,6 +275,7 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
   const to = r ? (r.toMorpho ? 'Morpho' : `Aave ${r.pool.label}`) : undefined
   const summary = (
     <Summary
+      tx={tx}
       items={[
         {
           label: 'Health factor',

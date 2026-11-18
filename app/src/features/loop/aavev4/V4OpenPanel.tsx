@@ -60,7 +60,8 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
     auto: autoSlip,
   } = useSlippage(pairKind({ symbol: C.symbol, usd: usdOf(state.collateralPrice) }, { symbol: L.symbol, usd: usdOf(state.debtPrice) }))
   const [horizonText, setHorizon] = useState('90')
-  const { busy, setBusy, result, setResult, run } = useTxAction()
+  const tx = useTxAction()
+  const { busy, setBusy, result, setResult, run } = tx
   const horizon = Number(horizonText)
 
   // the existing position on this pair: the slider sets the leverage of the whole position
@@ -323,6 +324,7 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
 
   const summary = (
     <Summary
+      tx={tx}
       visual={bar}
       items={[
         {

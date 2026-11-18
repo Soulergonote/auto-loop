@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useBytecode } from 'wagmi'
 import { getAddress, isAddress, type Address } from 'viem'
-import { DEFAULT_DEBT_SYMBOLS, executorRouters, v4Serves, type AggregatorChoice, type V4Net } from '../../../config'
+import { DEFAULT_DEBT_SYMBOLS, executorRouters, networkName, v4Serves, type AggregatorChoice, type V4Net } from '../../../config'
 import { v4ReservesQuery, type V4Reserve } from '../../../protocols/aavev4/reserves'
 import { readV4State, v4BorrowApy, v4PairKey, v4Sides, type V4Pair, type V4State } from '../../../protocols/aavev4/state'
 import { verifyV4Executor } from '../../../chain/deploy'
@@ -10,7 +10,7 @@ import { useAtomicBatch } from '../../../chain/batch'
 import { explainError } from '../../../chain/tx'
 import { fmtAddress, fmtAmount, fmtDollars, fmtLltv, fmtPct } from '../../../ui/format'
 import { Picker } from '../../../ui/Picker'
-import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, useSlow } from '../../../ui/primitives'
+import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, SummaryTitle, useSlow } from '../../../ui/primitives'
 import { V4OpenPanel } from './V4OpenPanel'
 import { V4ClosePanel } from './V4ClosePanel'
 import { V4SwapCollateralPanel } from './V4SwapCollateralPanel'
@@ -398,11 +398,14 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
     seed && same(seed.spoke, pair.collateral.spoke.address) && seed.collateralId === pair.collateral.reserveId && seed.debtId === pair.debt.reserveId
       ? seed
       : undefined
-  if (tab === 'close') return <V4ClosePanel key={key} ctx={ctx} seedTarget={mine?.target} />
-  if (tab === 'collateral') return <V4SwapCollateralPanel key={key} ctx={ctx} />
-  if (tab === 'debt') return <V4SwapDebtPanel key={key} ctx={ctx} />
-  if (tab === 'refinance') return <V4RefinancePanel key={key} ctx={ctx} />
-  return <V4OpenPanel key={key} ctx={ctx} seedLeverage={mine?.leverage} seedAmount={mine?.amount} />
+  const titled = (el: ReactNode) => (
+    <SummaryTitle value={`${pair.collateral.token.symbol}/${pair.debt.token.symbol} · ${networkName(net.label)}`}>{el}</SummaryTitle>
+  )
+  if (tab === 'close') return titled(<V4ClosePanel key={key} ctx={ctx} seedTarget={mine?.target} />)
+  if (tab === 'collateral') return titled(<V4SwapCollateralPanel key={key} ctx={ctx} />)
+  if (tab === 'debt') return titled(<V4SwapDebtPanel key={key} ctx={ctx} />)
+  if (tab === 'refinance') return titled(<V4RefinancePanel key={key} ctx={ctx} />)
+  return titled(<V4OpenPanel key={key} ctx={ctx} seedLeverage={mine?.leverage} seedAmount={mine?.amount} />)
 }
 
 /** Short name of a v4 pair for lists: collateral / debt, spoke. */

@@ -1,10 +1,12 @@
-import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
 import { AGGREGATORS, aggregatorsFor, type AggregatorChoice, type Market } from '../config'
 import type { Quote } from '../services/quotes/quotes'
 import { fmtAmount, fmtBps, fmtDollars, fmtX } from './format'
 import { extraWorstCaseUsd, isSlippageFailure, nextSlippage, type SlippageBps } from '../domain/slippage'
 import type { Tone } from './tone'
 import { useGateStep } from './gate'
+import { HfRing } from './HfRing'
+import { TxProgress, type TxState } from './TxProgress'
 
 export type { Tone }
 
@@ -212,17 +214,41 @@ export function LoopLayout({ children, summary }: { children: ReactNode; summary
 
 export type SummaryItem = {
   label: string
-  /** undefined = being read (grey rectangle), null = not computable (a dash) */
+  /** undefined = being read (loading frame), null = not computable (a dash) */
   value?: ReactNode
   sub?: ReactNode
   tone?: Tone
   /** kept in the mobile bar */
   key?: boolean
+  /** a health factor item's number, for its ring when `value` is not a plain formatted number */
+  hf?: number
+}
+
+/** « Résumé · cbETH/WETH · Base »: set by each Boucle view around its panels. */
+const SummaryTitleContext = createContext<string | undefined>(undefined)
+export const SummaryTitle = ({ value, children }: { value: string; children: ReactNode }) => (
+  <SummaryTitleContext.Provider value={value}>{children}</SummaryTitleContext.Provider>
+)
+
+const isHf = (it: SummaryItem) => /^health factor/i.test(it.label)
+const isLiq = (it: SummaryItem) => /^liquidation si/i.test(it.label)
+const isApy = (it: SummaryItem) => /^APY net/.test(it.label)
+
+function SummaryTile({ it, className = '' }: { it: SummaryItem; className?: string }) {
+  return (
+    <div className={`sum-item ${it.value === null ? '' : (it.tone ?? '')} ${it.key ? 'key' : ''} ${className}`}>
+      <div className="sum-label">{it.label}</div>
+      <div className="sum-value">{shown(it.value, 5)}</div>
+      {it.sub && <div className="sum-sub">{it.sub}</div>}
+    </div>
+  )
 }
 
 /**
- * Summary card: 3 or 4 key values and the screen's single main button, with the reason when it is disabled. Until the
- * wallet is connected, on the right network, with a contract there (`needs`), the button is that next step instead.
+ * Boucle summary (charte v3): a pale title band, the health factor ring beside the net APY, the liquidation price as
+ * the screen's key tile, the other values, the position bar, then the single main button, replaced by the transaction
+ * progress while a flow runs, and the audit note. Until the wallet is connected, on the right network, with a contract
+ * there (`needs`), the button is that next step instead.
  */
 export function Summary({
   items,
@@ -230,6 +256,7 @@ export function Summary({
   reason,
   children,
   visual,
+  tx,
   needs = 'contract',
 }: {
   items: SummaryItem[]
@@ -238,8 +265,11 @@ export function Summary({
   action: ReactNode
   reason?: string
   children?: ReactNode
+  /** the panel's signing flow (useTxAction): its steps take the button's place while it runs */
+  tx?: TxState
   needs?: 'contract' | 'wallet' | 'none'
 }) {
+  const title = useContext(SummaryTitleContext)
   const gate = useGateStep(needs)
   if (gate) {
     action = (
@@ -249,22 +279,46 @@ export function Summary({
     )
     reason = gate.reason
   }
+  const hf = items.find(isHf)
+  const apy = items.find(isApy)
+  const liq = items.find(isLiq)
+  const rest = items.filter((it) => it !== hf && it !== apy && it !== liq)
+  const running = !!tx?.busy
+  const ended = !running && !!tx?.result && tx.trail.length > 0
   return (
     <aside className="card summary">
-      <div className="sum-items">
-        {items.map((it) => (
-          <div key={it.label} className={`sum-item ${it.value === null ? '' : (it.tone ?? '')} ${it.key ? 'key' : ''}`}>
-            <div className="sum-label">{it.label}</div>
-            <div className="sum-value">{shown(it.value, 5)}</div>
-            {it.sub && <div className="sum-sub">{it.sub}</div>}
-          </div>
-        ))}
+      <div className="card-head">
+        <h2>{title ? `Résumé · ${title}` : 'Résumé'}</h2>
       </div>
+      {(hf || apy) && (
+        <div className="sum-top">
+          {hf && (
+            <div className={`sum-item sum-hf key ${hf.value === null ? '' : (hf.tone ?? '')}`}>
+              <HfRing value={hf.value} hf={hf.hf} tone={hf.tone} label={/après/.test(hf.label) ? 'health factor après' : undefined} />
+              {/* the mobile bar shows the number alone */}
+              <div className="sum-label">{hf.label}</div>
+              <div className="sum-value">{shown(hf.value, 3)}</div>
+            </div>
+          )}
+          {apy && <SummaryTile it={apy} />}
+        </div>
+      )}
+      {hf?.sub && <div className="sum-sub sum-hf-sub">{hf.sub}</div>}
+      {(liq || rest.length > 0) && (
+        <div className="sum-items">
+          {liq && <SummaryTile it={liq} className="sum-key" />}
+          {rest.map((it) => (
+            <SummaryTile key={it.label} it={it} />
+          ))}
+        </div>
+      )}
       {visual && <div className="sum-visual">{visual}</div>}
       <div className="sum-action">
-        {action}
-        {reason && <span className={`small sum-reason ${gate?.bad ? 'bad-text' : 'muted'}`}>{reason}</span>}
+        {(running || ended) && tx && <TxProgress trail={tx.trail} busy={running} failed={ended && !tx.result?.ok} />}
+        {!running && action}
+        {!running && reason && <span className={`small sum-reason ${gate?.bad ? 'bad-text' : 'muted'}`}>{reason}</span>}
         {children}
+        <p className="sum-audit">Contrat non audité. Vérifier chaque transaction dans le portefeuille.</p>
       </div>
     </aside>
   )
@@ -308,7 +362,7 @@ export function TxLink({ market, hash }: { market: Pick<Market, 'chain'>; hash: 
   if (!explorer) return null
   return (
     <a href={`${explorer.url}/tx/${hash}`} target="_blank" rel="noreferrer">
-      Voir sur {explorer.name}
+      Voir sur {explorer.name} ↗
     </a>
   )
 }

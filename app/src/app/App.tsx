@@ -634,10 +634,6 @@ export function App() {
             </LoopLayout>
           ))}
       </GateProvider>
-
-      <footer className="muted small">
-        Contrat non audité. Vérifier chaque transaction dans le portefeuille ; le contrat n’agit que pour l’adresse qui signe.
-      </footer>
     </div>
   )
 }

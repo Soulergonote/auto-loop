@@ -387,10 +387,10 @@ async function reinvest(page, browser) {
       await page.screenshot({ path: `${outPrefix}-augmenter.png`, fullPage: true })
       break
     }
-    // busy labels end with "…" (simulation, wallet, inclusion)
+    // while a flow runs, its progress (.tx, aria-busy) takes the button's place in the summary
     for (let i = 0; i < 300; i++) {
       await page.waitForTimeout(1000)
-      const t = await btn.textContent()
+      const t = (await page.locator('.tx[aria-busy=true]').count()) ? 'en cours…' : await btn.textContent()
       if (i % 10 === 0) console.log('  ', i, 's:', t)
       if (!t.endsWith('…') && i > 2) break
       // automine makes no block after the transaction's own: when the app's first receipt poll came before that block

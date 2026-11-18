@@ -52,7 +52,8 @@ export function V4SwapCollateralPanel({ ctx }: { ctx: V4Ctx }) {
   const [part, setPart] = useState<(typeof PARTS)[number]>('100')
   const full = part === '100'
   const { slippage, setSlippage, auto: autoSlip } = useSlippage(T ? pairKind(reserveAsset(C), reserveAsset(T)) : 'other')
-  const { busy, setBusy, result, setResult, run } = useTxAction<{ ok: boolean; text: string; hash?: `0x${string}`; details?: string[]; to?: number }>()
+  const tx = useTxAction<{ ok: boolean; text: string; hash?: `0x${string}`; details?: string[]; to?: number }>()
+  const { busy, setBusy, result, setResult, run } = tx
 
   const target = useQuery({
     queryKey: ['v4-reserve-user', net.id, T?.spoke.address, T?.reserveId, account, executor],
@@ -213,6 +214,7 @@ export function V4SwapCollateralPanel({ ctx }: { ctx: V4Ctx }) {
 
   const summary = (
     <Summary
+      tx={tx}
       items={[
         {
           label: 'Health factor après',

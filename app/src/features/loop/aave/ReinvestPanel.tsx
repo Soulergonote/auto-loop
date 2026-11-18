@@ -82,7 +82,8 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
   const [frozen, setFrozen] = useState<Planned[]>()
   const [done, setDone] = useState<string[]>([])
   const [capital, setCapital] = useState(0n)
-  const { busy, setBusy, result, setResult, run } = useTxAction<{ ok: boolean; text: string; hash?: Hash }>()
+  const tx = useTxAction<{ ok: boolean; text: string; hash?: Hash }>()
+  const { busy, setBusy, result, setResult, run } = tx
   // leverage to return to: the position's before the rewards are added (frozen at the claim in the step flow,
   // which can deposit collateral aTokens)
   const liveLev = (() => {
@@ -438,6 +439,7 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
     <LoopLayout
       summary={
         <Summary
+          tx={tx}
           items={items}
           needs="wallet"
           action={

@@ -66,7 +66,8 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
   const debt = user.debt
   const { slippage, setSlippage, auto: autoSlip } = useSlippage('pt')
   const [choice, setChoice] = useState<string>()
-  const { busy, setBusy, result, run } = useTxAction()
+  const tx = useTxAction()
+  const { busy, setBusy, result, run } = tx
 
   // PT infos of every candidate collateral with the same loan token (only PTs can be roll targets across collaterals)
   const candidates = useMemo(
@@ -214,6 +215,7 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
 
   const summary = (
     <Summary
+      tx={tx}
       items={[
         {
           label: 'Health factor',

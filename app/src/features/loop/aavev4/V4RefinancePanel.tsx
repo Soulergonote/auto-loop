@@ -66,7 +66,8 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
   const executor = net.executor
   const chainId = net.chain.id
   const user = state.user
-  const { busy, setBusy, result, setResult, run } = useTxAction<{ ok: boolean; text: string; hash?: Hash; details?: string[]; land?: Other }>()
+  const tx = useTxAction<{ ok: boolean; text: string; hash?: Hash; details?: string[]; land?: Other }>()
+  const { busy, setBusy, result, setResult, run } = tx
   const [choice, setChoice] = useState<string>()
 
   // the same pair on the other spokes of these position managers
@@ -395,6 +396,7 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
   const toName = r ? (r.out ? otherName(r.other) : `spoke ${C.spoke.name}`) : undefined
   const summary = (
     <Summary
+      tx={tx}
       items={[
         {
           label: 'Health factor',

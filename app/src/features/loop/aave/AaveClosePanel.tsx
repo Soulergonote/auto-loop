@@ -1,3 +1,5 @@
+import { useTxAction } from '../shared/useTxAction'
+import type { TxState } from '../../../ui/TxProgress'
 import { useEffect, useState, type ReactNode } from 'react'
 import { type Address, type Hash } from 'viem'
 import { useReadContract } from 'wagmi'
@@ -64,8 +66,8 @@ export function AaveClosePanel({ reserves, user, account, aggregator, onDone, co
   // target leverage of the pair's position; 1 = close everything
   const [target, setTarget] = useState(seedTarget ? Math.floor(seedTarget * 20) / 20 : 1)
   const { slippage, setSlippage, auto: autoSlip } = useSlippage(pairKind(reserveAsset(C), reserveAsset(D), { pt: !!C.pt }))
-  const [busy, setBusy] = useState<string>()
-  const [result, setResult] = useState<{ ok: boolean; text: string; hash?: Hash; details?: string[]; back?: { collateral: bigint; debt: bigint } }>()
+  const tx = useTxAction<{ ok: boolean; text: string; hash?: Hash; details?: string[]; back?: { collateral: bigint; debt: bigint } }>()
+  const { busy, setBusy, result, setResult } = tx
 
   if (!user) {
     return (
@@ -128,6 +130,7 @@ export function AaveClosePanel({ reserves, user, account, aggregator, onDone, co
         setBusy,
         result,
         setResult,
+        tx,
       }}
     />
   )
@@ -153,6 +156,7 @@ function ClosePanelInner(p: {
   setBusy: (s?: string) => void
   result?: { ok: boolean; text: string; hash?: Hash; details?: string[] }
   setResult: (r?: { ok: boolean; text: string; hash?: Hash; details?: string[]; back?: { collateral: bigint; debt: bigint } }) => void
+  tx: TxState & { start: () => void }
 }) {
   const { market, C, D, user, account, aggregator, slippage, autoSlip, busy, setBusy, result, setResult } = p
   // a wallet that sends atomic batches: approval, close and approval back in one confirmation
@@ -317,7 +321,7 @@ function ClosePanelInner(p: {
   const disabledReason = signBlocker({ executor: market.executor, simulated: q?.simulated, problems })
 
   async function onClose() {
-    setResult(undefined)
+    p.tx.start()
     try {
       setBusy('Nouvelle cotation…')
       const fresh = await getQuote(quoteReq!)
@@ -359,6 +363,7 @@ function ClosePanelInner(p: {
 
   const summary = (
     <Summary
+      tx={p.tx}
       items={[
         {
           label: 'Dette remboursée',

@@ -29,7 +29,8 @@ export function V4ClosePanel({ ctx, seedTarget }: { ctx: V4Ctx; seedTarget?: num
     setSlippage,
     auto: autoSlip,
   } = useSlippage(pairKind({ symbol: C.symbol, usd: usdOf(state.collateralPrice) }, { symbol: L.symbol, usd: usdOf(state.debtPrice) }))
-  const { busy, setBusy, result, setResult, run } = useTxAction()
+  const tx = useTxAction()
+  const { busy, setBusy, result, setResult, run } = tx
   const { target, setTarget, currentLev, sliderMax, full, repay, toSell, withdraw, quoteReq, quote, q, stale } = useCloseSizing({
     coll,
     debt,
@@ -46,6 +47,7 @@ export function V4ClosePanel({ ctx, seedTarget }: { ctx: V4Ctx; seedTarget?: num
       <LoopLayout
         summary={
           <Summary
+            tx={tx}
             items={[
               { label: 'Dette remboursée', value: NA },
               { label: 'Health factor après', value: NA, key: true },
@@ -181,6 +183,7 @@ export function V4ClosePanel({ ctx, seedTarget }: { ctx: V4Ctx; seedTarget?: num
   ]
   const summary = (
     <Summary
+      tx={tx}
       items={[
         { label: 'Dette remboursée', value: `${fmtAmount(repay, L.decimals)} ${L.symbol}`, sub: full ? 'toute la dette, intérêts compris' : undefined },
         {

@@ -12,7 +12,7 @@ import { explainError } from '../../../chain/tx'
 import { fmtLltv, fmtAddress, fmtAmount, fmtDollars, fmtPct, ptShortSymbol } from '../../../ui/format'
 import { useBalances } from '../../../chain/walletTokens'
 import { Picker } from '../../../ui/Picker'
-import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, TxResult, useSlow } from '../../../ui/primitives'
+import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, SummaryTitle, TxResult, useSlow } from '../../../ui/primitives'
 import { MorphoOpenPanel } from './MorphoOpenPanel'
 import { MorphoClosePanel } from './MorphoClosePanel'
 import { MorphoRollPanel } from './MorphoRollPanel'
@@ -429,11 +429,12 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
     onExecutor,
   }
   const key = `${market.id}-${seed?.nonce ?? ''}`
-  if (tab === 'roll' && hasPosition) return <MorphoRollPanel key={key} ctx={ctx} renew={rollLabel === 'Renouveler'} />
-  if (tab === 'refinance' && canRefinance) return <MorphoRefinancePanel key={key} ctx={ctx} />
+  const titled = (el: ReactNode) => <SummaryTitle value={`${ptShortSymbol(market.collateral.symbol)}/${market.loan.symbol} · ${net.label}`}>{el}</SummaryTitle>
+  if (tab === 'roll' && hasPosition) return titled(<MorphoRollPanel key={key} ctx={ctx} renew={rollLabel === 'Renouveler'} />)
+  if (tab === 'refinance' && canRefinance) return titled(<MorphoRefinancePanel key={key} ctx={ctx} />)
   const mine = seed?.market.id === market.id ? seed : undefined
-  if (tab === 'close') return <MorphoClosePanel key={key} ctx={ctx} seedTarget={mine?.target} />
-  return <MorphoOpenPanel key={key} ctx={ctx} seedLeverage={mine?.leverage} seedAmount={mine?.amount} />
+  if (tab === 'close') return titled(<MorphoClosePanel key={key} ctx={ctx} seedTarget={mine?.target} />)
+  return titled(<MorphoOpenPanel key={key} ctx={ctx} seedLeverage={mine?.leverage} seedAmount={mine?.amount} />)
 }
 
 /** Short name of a market for lists: collateral / loan, LLTV. */

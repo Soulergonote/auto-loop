@@ -62,7 +62,8 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
   const T = targets.find((t) => t.token.address === targetChoice) ?? targets.find((t) => isCorrelated(t, D)) ?? targets[0]
   const [part, setPart] = useState<(typeof PARTS)[number]>('100')
   const { slippage, setSlippage, auto: autoSlip } = useSlippage(T ? pairKind(reserveAsset(T), reserveAsset(D)) : 'other')
-  const { busy, setBusy, result, setResult, run } = useTxAction<{ ok: boolean; text: string; hash?: Hash; to?: Token; details?: string[] }>()
+  const tx = useTxAction<{ ok: boolean; text: string; hash?: Hash; to?: Token; details?: string[] }>()
+  const { busy, setBusy, result, setResult, run } = tx
   const batch = useAtomicBatch(market.chain.id, account) === true
   const gasPrice = useGasPrice({ chainId: market.chain.id, query: { refetchInterval: 30_000 } })
   const executor = market.executor ?? market.quoteTaker
@@ -238,6 +239,7 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
 
   const summary = (
     <Summary
+      tx={tx}
       items={[
         {
           label: 'Health factor après',

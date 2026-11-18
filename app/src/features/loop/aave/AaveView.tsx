@@ -1,13 +1,13 @@
 import { useState, type ReactNode } from 'react'
 import { formatUnits, type Address } from 'viem'
-import { protocolName, DEMO, type AggregatorChoice, type Market, type Token } from '../../../config'
+import { networkName, protocolName, DEMO, type AggregatorChoice, type Market, type Token } from '../../../config'
 import { eligibleEModes, useEModeCategories, useMarket, withEMode, withIncentives } from '../../../protocols/aave/useMarket'
 import { useCampaigns } from '../../../services/merkl'
 import { fmtDate, fmtPct, fmtPrice } from '../../../ui/format'
 import { WINDOWS, useRateAverages, type Window } from '../../../protocols/aave/rateHistory'
 import { useClaimables } from '../../../protocols/aave/reinvest'
 import { ReinvestPanel } from './ReinvestPanel'
-import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary } from '../../../ui/primitives'
+import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, SummaryTitle } from '../../../ui/primitives'
 import { AaveOpenPanel } from './AaveOpenPanel'
 import { AaveClosePanel } from './AaveClosePanel'
 import { SwapCollateralPanel } from './SwapCollateralPanel'
@@ -40,7 +40,16 @@ type AaveViewProps = {
   onExecutor: (a: Address) => void
 }
 
-export function AaveView({
+/** The Boucle screen of an Aave v3 pair; its summary is titled « Résumé · collateral/debt · network ». */
+export function AaveView(p: AaveViewProps) {
+  return (
+    <SummaryTitle value={`${p.collateral.symbol}/${p.debt.symbol} · ${networkName(p.market.label)}`}>
+      <AaveViewBody {...p} />
+    </SummaryTitle>
+  )
+}
+
+function AaveViewBody({
   market: m,
   collateral,
   debt,

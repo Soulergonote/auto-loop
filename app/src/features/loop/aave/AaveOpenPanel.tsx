@@ -120,7 +120,8 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
   const gasPrice = useGasPrice({ chainId: market.chain.id, query: { refetchInterval: 30_000 } })
   // a wallet that sends atomic batches: eMode, approval, delegation, open and allowances back in one confirmation
   const batch = useAtomicBatch(market.chain.id, account) === true
-  const { busy, setBusy, result, setResult, run } = useTxAction()
+  const tx = useTxAction()
+  const { busy, setBusy, result, setResult, run } = tx
 
   // an existing position on the pair is levered further: the slider then sets the leverage of the whole position
   const position = user ? pairPosition(user, C.side, D.side) : NO_POSITION
@@ -561,6 +562,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
 
   const summary = (
     <Summary
+      tx={tx}
       visual={bar}
       items={[
         {

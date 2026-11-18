@@ -60,7 +60,8 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
     auto: autoSlip,
   } = useSlippage(pairKind({ symbol: C.symbol, usd: M.collateralUsd }, { symbol: L.symbol, usd: M.loanUsd }, { pt: !!pt }))
   const [horizonText, setHorizon] = useState('90')
-  const { busy, setBusy, result, setResult, run } = useTxAction()
+  const tx = useTxAction()
+  const { busy, setBusy, result, setResult, run } = tx
 
   const ptDays = pt ? daysToMaturity(pt) : undefined
   const ptExpired = !!pt && isExpired(pt)
@@ -352,6 +353,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
 
   const summary = (
     <Summary
+      tx={tx}
       visual={bar}
       items={[
         {

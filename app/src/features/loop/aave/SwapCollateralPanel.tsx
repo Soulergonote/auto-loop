@@ -86,7 +86,8 @@ export function SwapCollateralPanel({
   const T: Reserve | undefined = T0 && { ...T0, supplyRewardApr: headlineRewards(campaigns, T0).supply }
   const [part, setPart] = useState<(typeof PARTS)[number]>('100')
   const { slippage, setSlippage, auto: autoSlip } = useSlippage(T ? pairKind(reserveAsset(C), reserveAsset(T), { pt: !!(C.pt || T.pt) }) : 'other')
-  const { busy, setBusy, result, setResult, run } = useTxAction<{ ok: boolean; text: string; hash?: Hash; to?: Token; details?: string[] }>()
+  const tx = useTxAction<{ ok: boolean; text: string; hash?: Hash; to?: Token; details?: string[] }>()
+  const { busy, setBusy, result, setResult, run } = tx
   const batch = useAtomicBatch(market.chain.id, account) === true
   const gasPrice = useGasPrice({ chainId: market.chain.id, query: { refetchInterval: 30_000 } })
 
@@ -252,6 +253,7 @@ export function SwapCollateralPanel({
 
   const summary = (
     <Summary
+      tx={tx}
       items={[
         {
           label: 'Health factor après',

@@ -36,7 +36,8 @@ export function MorphoClosePanel({ ctx, seedTarget }: { ctx: MorphoCtx; seedTarg
     setSlippage,
     auto: autoSlip,
   } = useSlippage(pairKind({ symbol: C.symbol, usd: M.collateralUsd }, { symbol: L.symbol, usd: M.loanUsd }, { pt: !!pt }))
-  const { busy, setBusy, result, setResult, run } = useTxAction()
+  const tx = useTxAction()
+  const { busy, setBusy, result, setResult, run } = tx
   // a matured PT is all redeemed on a full close (nothing to hold any more)
   const ptExpired = !!pt && isExpired(pt)
   const { target, setTarget, currentLev, sliderMax, full, repay, toSell, withdraw, quoteReq, quote, q, stale } = useCloseSizing({
@@ -56,6 +57,7 @@ export function MorphoClosePanel({ ctx, seedTarget }: { ctx: MorphoCtx; seedTarg
       <LoopLayout
         summary={
           <Summary
+            tx={tx}
             items={[
               { label: 'Dette remboursée', value: NA },
               { label: 'Health factor après', value: NA, key: true },
@@ -168,6 +170,7 @@ export function MorphoClosePanel({ ctx, seedTarget }: { ctx: MorphoCtx; seedTarg
   ]
   const summary = (
     <Summary
+      tx={tx}
       items={[
         { label: 'Dette remboursée', value: `${fmtAmount(repay, L.decimals)} ${L.symbol}`, sub: full ? 'toute la dette, intérêts compris' : undefined },
         {
