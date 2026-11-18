@@ -54,8 +54,11 @@ export function CampaignTable({ campaigns, yields, excluded, borrowed }: Props) 
               <td data-label="Sur la position" className={out ? 'num bad' : 'num'}>
                 {out ? 'non compté' : y ? fmtPct(y.apy) : '…'}
               </td>
-              <td data-label="Fin" className={left < 7 ? 'warn' : undefined}>
-                {c.endsAt ? `${fmtDate(c.endsAt)} (${left < 1 ? 'aujourd’hui' : `dans ${Math.floor(left)} j`})` : 'non indiquée'}
+              <td data-label="Fin">
+                {/* an end within a week: ink in an amber pill (amber is never a text colour) */}
+                <span className={left < 7 ? 'warn-text' : undefined}>
+                  {c.endsAt ? `${fmtDate(c.endsAt)} (${left < 1 ? 'aujourd’hui' : `dans ${Math.floor(left)} j`})` : 'non indiquée'}
+                </span>
               </td>
               <td data-label="Conditions" title={c.description}>
                 {rules(c)}

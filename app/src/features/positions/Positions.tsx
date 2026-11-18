@@ -517,8 +517,10 @@ function MarketPosition({
                   <td className="num" data-label="Sur la position">
                     {fmtPct(c.apy)}
                   </td>
-                  <td data-label="Fin" className={daysLeft(c.campaign) < 7 ? 'warn' : undefined}>
-                    {c.campaign.endsAt ? fmtDate(c.campaign.endsAt) : 'non indiquée'}
+                  <td data-label="Fin">
+                    <span className={daysLeft(c.campaign) < 7 ? 'warn-text' : undefined}>
+                      {c.campaign.endsAt ? fmtDate(c.campaign.endsAt) : 'non indiquée'}
+                    </span>
                   </td>
                 </tr>
               ))}

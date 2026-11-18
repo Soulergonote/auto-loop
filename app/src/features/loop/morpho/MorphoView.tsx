@@ -295,7 +295,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
         )}
         {onchain ? (
           <p className="muted small">
-            Morpho ne publie pas de liste pour ce réseau : marchés lus sur la chaîne (au moins {usd(10_000)} déposés), aucun n’est revu par Morpho.
+            Morpho ne publie pas de liste pour ce réseau : marchés lus sur le réseau (au moins {usd(10_000)} déposés), aucun n’est revu par Morpho.
           </p>
         ) : (
           <label className="check small">
@@ -307,14 +307,14 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
         {listed.isError && (
           <Notice>
             <span>
-              {onchain ? 'Marchés Morpho illisibles sur la chaîne' : 'API Morpho injoignable'} : {(listed.error as Error).message}
+              {onchain ? 'Marchés Morpho illisibles sur le réseau' : 'API Morpho injoignable'} : {(listed.error as Error).message}
             </span>
             <button className="btn" onClick={() => void listed.refetch()}>
               Réessayer
             </button>
           </Notice>
         )}
-        {slow && !listed.isError && <Notice>{onchain ? 'La lecture des marchés sur la chaîne prend du temps.' : 'L’API Morpho répond lentement.'}</Notice>}
+        {slow && !listed.isError && <Notice>{onchain ? 'La lecture des marchés sur le réseau prend du temps.' : 'L’API Morpho répond lentement.'}</Notice>}
         {state.isError && <Notice tone="bad">Lecture du marché sur Morpho impossible : {errText(state.error)}</Notice>}
         {market && (
           <Fold
@@ -359,7 +359,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
         )}
         {market && !market.listed && (
           <Notice>
-            {market.source === 'chain' ? 'Marché lu sur la chaîne' : 'Marché non listé par Morpho'} : oracle et paramètres non revus par Morpho. Vérifier
+            {market.source === 'chain' ? 'Marché lu sur le réseau' : 'Marché non listé par Morpho'} : oracle et paramètres non revus par Morpho. Vérifier
             l’oracle avant d’y déposer.
           </Notice>
         )}

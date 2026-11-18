@@ -89,6 +89,8 @@ body {
 /* ---------- base ---------- */
 a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
 a:hover { text-decoration-thickness: 2px; }
+/* an external link opens a new tab and says so */
+a[target='_blank']::after { content: ' ↗'; display: inline-block; text-decoration: none; }
 h2, h3 { margin: 0; }
 p { margin: 0; }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -198,7 +200,7 @@ input::placeholder { color: var(--muted); opacity: 1; font-weight: 400; }
 input:focus, select:focus, textarea:focus { outline: none; box-shadow: 3px 3px 0 var(--act); }
 select {
   appearance: none; -webkit-appearance: none; padding-right: 32px; cursor: pointer;
-  background: var(--white) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M0 0h10L5 6z' fill='%23111'/%3E%3C/svg%3E") no-repeat right 12px center / 10px 6px;
+  background: var(--white) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M0 0h10L5 6z' fill='%23111'/%3E%3C/svg%3E") no-repeat right 12px center / 9px 5px;
 }
 .inputrow { display: flex; gap: var(--s2); }
 .inputrow select { width: auto; flex: 0 0 auto; max-width: 45%; }
@@ -231,7 +233,9 @@ input[type='checkbox']:focus-visible { outline: 3px solid var(--act); outline-of
 .segmented button:not(.on):hover:not(:disabled) { background: var(--sel-soft); }
 .segmented button:disabled { color: var(--muted); cursor: not-allowed; }
 .segmented button:focus-visible { outline-offset: -5px; }
-.tabs .segmented { max-width: 640px; }
+.tabs .segmented { max-width: 100%; }
+/* Boucle modes: up to 6 cells on one row, two rows under 700 px */
+@media (max-width: 732px) { .tabs .segmented button { flex-basis: 30%; } }
 
 /* leverage slider: white track filled with the action colour, a white handle with its hard shadow, a tick per whole x */
 .lev-row { display: flex; align-items: flex-start; gap: var(--s3); }

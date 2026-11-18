@@ -234,7 +234,7 @@ function MorphoPosition({
       place={
         <>
           <Place text={`Morpho · ${net.label}`} />
-          {!m.listed && (m.source === 'chain' ? ' · marché lu sur la chaîne' : ' · marché non listé')}
+          {!m.listed && (m.source === 'chain' ? ' · marché lu sur le réseau' : ' · marché non listé')}
         </>
       }
       hf={hf}

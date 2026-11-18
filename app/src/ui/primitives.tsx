@@ -363,7 +363,7 @@ export function TxLink({ market, hash }: { market: Pick<Market, 'chain'>; hash: 
   if (!explorer) return null
   return (
     <a href={`${explorer.url}/tx/${hash}`} target="_blank" rel="noreferrer">
-      Voir sur {explorer.name} ↗
+      Voir sur {explorer.name}
     </a>
   )
 }
