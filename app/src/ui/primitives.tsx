@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react'
 import { AGGREGATORS, aggregatorsFor, type AggregatorChoice, type Market } from '../config'
 import type { Quote } from '../services/quotes/quotes'
 import { fmtAmount, fmtBps, fmtDollars, fmtX } from './format'
@@ -107,10 +107,15 @@ export function LeverageSlider({
     if (Number.isFinite(x) && x > 0) onChange(Math.min(max, Math.max(min, Math.round(x / step) * step)))
     setTyped(undefined)
   }
+  const fill = max > min ? ((value - min) / (max - min)) * 100 : 0
+  const at = (x: number) => `calc(${(((x - min) / (max - min)) * 100).toFixed(2)}% - ${(((x - min) / (max - min)) * 20 - 10).toFixed(2)}px)`
   return (
     <div className="field">
       <span>
         <label htmlFor={`${id}-n`}>{label}</label>
+        {aside && <span className="small">{aside}</span>}
+      </span>
+      <div className="lev-row">
         <input
           id={`${id}-n`}
           className="lev-input"
@@ -121,39 +126,49 @@ export function LeverageSlider({
           onBlur={(e) => commit(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && commit((e.target as HTMLInputElement).value)}
         />
-        <span className="muted small">{aside}</span>
-      </span>
-      <input
-        type="range"
-        aria-label={label}
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        list={`${id}-m`}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-      <datalist id={`${id}-m`}>
-        {marks.map((m) => (
-          <option key={m} value={m} />
-        ))}
-      </datalist>
-      <span className="lev-bounds muted small">
-        <span>{floor ?? fmtX(min)}</span>
-        <span>{fmtX(max)}</span>
-      </span>
+        <div className="lev-track">
+          <input
+            type="range"
+            aria-label={label}
+            min={min}
+            max={max}
+            step={step}
+            value={value}
+            style={{ '--fill': `${fill.toFixed(2)}%` } as CSSProperties}
+            onChange={(e) => onChange(Number(e.target.value))}
+          />
+          <div className="lev-ticks" aria-hidden="true">
+            {marks.map((m) => (
+              <i key={m} style={{ left: at(m) }} />
+            ))}
+          </div>
+          <span className="lev-bounds">
+            <span>{floor ?? fmtX(min)}</span>
+            <span>{fmtX(max)}</span>
+          </span>
+        </div>
+      </div>
     </div>
   )
 }
 
-/** Grey rectangle standing for a value being read. */
+/** A value being read: a pale block sweeping a white frame (charte v3, loading (d)). */
 export const Skel = ({ w = 4 }: { w?: number }) => <span className="skel" style={{ width: `${w}em` }} aria-label="chargement" />
 
-/** Help bubble: an ⓘ after a label, 2 sentences at most, opened on hover and on tap. */
+/** Help bubble: a « ? » square after a label, 2 sentences at most, opened on hover, focus and tap, closed with Escape. */
 export function Help({ children }: { children: ReactNode }) {
+  const [closed, setClosed] = useState(false)
   return (
-    <span className="help" tabIndex={0} role="note">
-      ⓘ<span className="tip">{children}</span>
+    <span
+      className={`help ${closed ? 'closed' : ''}`}
+      tabIndex={0}
+      role="note"
+      aria-label="Aide"
+      onKeyDown={(e) => e.key === 'Escape' && setClosed(true)}
+      onMouseLeave={() => setClosed(false)}
+      onBlur={() => setClosed(false)}
+    >
+      ?<span className="tip">{children}</span>
     </span>
   )
 }
@@ -163,7 +178,7 @@ export function Fold({ title, value, children, open, plain }: { title: string; v
   return (
     <details className={`fold ${plain ? 'fold-plain' : ''}`} open={open}>
       <summary>
-        {title}
+        <span className="fold-title">{title}</span>
         {value !== undefined && <span className="fold-value">{value}</span>}
       </summary>
       <div className="fold-body">{children}</div>
@@ -171,7 +186,7 @@ export function Fold({ title, value, children, open, plain }: { title: string; v
   )
 }
 
-export function Tag({ tone, children }: { tone?: 'good' | 'warn'; children: ReactNode }) {
+export function Tag({ tone, children }: { tone?: 'good' | 'warn' | 'bad'; children: ReactNode }) {
   return <span className={`tag ${tone ?? ''}`}>{children}</span>
 }
 
