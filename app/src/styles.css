@@ -496,19 +496,28 @@ tr.dim > td { color: var(--muted); }
 .scan-search { max-width: 360px; flex: 1 1 240px; }
 .scan-amount { max-width: 220px; flex: 0 1 220px; }
 .scan-progress { margin: var(--s2) 0; }
-.scan-status { margin: var(--s2) 0 0; font-size: var(--t-label); color: var(--muted); }
 .scan .btn { min-height: 32px; }
-.scan-detail > td { background: var(--sel-soft); }
-.reserves.variants { margin-top: var(--s3); }
-/* Scanner « Détail »: one row per term, the net APY last under a 2 px line */
-.contribs { display: grid; grid-template-columns: repeat(3, max-content); gap: var(--s1) 0; font-size: var(--t-ui); margin: 0 0 var(--s2); text-align: left; font-weight: 400; }
-.contribs span + span { padding-left: var(--s5); }
+/* a row: the pair in Archivo, then the network line with its pills and « Détail » */
+.scan-pair { font: 800 var(--t-d4)/1.25 var(--f-display); font-stretch: 87.5%; }
+.scan .tags { align-items: center; margin-top: 6px; }
+.scan-place { font-size: var(--t-ui); color: var(--muted); margin-right: var(--s1); }
+.scan td.num strong { font-weight: 700; }
+/* the opened row and its detail share the light pale */
+.scan tr.open > td, .scan tr.scan-detail > td, .scan tr.clickable.open:hover > td { background: var(--sel-soft); }
+.scan tr.scan-detail > td { border-top: 0; padding: 0 var(--s2) var(--s4); }
+.apy-detail { max-width: 460px; display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3); background: var(--white); border: var(--bw) solid var(--ink); border-radius: var(--r); }
+.apy-detail-title { font: 800 var(--t-d4)/1.25 var(--f-display); font-stretch: 87.5%; }
+.reserves.variants { margin-top: var(--s3); background: var(--white); border: var(--bw) solid var(--ink); border-radius: var(--r); }
+/* Scanner « Détail »: one row per term (label, calculation, amount), the net APY last under a 2 px line */
+.contribs { display: grid; grid-template-columns: minmax(0, 1fr) max-content max-content; gap: var(--s1) 0; font-size: var(--t-ui); margin: 0; text-align: left; font-weight: 400; }
+.contribs span + span { padding-left: var(--s4); }
 .contribs > div { display: contents; }
 .contribs [role='rowheader'] { color: var(--ink); }
 .contribs .num { text-align: right; white-space: nowrap; }
 .contribs .good { color: var(--good); }
 .contribs .bad { color: var(--bad); }
-.contribs .total > span { border-top: var(--bw) solid var(--ink); padding-top: var(--s1); font-weight: 700; }
+.contribs .total > span { border-top: var(--bw) solid var(--ink); padding-top: var(--s2); margin-top: var(--s1); font-weight: 700; }
+.card-head .scan-status { font-size: var(--t-ui); color: inherit; margin: 0; }
 /* narrower window: « Écart » and « Bonus Merkl » stay in « Détail », so « Ouvrir » fits */
 @media (max-width: 960px) {
   table.scan th.detail, table.scan td.detail { display: none; }
@@ -557,7 +566,13 @@ tr.dim > td { color: var(--muted); }
   table.scan.cards tr.scan-detail { display: block; }
   table.scan.cards tr.scan-detail > td { display: block; }
   table.scan.cards td.lead { grid-column: 1 / -1; display: block; }
-  table.scan.cards td.detail, table.scan.cards td.row-action { display: none; }
+  table.scan.cards td.detail { display: none; }
+  /* third line of a card: « Ouvrir » across the whole width */
+  table.scan.cards td.row-action { display: block; grid-column: 1 / -1; }
+  table.scan.cards td.row-action:empty { display: none; }
+  table.scan.cards td.row-action .btn { width: 100%; min-height: 44px; }
+  .scan tr.open { background: var(--sel-soft); }
+  .scan tr.open > td { background: none; }
   .split-grid { grid-template-columns: minmax(0, 1fr); }
   .share-row { grid-template-columns: 74px minmax(0, 1fr) 40px 64px; }
   .contribs { grid-template-columns: 1fr max-content max-content; }
@@ -565,7 +580,7 @@ tr.dim > td { color: var(--muted); }
   .spark { display: inline-block; margin: 0 0 0 var(--s2); vertical-align: middle; }
   .waterfall th { white-space: normal; width: 30%; }
 }
-@media (max-width: 760px) {
+@media (min-width: 733px) and (max-width: 760px) {
   table.scan td.row-action, table.scan thead th:last-child { display: none; }
 }
 

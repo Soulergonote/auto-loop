@@ -141,25 +141,29 @@ function ApyBreakdown({ line: l }: { line: Line }) {
   const { lines, total } = apyLines(l.parts, { lends: l.protocol === 'aave' })
   const signed = (x: number) => `${x > 0 ? '+' : ''}${fmtPct(x)}`
   return (
-    <div className="contribs" role="table" aria-label="Décomposition de l’APY net">
-      {lines.map((c) => (
-        <div role="row" key={c.label}>
-          <span role="rowheader">{c.label}</span>
-          <span role="cell" className="num muted">
-            {c.rate !== undefined && c.factor !== undefined && `${fmtPct(c.rate)} × ${fmtX(c.factor, true)}`}
-          </span>
-          <span role="cell" className={`num ${c.value < 0 ? 'bad' : c.value > 0 ? 'good' : ''}`}>
-            {signed(c.value)}
+    <div className="apy-detail">
+      <div className="apy-detail-title">Décomposition de l’APY net · levier {fmtX(l.leverage, true)}</div>
+      <div className="contribs" role="table" aria-label="Décomposition de l’APY net">
+        {lines.map((c) => (
+          <div role="row" key={c.label}>
+            <span role="rowheader">{c.label}</span>
+            <span role="cell" className="num muted">
+              {c.rate !== undefined && c.factor !== undefined && `${fmtPct(c.rate)} × ${fmtX(c.factor, true)}`}
+            </span>
+            <span role="cell" className={`num ${c.value < 0 ? 'bad' : c.value > 0 ? 'good' : ''}`}>
+              {signed(c.value)}
+            </span>
+          </div>
+        ))}
+        <div role="row" className="total">
+          <span role="rowheader">APY net</span>
+          <span role="cell" />
+          <span role="cell" className={`num ${total < 0 ? 'bad' : 'good'}`}>
+            {fmtPct(total)}
           </span>
         </div>
-      ))}
-      <div role="row" className="total">
-        <span role="rowheader">APY net</span>
-        <span role="cell" />
-        <span role="cell" className={`num ${total < 0 ? 'bad' : 'good'}`}>
-          {fmtPct(total)}
-        </span>
       </div>
+      <p className="muted small">Taux variables du jour, hors coûts d’entrée et de sortie.</p>
     </div>
   )
 }
@@ -500,322 +504,323 @@ export function Scanner({
   const hf = hfText
 
   return (
-    <Card>
-      <div className="scan-filters">
-        <div className="field">
-          <span>Protocole</span>
-          <Segmented
-            value={protocol}
-            onChange={setProtocol}
+    <>
+      <Card title="Filtres">
+        <div className="scan-filters">
+          <div className="field">
+            <span>Protocole</span>
+            <Segmented
+              value={protocol}
+              onChange={setProtocol}
+              options={[
+                { value: 'all' as Protocol, label: 'Tous' },
+                { value: 'aave' as Protocol, label: 'Aave' },
+                { value: 'morpho' as Protocol, label: 'Morpho' },
+              ]}
+            />
+          </div>
+          <Picker
+            label="Réseau"
+            value={String(chain)}
+            onChange={(v) => setScope(v === 'all' ? 'all' : Number(v))}
             options={[
-              { value: 'all' as Protocol, label: 'Tous' },
-              { value: 'aave' as Protocol, label: 'Aave' },
-              { value: 'morpho' as Protocol, label: 'Morpho' },
+              { value: 'all', label: 'Tous les réseaux' },
+              ...networks.map((n) => ({ value: String(n.chainId), label: n.label, icon: <Logo name={n.label} /> })),
             ]}
           />
+          <div className="field">
+            <span>Health factor visé</span>
+            <Segmented value={hfText} onChange={setHf} options={HFS.map((h) => ({ value: h, label: h }))} />
+          </div>
+          <div className="field">
+            <span>Type de paire</span>
+            <Segmented
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: 'correlated' as Filter, label: 'Corrélées' },
+                { value: 'stable' as Filter, label: 'Stables USD' },
+                { value: 'all' as Filter, label: 'Toutes' },
+              ]}
+            />
+          </div>
         </div>
-        <Picker
-          label="Réseau"
-          value={String(chain)}
-          onChange={(v) => setScope(v === 'all' ? 'all' : Number(v))}
-          options={[
-            { value: 'all', label: 'Tous les réseaux' },
-            ...networks.map((n) => ({ value: String(n.chainId), label: n.label, icon: <Logo name={n.label} /> })),
-          ]}
-        />
-        <div className="field">
-          <span>Health factor visé</span>
-          <Segmented value={hfText} onChange={setHf} options={HFS.map((h) => ({ value: h, label: h }))} />
-        </div>
-        <div className="field">
-          <span>Type de paire</span>
-          <Segmented
-            value={filter}
-            onChange={setFilter}
-            options={[
-              { value: 'correlated' as Filter, label: 'Corrélées' },
-              { value: 'stable' as Filter, label: 'Stables USD' },
-              { value: 'all' as Filter, label: 'Toutes' },
-            ]}
+        <div className="scan-inputs">
+          <input
+            type="search"
+            className="scan-search"
+            aria-label="Rechercher un token"
+            placeholder="Rechercher un token (wstETH, USDC…)"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <input
+            type="text"
+            inputMode="decimal"
+            className="scan-amount"
+            aria-label="Montant à boucler en dollars"
+            placeholder="Montant en $ (ex. 25k)"
+            value={amountText}
+            onChange={(e) => setAmountText(e.target.value)}
           />
         </div>
-      </div>
-      <div className="scan-inputs">
-        <input
-          type="search"
-          className="scan-search"
-          aria-label="Rechercher un token"
-          placeholder="Rechercher un token (wstETH, USDC…)"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <input
-          type="text"
-          inputMode="decimal"
-          className="scan-amount"
-          aria-label="Montant à boucler en dollars"
-          placeholder="Montant en $ (ex. 25k)"
-          value={amountText}
-          onChange={(e) => setAmountText(e.target.value)}
-        />
-      </div>
-      <label className="check">
-        <input type="checkbox" checked={showNegative} onChange={(e) => setShowNegative(e.target.checked)} /> Afficher les APY négatifs
-      </label>
-      {failed.length > 0 && loading === 0 && (
-        <Notice>
-          <span>Illisible depuis ce navigateur : {failed.join(', ')} (RPC public ou API Morpho qui ne répond pas).</span>
-          <button className="btn" onClick={retry}>
-            Réessayer
-          </button>
-        </Notice>
-      )}
-      {slow && (
-        <Notice>
-          <span>
-            {loading} marché{loading > 1 ? 's' : ''} encore en lecture : RPC publics lents.
-          </span>
-          <button className="btn" onClick={retry}>
-            Réessayer
-          </button>
-        </Notice>
-      )}
-      {merklFailed.length > 0 && (
-        <Notice>
-          Merkl indisponible pour {merklFailed.map((id) => markets.find((m) => m.chain.id === id)?.chain.name).join(', ')} : APY sans bonus là-bas.
-        </Notice>
-      )}
-      {filter === 'all' && targetHf < 1.2 && (
-        <Notice tone="bad">Un health factor de {hf} sur une paire non corrélée se fait liquider au premier mouvement de prix.</Notice>
-      )}
-      {loading > 0 && (
-        <p className="scan-progress small" aria-live="polite">
-          {progress.map((n, i) => (
-            <Fragment key={n.label}>
-              {i > 0 && ' · '}
-              <span className={n.state === 'failed' ? 'warn-text' : n.state === 'pending' ? 'muted' : undefined}>
-                {n.label} {n.state === 'failed' ? 'échec' : n.state === 'pending' ? 'en cours' : 'lu'}
-              </span>
-            </Fragment>
-          ))}
-        </p>
-      )}
-      {visible.length > 0 || loading > 0 ? (
-        <table className="reserves scan cards">
-          <thead>
-            <tr>
-              {head('pair', 'Paire', false)}
-              {head('leverage', 'Levier')}
-              {head('apy', 'APY net')}
-              {head('spread', 'Écart', true, true)}
-              {head('rewardsApy', 'Bonus Merkl', true, true)}
-              {amountUsd !== undefined && head('gainUsd', 'Gain / an')}
-              {head('capacityUsd', 'Capacité')}
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map(({ head: r, variants }) => {
-              const open = opened === r.group
-              return (
-                <Fragment key={r.group}>
-                  <tr className={`${r.open ? 'clickable' : ''} ${r.fits ? '' : 'dim'}`} onClick={r.open}>
-                    <td className="lead">
-                      {r.pair}
-                      {(chain === 'all' || protocol === 'all' || !r.open) && (
-                        <span className="muted">
-                          {' · '}
-                          <Place text={r.place} />
-                        </span>
-                      )}
-                      <div className="tags">
-                        {r.tags}
-                        {depegTag(r)}
-                        {variants.length > 0 && (
-                          <Tag>
-                            + {variants.length} marché{variants.length > 1 ? 's' : ''}
-                          </Tag>
-                        )}
-                        <button
-                          type="button"
-                          className="link"
-                          aria-expanded={open}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setOpened(open ? undefined : r.group)
-                          }}
-                        >
-                          {open ? 'Masquer le détail' : 'Détail'}
-                        </button>
-                      </div>
-                    </td>
-                    <td data-label="Levier" className="num">
-                      {fmtX(r.leverage, true)}
-                    </td>
-                    <td data-label="APY net" className={`num ${r.apy < 0 ? 'bad' : 'good'}`}>
-                      <strong>{fmtPct(r.apy)}</strong>
-                      {sparks.points.has(r.key) && <Sparkline points={sparks.points.get(r.key)!} />}
-                      {r.apyBefore !== undefined && Math.abs(r.apyBefore - r.apy) >= 0.001 && (
-                        <div className="muted small" title="APY avant l’effet de cet emprunt sur les taux">
-                          avant : {fmtPct(r.apyBefore)}
+        <label className="check">
+          <input type="checkbox" checked={showNegative} onChange={(e) => setShowNegative(e.target.checked)} /> Afficher les APY négatifs
+        </label>
+      </Card>
+      <Card title={`Meilleures boucles · HF visé ${hf}`} aside={status && <span className="scan-status">{status}</span>}>
+        {failed.length > 0 && loading === 0 && (
+          <Notice>
+            <span>Illisible depuis ce navigateur : {failed.join(', ')} (RPC public ou API Morpho qui ne répond pas).</span>
+            <button className="btn" onClick={retry}>
+              Réessayer
+            </button>
+          </Notice>
+        )}
+        {slow && (
+          <Notice>
+            <span>
+              {loading} marché{loading > 1 ? 's' : ''} encore en lecture : RPC publics lents.
+            </span>
+            <button className="btn" onClick={retry}>
+              Réessayer
+            </button>
+          </Notice>
+        )}
+        {merklFailed.length > 0 && (
+          <Notice>
+            Merkl indisponible pour {merklFailed.map((id) => markets.find((m) => m.chain.id === id)?.chain.name).join(', ')} : APY sans bonus là-bas.
+          </Notice>
+        )}
+        {filter === 'all' && targetHf < 1.2 && (
+          <Notice tone="bad">Un health factor de {hf} sur une paire non corrélée se fait liquider au premier mouvement de prix.</Notice>
+        )}
+        {loading > 0 && (
+          <p className="scan-progress small" aria-live="polite">
+            {progress.map((n, i) => (
+              <Fragment key={n.label}>
+                {i > 0 && ' · '}
+                <span className={n.state === 'failed' ? 'warn-text' : n.state === 'pending' ? 'muted' : undefined}>
+                  {n.label} {n.state === 'failed' ? 'échec' : n.state === 'pending' ? 'en cours' : 'lu'}
+                </span>
+              </Fragment>
+            ))}
+          </p>
+        )}
+        {visible.length > 0 || loading > 0 ? (
+          <table className="reserves scan cards">
+            <thead>
+              <tr>
+                {head('pair', 'Paire', false)}
+                {head('leverage', 'Levier')}
+                {head('apy', 'APY net')}
+                {head('spread', 'Écart', true, true)}
+                {head('rewardsApy', 'Bonus Merkl', true, true)}
+                {amountUsd !== undefined && head('gainUsd', 'Gain / an')}
+                {head('capacityUsd', 'Capacité')}
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map(({ head: r, variants }) => {
+                const open = opened === r.group
+                return (
+                  <Fragment key={r.group}>
+                    <tr className={`${r.open ? 'clickable' : ''} ${r.fits ? '' : 'dim'} ${open ? 'open' : ''}`} onClick={r.open}>
+                      <td className="lead">
+                        <b className="scan-pair">{r.pair}</b>
+                        <div className="tags">
+                          <span className="scan-place">
+                            <Place text={r.place} />
+                          </span>
+                          {r.tags}
+                          {depegTag(r)}
+                          {variants.length > 0 && (
+                            <Tag>
+                              + {variants.length} marché{variants.length > 1 ? 's' : ''}
+                            </Tag>
+                          )}
+                          <button
+                            type="button"
+                            className="link"
+                            aria-expanded={open}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setOpened(open ? undefined : r.group)
+                            }}
+                          >
+                            {open ? 'Masquer le détail' : 'Détail'}
+                          </button>
                         </div>
-                      )}
-                    </td>
-                    <td data-label="Écart" className={`num detail ${r.spread < 0 ? 'bad' : ''}`}>
-                      {fmtPct(r.spread)}
-                    </td>
-                    <td data-label="Bonus Merkl" className="num detail">
-                      {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : <span className="na">—</span>}
-                      {r.rewardsEnd !== undefined && <div className="muted small">jusqu’au {fmtDate(r.rewardsEnd)}</div>}
-                    </td>
-                    {amountUsd !== undefined && (
-                      <td data-label="Gain / an" className={`num ${r.gainUsd < 0 ? 'bad' : ''}`}>
-                        {r.fits ? fmtDollars(r.gainUsd, true) : <span className="na">—</span>}
-                        {r.fits && r.paybackDays !== undefined && (
-                          <div className="muted small">rentable en {fmtDays(Math.max(1, Math.ceil(r.paybackDays)))}</div>
+                      </td>
+                      <td data-label="Levier" className="num">
+                        {fmtX(r.leverage, true)}
+                      </td>
+                      <td data-label="APY net" className={`num ${r.apy < 0 ? 'bad' : 'good'}`}>
+                        <strong>{fmtPct(r.apy)}</strong>
+                        {sparks.points.has(r.key) && <Sparkline points={sparks.points.get(r.key)!} />}
+                        {r.apyBefore !== undefined && Math.abs(r.apyBefore - r.apy) >= 0.001 && (
+                          <div className="muted small" title="APY avant l’effet de cet emprunt sur les taux">
+                            avant : {fmtPct(r.apyBefore)}
+                          </div>
                         )}
                       </td>
-                    )}
-                    <td data-label="Capacité" className={`num ${r.fits ? '' : 'warn'}`} title={r.fits ? undefined : 'Trop petit pour ce montant'}>
-                      {fmtDollars(r.capacityUsd, true)}
-                    </td>
-                    <td className="row-action">
-                      {r.open && (
-                        <button
-                          className="btn small"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            r.open?.()
-                          }}
-                        >
-                          Ouvrir
-                        </button>
+                      <td data-label="Écart" className={`num detail ${r.spread < 0 ? 'bad' : ''}`}>
+                        {fmtPct(r.spread)}
+                      </td>
+                      <td data-label="Bonus Merkl" className="num detail">
+                        {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : <span className="na">—</span>}
+                        {r.rewardsEnd !== undefined && <div className="muted small">jusqu’au {fmtDate(r.rewardsEnd)}</div>}
+                      </td>
+                      {amountUsd !== undefined && (
+                        <td data-label="Gain / an" className={`num ${r.gainUsd < 0 ? 'bad' : ''}`}>
+                          {r.fits ? fmtDollars(r.gainUsd, true) : <span className="na">—</span>}
+                          {r.fits && r.paybackDays !== undefined && (
+                            <div className="muted small">rentable en {fmtDays(Math.max(1, Math.ceil(r.paybackDays)))}</div>
+                          )}
+                        </td>
                       )}
-                    </td>
-                  </tr>
-                  {open && (
-                    <tr className="scan-detail">
-                      <td colSpan={amountUsd !== undefined ? 8 : 7}>
-                        <ApyBreakdown line={r} />
-                        {variants.length > 0 && (
-                          <table className="reserves variants">
-                            <thead>
-                              <tr>
-                                <th>Autres marchés</th>
-                                <th className="num">Levier</th>
-                                <th className="num">APY net</th>
-                                <th className="num">Écart</th>
-                                <th className="num">Capacité</th>
-                                <th></th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {variants.map((v) => (
-                                <tr key={v.key} className={v.open ? 'clickable' : undefined} onClick={v.open}>
-                                  <td className="lead">
-                                    <div className="tags">
-                                      {v.tags}
-                                      {depegTag(v)}
-                                    </div>
-                                    {v.note && <div className="muted small">{v.note}</div>}
-                                  </td>
-                                  <td data-label="Levier" className="num">
-                                    {fmtX(v.leverage, true)}
-                                  </td>
-                                  <td data-label="APY net" className={`num ${v.apy < 0 ? 'bad' : 'good'}`}>
-                                    {fmtPct(v.apy)}
-                                  </td>
-                                  <td data-label="Écart" className="num">
-                                    {fmtPct(v.spread)}
-                                  </td>
-                                  <td data-label="Capacité" className="num">
-                                    {fmtDollars(v.capacityUsd, true)}
-                                  </td>
-                                  <td className="row-action">
-                                    {v.open && (
-                                      <button
-                                        className="btn small"
-                                        onClick={(e) => {
-                                          e.stopPropagation()
-                                          v.open?.()
-                                        }}
-                                      >
-                                        Ouvrir
-                                      </button>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                      <td data-label="Capacité" className="num" title={r.fits ? undefined : 'Trop petit pour ce montant'}>
+                        {r.fits ? fmtDollars(r.capacityUsd, true) : <span className="warn-text">{fmtDollars(r.capacityUsd, true)}</span>}
+                      </td>
+                      <td className="row-action">
+                        {r.open && (
+                          <button
+                            className="btn small"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              r.open?.()
+                            }}
+                          >
+                            Ouvrir
+                          </button>
                         )}
                       </td>
                     </tr>
-                  )}
-                </Fragment>
-              )
-            })}
-            {loading > 0 &&
-              visible.length < 5 &&
-              Array.from({ length: 5 - visible.length }, (_, i) => (
-                <tr key={`skel-${i}`}>
-                  <td className="lead" colSpan={amountUsd !== undefined ? 8 : 7}>
-                    <Skel w={16} />
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      ) : (
-        <p className="muted">Aucune paire ne correspond à ces filtres. Changer de health factor ou de type de paire.</p>
-      )}
-      {visible.some((g) => !g.head.fits) && <p className="muted small scan-status">Capacité en ambre, ligne grisée : trop petite pour ce montant.</p>}
-      {groups.length > ROWS && (
-        <div className="actions">
-          <span className="muted small">
-            {all ? groups.length : ROWS} paires sur {groups.length}.
-          </span>
-          <button className="btn small" onClick={() => setAll(!all)}>
-            {all ? `Afficher les ${ROWS} premières` : 'Afficher toutes les paires'}
-          </button>
-        </div>
-      )}
-      {status && <p className="muted small scan-status">{status}</p>}
-      <Fold title="Méthode" value={`levier à un health factor de ${hf}, meilleur eMode, Merkl si éligible, Morpho listé`}>
-        <p className="muted small">
-          Le levier de chaque paire donne un health factor de {hf}, plafonné comme le curseur de la boucle, dans la configuration eMode qui rapporte le plus.
-          Les bonus Merkl ne comptent que si la position y a droit à ce health factor. Les taux sont variables : l’APY change avec l’utilisation du marché.
-        </p>
-        <p className="muted small">
-          « Écart » est le rendement du collatéral moins le coût de l’emprunt, sans levier ni bonus : ce que la paire rapporte par unité de levier, la mesure à
-          comparer entre deux paires. Le rendement du collatéral compte le taux de dépôt et le rendement propre des tokens à rendement (wstETH, sUSDe,
-          syrupUSDC…), pris à la source la plus récente qui connaît le token (taux publié on-chain, Pendle, API Morpho, sinon moyenne de l’adaptateur de prix
-          Aave) ; le coût de l’emprunt retranche celui d’une dette qui en a un. Sans source, l’étiquette « rendement du token non compté » le signale. Pour un
-          PT Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe de son marché Pendle, valable jusqu’à l’échéance. « Détail » montre l’APY
-          net, une ligne par contribution ; « + N marchés » regroupe les autres marchés Morpho de la même paire sur le même réseau (autre LLTV ou autre oracle).
-        </p>
-        <p className="muted small">
-          Avec un montant : l’APY est celui juste après cette boucle, la dette ajoutée faisant monter le taux d’emprunt (courbe de taux de la réserve Aave,
-          AdaptiveCurveIRM de Morpho dont le taux cible dérive ensuite avec le temps) et le collatéral ajouté baisser son taux de dépôt ; « avant » rappelle
-          l’APY sans cet effet. « Gain / an » = APY × montant ; « rentable en N j » paie une estimation des deux swaps (entrée et sortie de l’emprunt) au
-          slippage par défaut de la paire, sans devis ; une paire dont la capacité est sous le montant passe en fin de liste, grisée. Les APR Merkl ne sont pas
-          dilués par le montant.
-        </p>
-        <p className="muted small">
-          Non compté : le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes Merkl à public restreint. La capacité est le capital encore «
-          bouclable » avant que l’actif emprunté manque de liquidité ou atteigne un plafond.
-        </p>
-        <p className="muted small">
-          Aave v4 : chaque paire collatéral / dette d’un même spoke, d’après l’API publique d’Aave, au levier qui donne ce health factor avec le facteur de
-          collatéral du spoke. Le coût de l’emprunt compte la prime de risque que ce collatéral ajoute au taux de base ; les bonus Merkl de l’API sont comptés
-          sans vérifier leurs conditions. La ligne s’ouvre dans la Boucle ; l’étiquette « non exécutable » marque un réseau où aucun agrégateur ne cote.
-        </p>
-        <p className="muted small">
-          Morpho Blue : chaque marché listé par Morpho (un collatéral, un actif emprunté, une LLTV), au levier qui donne ce health factor, plafonné au levier
-          d’un health factor de 1,02 comme le curseur. Taux de l’API Morpho, relus on-chain à l’ouverture ; « Bonus Merkl » y est la part des récompenses
-          d’emprunt que l’API compte. Les marchés avec un avertissement rouge de l’API sont écartés.
-        </p>
-      </Fold>
-    </Card>
+                    {open && (
+                      <tr className="scan-detail">
+                        <td colSpan={amountUsd !== undefined ? 8 : 7}>
+                          <ApyBreakdown line={r} />
+                          {variants.length > 0 && (
+                            <table className="reserves variants">
+                              <thead>
+                                <tr>
+                                  <th>Autres marchés</th>
+                                  <th className="num">Levier</th>
+                                  <th className="num">APY net</th>
+                                  <th className="num">Écart</th>
+                                  <th className="num">Capacité</th>
+                                  <th></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {variants.map((v) => (
+                                  <tr key={v.key} className={v.open ? 'clickable' : undefined} onClick={v.open}>
+                                    <td className="lead">
+                                      <div className="tags">
+                                        {v.tags}
+                                        {depegTag(v)}
+                                      </div>
+                                      {v.note && <div className="muted small">{v.note}</div>}
+                                    </td>
+                                    <td data-label="Levier" className="num">
+                                      {fmtX(v.leverage, true)}
+                                    </td>
+                                    <td data-label="APY net" className={`num ${v.apy < 0 ? 'bad' : 'good'}`}>
+                                      {fmtPct(v.apy)}
+                                    </td>
+                                    <td data-label="Écart" className="num">
+                                      {fmtPct(v.spread)}
+                                    </td>
+                                    <td data-label="Capacité" className="num">
+                                      {fmtDollars(v.capacityUsd, true)}
+                                    </td>
+                                    <td className="row-action">
+                                      {v.open && (
+                                        <button
+                                          className="btn small"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            v.open?.()
+                                          }}
+                                        >
+                                          Ouvrir
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
+              {loading > 0 &&
+                visible.length < 5 &&
+                Array.from({ length: 5 - visible.length }, (_, i) => (
+                  <tr key={`skel-${i}`}>
+                    <td className="lead" colSpan={amountUsd !== undefined ? 8 : 7}>
+                      <Skel w={16} />
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="muted">Aucune paire ne correspond à ces filtres. Changer de health factor ou de type de paire.</p>
+        )}
+        {visible.some((g) => !g.head.fits) && <p className="muted small scan-status">Capacité en ambre, ligne grisée : trop petite pour ce montant.</p>}
+        {groups.length > ROWS && (
+          <div className="actions">
+            <span className="muted small">
+              {all ? groups.length : ROWS} paires sur {groups.length}.
+            </span>
+            <button className="btn small" onClick={() => setAll(!all)}>
+              {all ? `Afficher les ${ROWS} premières` : 'Afficher toutes les paires'}
+            </button>
+          </div>
+        )}
+        <Fold title="Méthode" value={`levier à un health factor de ${hf}, meilleur eMode, Merkl si éligible, Morpho listé`}>
+          <p className="muted small">
+            Le levier de chaque paire donne un health factor de {hf}, plafonné comme le curseur de la boucle, dans la configuration eMode qui rapporte le plus.
+            Les bonus Merkl ne comptent que si la position y a droit à ce health factor. Les taux sont variables : l’APY change avec l’utilisation du marché.
+          </p>
+          <p className="muted small">
+            « Écart » est le rendement du collatéral moins le coût de l’emprunt, sans levier ni bonus : ce que la paire rapporte par unité de levier, la mesure
+            à comparer entre deux paires. Le rendement du collatéral compte le taux de dépôt et le rendement propre des tokens à rendement (wstETH, sUSDe,
+            syrupUSDC…), pris à la source la plus récente qui connaît le token (taux publié on-chain, Pendle, API Morpho, sinon moyenne de l’adaptateur de prix
+            Aave) ; le coût de l’emprunt retranche celui d’une dette qui en a un. Sans source, l’étiquette « rendement du token non compté » le signale. Pour un
+            PT Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe de son marché Pendle, valable jusqu’à l’échéance. « Détail » montre
+            l’APY net, une ligne par contribution ; « + N marchés » regroupe les autres marchés Morpho de la même paire sur le même réseau (autre LLTV ou autre
+            oracle).
+          </p>
+          <p className="muted small">
+            Avec un montant : l’APY est celui juste après cette boucle, la dette ajoutée faisant monter le taux d’emprunt (courbe de taux de la réserve Aave,
+            AdaptiveCurveIRM de Morpho dont le taux cible dérive ensuite avec le temps) et le collatéral ajouté baisser son taux de dépôt ; « avant » rappelle
+            l’APY sans cet effet. « Gain / an » = APY × montant ; « rentable en N j » paie une estimation des deux swaps (entrée et sortie de l’emprunt) au
+            slippage par défaut de la paire, sans devis ; une paire dont la capacité est sous le montant passe en fin de liste, grisée. Les APR Merkl ne sont
+            pas dilués par le montant.
+          </p>
+          <p className="muted small">
+            Non compté : le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes Merkl à public restreint. La capacité est le capital encore «
+            bouclable » avant que l’actif emprunté manque de liquidité ou atteigne un plafond.
+          </p>
+          <p className="muted small">
+            Aave v4 : chaque paire collatéral / dette d’un même spoke, d’après l’API publique d’Aave, au levier qui donne ce health factor avec le facteur de
+            collatéral du spoke. Le coût de l’emprunt compte la prime de risque que ce collatéral ajoute au taux de base ; les bonus Merkl de l’API sont comptés
+            sans vérifier leurs conditions. La ligne s’ouvre dans la Boucle ; l’étiquette « non exécutable » marque un réseau où aucun agrégateur ne cote.
+          </p>
+          <p className="muted small">
+            Morpho Blue : chaque marché listé par Morpho (un collatéral, un actif emprunté, une LLTV), au levier qui donne ce health factor, plafonné au levier
+            d’un health factor de 1,02 comme le curseur. Taux de l’API Morpho, relus on-chain à l’ouverture ; « Bonus Merkl » y est la part des récompenses
+            d’emprunt que l’API compte. Les marchés avec un avertissement rouge de l’API sont écartés.
+          </p>
+        </Fold>
+      </Card>
+    </>
   )
 }
