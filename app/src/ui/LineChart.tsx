@@ -46,6 +46,8 @@ export function LineChart({ points, format, formatX, tone, label, reference, mar
   const path = points.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join('')
   const pct = (v: number) => `${((y(v) / H) * 100).toFixed(2)}%`
   const h = hover !== undefined ? points[hover] : mark !== undefined ? points.find((p) => p.t === mark) : undefined
+  // today's point (the last of a time series, or the marked one), always shown in the action colour
+  const today = mark !== undefined ? points.find((p) => p.t === mark) : points[points.length - 1]
 
   const onMove = (e: PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect()
@@ -77,7 +79,8 @@ export function LineChart({ points, format, formatX, tone, label, reference, mar
             0
           </span>
         )}
-        {h && <span className="linechart-dot" style={{ left: `${(x(h.t) / W) * 100}%`, top: pct(h.v) }} aria-hidden="true" />}
+        {today && <span className="linechart-dot today" style={{ left: `${(x(today.t) / W) * 100}%`, top: pct(today.v) }} aria-hidden="true" />}
+        {h && h !== today && <span className="linechart-dot" style={{ left: `${(x(h.t) / W) * 100}%`, top: pct(h.v) }} aria-hidden="true" />}
         {h && (
           <div className={`linechart-tip ${x(h.t) > W / 2 ? 'left' : ''}`} style={{ left: `${(x(h.t) / W) * 100}%` }}>
             <span className="muted">{formatX(h.t)}</span> <b className={tone?.(h.v)}>{format(h.v)}</b>

@@ -436,7 +436,8 @@ tr.dim > td { color: var(--muted); }
 .linechart-line { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .linechart-cross { stroke: var(--muted); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .linechart-y { position: absolute; right: calc(100% + 8px); font-size: var(--t-label); color: var(--muted); white-space: nowrap; }
-.linechart-dot { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--act); border: var(--bw-sm) solid var(--ink); pointer-events: none; }
+.linechart-dot { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--white); border: var(--bw-sm) solid var(--ink); pointer-events: none; }
+.linechart-dot.today { background: var(--act); }
 .linechart-tip { position: absolute; top: 0; transform: translate(8px, 0); padding: var(--s1) var(--s2); font-size: var(--t-label); white-space: nowrap; background: var(--white); border: var(--bw) solid var(--ink); border-radius: var(--r); box-shadow: var(--sh); pointer-events: none; }
 .linechart-tip.left { transform: translate(calc(-100% - 8px), 0); }
 .linechart-x { display: flex; justify-content: space-between; gap: var(--s2); margin: var(--s1) 0 0 52px; }
@@ -574,3 +575,6 @@ tr.dim > td { color: var(--muted); }
   .skel::after { left: -2px; }
   .tx-step.on .tx-dot::after { left: -1px; }
 }
+.linechart-tip .good { color: var(--good); }
+.linechart-tip .bad { color: var(--bad); }
+.linechart-tip .warn { background: var(--warn-bg); border: var(--bw-sm) solid var(--ink); border-radius: var(--r-xs); padding: 0 4px; }
