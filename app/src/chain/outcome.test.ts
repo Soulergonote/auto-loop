@@ -52,12 +52,12 @@ describe('decodeOutcome', () => {
     expect(o.kind).toBe('open')
     expect(o.swaps).toHaveLength(2)
     expect(plain(outcomeLines(o, tokens, { supplied: 1873n * 10n ** 15n }))).toEqual([
-      'Capital 0,5 wstETH',
-      'Déposé 1,872 WETH (devis 1,873)',
-      'Emprunté 2 790,40 USDC',
-      'Swap 0,5 wstETH → 0,624 WETH',
-      'Swap 2 790,40 USDC → 1,248 WETH',
-      'Health factor 1,26',
+      'Capital 0.5 wstETH',
+      'Déposé 1.872 WETH (devis 1.873)',
+      'Emprunté 2 790.40 USDC',
+      'Swap 0.5 wstETH → 0.624 WETH',
+      'Swap 2 790.40 USDC → 1.248 WETH',
+      'Health factor 1.26',
     ])
   })
 
@@ -82,11 +82,11 @@ describe('decodeOutcome', () => {
     const o = decodeOutcome(logs, EXECUTOR, USER)!
     expect(o.healthFactor).toBe(Infinity)
     expect(plain(outcomeLines(o, tokens, { collateralReturned: 125n * 10n ** 16n }))).toEqual([
-      'Dette remboursée 4 470,50 USDC',
+      'Dette remboursée 4 470.50 USDC',
       'Collatéral retiré 3 WETH',
-      'Swap 1,75 WETH → 4 483,00 USDC',
-      'Rendu 1,25 WETH',
-      'Rendu 12,5 USDC',
+      'Swap 1.75 WETH → 4 483.00 USDC',
+      'Rendu 1.25 WETH',
+      'Rendu 12.5 USDC',
       'Health factor ∞',
     ])
   })
@@ -102,7 +102,7 @@ describe('decodeOutcome', () => {
       }),
     ]
     const lines = plain(outcomeLines(decodeOutcome(logs, EXECUTOR, USER)!, tokens))
-    expect(lines).toContain('Prime du flash loan 0,0013 wstETH')
+    expect(lines).toContain('Prime du flash loan 0.0013 wstETH')
     expect(lines[0]).toBe('Retiré 3 WETH')
   })
 
@@ -137,11 +137,11 @@ describe('decodeOutcome: change of debt', () => {
     const o = decodeOutcome(logs, EXECUTOR, USER)!
     expect(o.kind).toBe('debt')
     expect(plain(outcomeLines(o, tokens))).toEqual([
-      'Dette remboursée 3 000,00 USDC',
+      'Dette remboursée 3 000.00 USDC',
       'Nouvelle dette 1 WETH',
-      'Swap 1 WETH → 3 010,00 USDC',
+      'Swap 1 WETH → 3 010.00 USDC',
       'Rendu 10 USDC',
-      'Health factor 1,20',
+      'Health factor 1.20',
     ])
   })
 })

@@ -1,6 +1,6 @@
 /**
  * Every number shown in the app goes through here, so that the formats of the UI charter hold everywhere:
- * decimal comma, narrow no-break space between thousands, no-break space before units, true minus sign.
+ * decimal point (charte v3: « 6 138.90 $ »), narrow no-break space between thousands, no-break space before units, true minus sign.
  */
 import { formatUnits } from 'viem'
 
@@ -9,11 +9,11 @@ export const NBSP = ' '
 const MINUS = '−'
 
 const nf = (max: number, min = 0) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: max, minimumFractionDigits: min })
-/** fr-FR already groups thousands with a narrow no-break space; only the minus sign needs fixing */
-const minus = (s: string) => s.replace(/^-/, MINUS)
+/** fr-FR already groups thousands with a narrow no-break space; the decimal comma becomes a point and the minus sign a true one */
+const minus = (s: string) => s.replace(',', '.').replace(/^-/, MINUS)
 const num = (x: number, max: number, min = 0) => minus(nf(max, min).format(x))
 
-/** Token amount: 2 fixed decimals from 1 000 ("2 118,90"), 4 at most from 1, 4 significant digits below. `max` caps the decimals (8 to fill an input). */
+/** Token amount: 2 fixed decimals from 1 000 ("2 118.90"), 4 at most from 1, 4 significant digits below. `max` caps the decimals (8 to fill an input). */
 export function fmtAmount(amount: bigint, decimals: number, max?: number): string {
   const n = Number(formatUnits(amount, decimals))
   if (max !== undefined) return num(n, max)
@@ -49,7 +49,7 @@ export const fmtPct = (x: number, digits = 2) => (Number.isFinite(x) ? `${num(x 
 /** Health factor: 2 fixed decimals, ∞ without debt. */
 export const fmtHf = (x: number) => (Number.isFinite(x) ? num(x, 2, 2) : '∞')
 
-/** Leverage: "2x", "6,47x"; `fixed` keeps 2 decimals ("2,00x") so that a table column lines up. */
+/** Leverage: "2x", "6.47x"; `fixed` keeps 2 decimals ("2.00x") so that a table column lines up. */
 export const fmtX = (x: number, fixed = false) => (Number.isFinite(x) ? `${num(x, 2, fixed ? 2 : 0)}x` : '∞')
 
 /** Plain number (Merkl reward amounts…): 4 decimals, none from 100. */
@@ -77,8 +77,8 @@ export function fmtMaturity(expirySec: number, nowSec = Date.now() / 1000): stri
 /** A PT's symbol without its maturity, for tight tiles: "PT-reUSDe-10DEC2026" → "PT-reUSDe". */
 export const ptShortSymbol = (symbol: string) => symbol.replace(/-\d{1,2}[A-Z]{3}\d{4}$/, '')
 
-/** A setting given in basis points (slippage choices): "0,01 %", "0,5 %", "1 %", no padding zeros. */
+/** A setting given in basis points (slippage choices): "0.01 %", "0.5 %", "1 %", no padding zeros. */
 export const fmtBps = (bps: number | string | bigint) => `${num(Number(bps) / 100, 2)}${NBSP}%`
 
-/** A market parameter (Morpho LLTV): "86 %", "91,5 %", no padding zero. */
+/** A market parameter (Morpho LLTV): "86 %", "91.5 %", no padding zero. */
 export const fmtLltv = (x: number) => `${num(x * 100, 1)}${NBSP}%`

@@ -497,7 +497,7 @@ export function Scanner({
       sparks.failed.morpho && 'historique Morpho',
     ],
   })
-  const hf = hfText.replace('.', ',')
+  const hf = hfText
 
   return (
     <Card>
@@ -525,7 +525,7 @@ export function Scanner({
         />
         <div className="field">
           <span>Health factor visé</span>
-          <Segmented value={hfText} onChange={setHf} options={HFS.map((h) => ({ value: h, label: h.replace('.', ',') }))} />
+          <Segmented value={hfText} onChange={setHf} options={HFS.map((h) => ({ value: h, label: h }))} />
         </div>
         <div className="field">
           <span>Type de paire</span>

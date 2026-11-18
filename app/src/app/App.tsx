@@ -31,6 +31,7 @@ import { merklQuery } from '../services/merkl'
 import { useBalances } from '../chain/walletTokens'
 import { Picker } from '../ui/Picker'
 import { Logo } from '../ui/Logo'
+import { AppLogo } from '../ui/AppLogo'
 import { PrivateRpc } from '../features/loop/shared/PrivateRpc'
 import { AggregatorPicker, Card, LoopLayout, Notice, Segmented, Skel, Summary } from '../ui/primitives'
 import { ExecutorCheckNote, MockQuotesNote, PlatformLine } from './ExecutorInfo'
@@ -508,10 +509,7 @@ export function App() {
   return (
     <div className="page">
       <header className="top">
-        <h1>
-          <img className="app-icon" src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" />
-          Auto-loop
-        </h1>
+        <AppLogo />
         <WalletButton market={morpho ? morphoNet : v4 ? v4Net : market} />
       </header>
       <nav className="nav">

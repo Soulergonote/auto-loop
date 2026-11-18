@@ -116,7 +116,7 @@ export function LeverageSlider({
           className="lev-input"
           inputMode="decimal"
           aria-label={`${label} (x)`}
-          value={typed ?? String(Math.round(value * 100) / 100).replace('.', ',')}
+          value={typed ?? String(Math.round(value * 100) / 100)}
           onChange={(e) => setTyped(e.target.value)}
           onBlur={(e) => commit(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && commit((e.target as HTMLInputElement).value)}

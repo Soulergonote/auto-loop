@@ -17,7 +17,7 @@ describe('exit check before opening', () => {
     const costly = exitIssues({ sell: 'sUSDe', buy: 'USDC', noRoute: false, loss: 0.012, utilization: 0.99 })
     expect(costly.problems).toEqual([])
     expect(costly.warnings).toHaveLength(2)
-    expect(costly.warnings[0]).toContain('1,2')
+    expect(costly.warnings[0]).toContain('1.2')
     expect(costly.warnings[1]).toContain('retirer le collatéral')
     expect(exitIssues({ sell: 'a', buy: 'b', noRoute: false, loss: 0.001, utilization: 0.5 })).toEqual({ problems: [], warnings: [] })
   })

@@ -1,48 +1,106 @@
-/* Tokens of the UI charter: every colour goes through a variable; every text has at least 4.5:1 contrast. */
-:root {
-  --bg: #f6f7f9;
-  --card: #ffffff;
-  --text: #15181e;
-  --muted: #667085;
-  --border: #e3e6eb;
-  --accent: #3b5bdb;
-  --accent-text: #ffffff;
-  --good: #177a42;
-  --warn: #9a5c00;
-  --warn-bg: #fff4e0;
-  --bad: #c92a2a;
-  --bad-bg: #ffe9e9;
-  color-scheme: light;
+/* Charte v3 « Bloc »: every colour, size and shadow goes through a token; light theme only, three theme pairs. */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500 900;
+  font-stretch: 62% 125%;
+  src: url('./assets/fonts/archivo-latin-wdth.woff2') format('woff2-variations');
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1115;
-    --card: #171a21;
-    --text: #e8eaee;
-    --muted: #8f97a6;
-    --border: #2a2f3a;
-    --accent: #6e8cff;
-    --accent-text: #0f1115;
-    --good: #4cc380;
-    --warn: #f0a63a;
-    --warn-bg: #33270f;
-    --bad: #ff6b6b;
-    --bad-bg: #3a1a1a;
-    color-scheme: dark;
-  }
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 700;
+  src: url('./assets/fonts/inter-latin-wght.woff2') format('woff2-variations');
+}
+:root {
+  color-scheme: light;
+  /* neutrals, the same in every theme */
+  --paper: #f3f2ec;
+  --white: #ffffff;
+  --ink: #111111;
+  --muted: #4a4a46;
+  --rule: #d9d6ca;
+  /* blue theme, the default (ui/theme.ts) */
+  --act: #2d5bff;
+  --act-hover: #2850e0;
+  --sel: #b8c9ff;
+  --sel-soft: #e6ecff;
+  /* judgement: a number only */
+  --good: #137a3f;
+  --bad: #c4291c;
+  --warn-bg: #ffd88a;
+  --warn-arc: #d18a00;
+  --bad-bg: #ffd9d4;
+  /* type: Archivo semi-condensed for strong numbers and titles, Inter for the rest */
+  --f-display: 'Archivo', system-ui, sans-serif;
+  --f-body: 'Inter', system-ui, sans-serif;
+  --t-d1: 32px;
+  --t-d2: 24px;
+  --t-d3: 20px;
+  --t-d4: 16px;
+  --t-input: 15px;
+  --t-body: 14px;
+  --t-ui: 13px;
+  --t-label: 12px;
+  /* spacing */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  /* borders, radii, hard shadows */
+  --bw: 2px;
+  --bw-sm: 1.5px;
+  --r: 4px;
+  --r-sm: 3px;
+  --r-xs: 2px;
+  --sh: 3px 3px 0 var(--ink);
+  --sh-sm: 2px 2px 0 var(--ink);
+  --sh-lg: 4px 4px 0 var(--ink);
+  /* motion */
+  --press: 120ms ease;
+  --hover: 150ms ease;
+  /* v2 names still used below, mapped onto v3 until every rule is rewritten */
+  --bg: var(--paper);
+  --card: var(--white);
+  --text: var(--ink);
+  --border: var(--rule);
+  --accent: var(--act);
+  --accent-text: var(--white);
+  --warn: var(--ink);
+}
+:root[data-theme='violet'] {
+  --act: #6d28ff;
+  --act-hover: #6023e0;
+  --sel: #c9b8ff;
+  --sel-soft: #ece9ff;
+}
+:root[data-theme='magenta'] {
+  --act: #d6246e;
+  --act-hover: #bc2061;
+  --sel: #ffb8dd;
+  --sel-soft: #ffe6f2;
 }
 
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 var(--t-body)/1.45 var(--f-body);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-h1 { margin: 0; font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-.app-icon { width: 24px; height: 24px; flex: none; }
+/* header: the logo is a button that changes the theme, then the name in condensed Archivo */
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand h1 { margin: 0; font: 800 var(--t-d2)/1 var(--f-display); font-stretch: 75%; }
+.brand-mark { display: block; width: 30px; height: 30px; padding: 0; border: 0; background: none; cursor: pointer; flex: none; border-radius: var(--r); }
+.brand-mark svg { display: block; width: 30px; height: 30px; }
+.brand-mark:active svg { transform: translate(1px, 1px); }
 h2 { margin: 0; font-size: 15px; font-weight: 600; }
 p { margin: 0; }
 

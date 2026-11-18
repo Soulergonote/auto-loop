@@ -58,5 +58,5 @@ export function useSlippage(kind: PairKind) {
   return { slippage, setSlippage: setChosen, auto: chosen === undefined }
 }
 
-/** "0,05 % (auto)" in the folded settings line */
+/** "0.05 % (auto)" in the folded settings line */
 export const slippageNote = (auto: boolean) => (auto ? ' (auto)' : '')

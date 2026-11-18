@@ -20,4 +20,4 @@ export function liveQuote(q: Quote | undefined, what: string): Quote {
 }
 
 /** A health factor in wad as the contracts emit it (max uint256 without debt). */
-export const hfText = (x: bigint) => (x >= maxUint256 / 2n ? '∞' : (Number(x / 10n ** 14n) / 10_000).toFixed(2).replace('.', ','))
+export const hfText = (x: bigint) => (x >= maxUint256 / 2n ? '∞' : (Number(x / 10n ** 14n) / 10_000).toFixed(2))

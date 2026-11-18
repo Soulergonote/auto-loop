@@ -40,7 +40,7 @@ describe('riskSignals', () => {
       ['exit', 'good'],
       ['concentration', 'bad'],
     ])
-    expect(s[0].value).toBe('−1,00 %')
+    expect(s[0].value).toBe('−1.00 %')
   })
   it('a market above the oracle costs nothing; an uncorrelated pair gets a wider band', () => {
     expect(riskSignals({ ...base, oracleRatio: 1, marketRatio: 1.01 })[0].tone).toBe('good')
