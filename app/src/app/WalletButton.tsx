@@ -3,6 +3,7 @@ import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
 import { CHOOSE_WALLET, useWallets } from './wallets'
 import { type Market } from '../config'
 import { fmtAddress } from '../ui/format'
+import { Logo, logoOf } from '../ui/Logo'
 
 export function WalletButton({ market }: { market: { chain: Market['chain'] } }) {
   const { address, chainId, chain, isConnected } = useAccount()
@@ -73,8 +74,15 @@ export function WalletButton({ market }: { market: { chain: Market['chain'] } })
   }
   return (
     <details className="wallet-menu" ref={menu}>
-      <summary className="btn">
-        <span className={wrong ? 'warn-text' : 'muted'}>{chain?.name ?? 'Réseau inconnu'}</span>
+      <summary className="btn" title={`${chain?.name ?? 'Réseau inconnu'} · ${address}`}>
+        {/* network logo (16 px) then the short address; a network without a logo is named instead */}
+        {logoOf(chain?.name ?? '') ? (
+          <span className="wallet-logo" aria-label={chain?.name}>
+            <Logo name={chain!.name} size={16} />
+          </span>
+        ) : (
+          <span className={wrong ? 'warn-text' : 'muted'}>{chain?.name ?? 'Réseau inconnu'}</span>
+        )}
         <span className="addr">{fmtAddress(address!)}</span>
       </summary>
       <div className="menu" role="menu">
