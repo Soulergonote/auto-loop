@@ -8,8 +8,9 @@ import { v4BorrowApy } from '../../protocols/aavev4/state'
 import { withData } from '../../services/queryData'
 import { isCorrelated } from '../../domain/pairs'
 import { apyTone, hfTone } from '../../ui/tone'
-import { fmtAmount, fmtDollars, fmtHf, fmtLltv, fmtPct, fmtUsd, fmtX } from '../../ui/format'
-import { Card, Fold, Metric, Notice } from '../../ui/primitives'
+import { fmtAmount, fmtDollars, fmtLltv, fmtPct, fmtUsd, fmtX } from '../../ui/format'
+import { Card, Fold, Metric, Notice, Tag } from '../../ui/primitives'
+import { PositionCard } from './PositionCard'
 import type { V4Seed, V4Tab } from '../loop/aavev4/V4View'
 import { HfProjection } from './HfProjection'
 import { HfTargetBlock } from './HfTarget'
@@ -109,42 +110,43 @@ function V4Position({ position: p, summary: s, onManage }: { position: V4SpokePo
     C && D && onManage({ chainId: p.chainId, spoke: p.spoke.address, collateralId: C.reserve.reserveId, debtId: D.reserve.reserveId, tab, leverage, ...opts })
   const single = supplies.length === 1 && debts.length === 1
   const title = single ? `${supplies[0].reserve.token.symbol} / ${debts[0].reserve.token.symbol}` : p.spoke.name
+  const unmarked = supplies.some((h) => !h.collateral && h.reserve.collateralFactor > 0) && levered
   return (
-    <Card
-      title={
+    <PositionCard
+      title={title}
+      place={<Place text={`Aave v4 · ${chainLabel(p.chainId)}`} />}
+      hf={p.healthFactor}
+      tone={levered ? hfTone(p.healthFactor, correlated) : undefined}
+      levered={levered}
+      tags={
         <>
-          {title}
-          <span className="card-sub">
-            <Place text={`Aave v4 · ${chainLabel(p.chainId)}`} /> · spoke {p.spoke.name}
-            {s.threshold > 0 && ` · seuil ${fmtLltv(s.threshold)}`}
-          </span>
+          <Tag>spoke {p.spoke.name}</Tag>
+          {s.threshold > 0 && <Tag>seuil {fmtLltv(s.threshold)}</Tag>}
         </>
       }
-      aside={
+      warnings={unmarked ? 1 : 0}
+      equity={fmtUsd(s.equityBase)}
+      apy={s.apy !== undefined ? fmtPct(s.apy) : undefined}
+      apyTone={apyTone(s.apy)}
+      actions={
         C &&
         D && (
-          <div className="actions">
-            <button className="btn" onClick={() => manage('close', Number.isFinite(s.leverage) ? s.leverage : undefined)}>
-              Gérer
-            </button>
+          <>
             {levered && (
-              <button className="btn" onClick={() => manage('refinance')} title="Déplacer la position vers un autre spoke, Aave v3 ou Morpho">
+              <button className="btn small" onClick={() => manage('refinance')} title="Déplacer la position vers un autre spoke, Aave v3 ou Morpho">
                 Refinancer
               </button>
             )}
-          </div>
+            <button className="btn small" onClick={() => manage('close', Number.isFinite(s.leverage) ? s.leverage : undefined)}>
+              Gérer
+            </button>
+          </>
         )
       }
     >
       <div className="metrics">
         <Metric label="Valeur nette" value={fmtUsd(s.equityBase)} sub={`dette ${fmtUsd(s.debtBase, true)}`} />
         <Metric label="Levier" value={fmtX(s.leverage)} />
-        <Metric
-          label="Health factor"
-          value={fmtHf(p.healthFactor)}
-          tone={levered ? hfTone(p.healthFactor, correlated) : undefined}
-          sub={correlated ? 'paire corrélée' : undefined}
-        />
         <Metric
           label="APY net"
           value={s.apy !== undefined ? fmtPct(s.apy) : '—'}
@@ -171,7 +173,7 @@ function V4Position({ position: p, summary: s, onManage }: { position: V4SpokePo
           onRebalance={(r) => (r.direction === 'down' ? manage('close', r.leverage, { target: r.leverage }) : manage('open', r.leverage, { amount: '0' }))}
         />
       )}
-      {supplies.some((h) => !h.collateral && h.reserve.collateralFactor > 0) && levered && (
+      {unmarked && (
         <Notice>Un dépôt de ce spoke n’est pas marqué comme collatéral : il ne garantit pas la dette et ne compte pas dans le health factor.</Notice>
       )}
       <Fold
@@ -217,6 +219,6 @@ function V4Position({ position: p, summary: s, onManage }: { position: V4SpokePo
           </tbody>
         </table>
       </Fold>
-    </Card>
+    </PositionCard>
   )
 }

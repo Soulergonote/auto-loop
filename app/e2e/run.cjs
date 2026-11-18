@@ -186,7 +186,7 @@ const anvil = async (method, params) =>
   // positions: the Positions screen of the account
   if (mode === 'positions') {
     await page.getByRole('tab', { name: 'Positions' }).or(page.locator('nav >> text=Positions')).first().click()
-    await page.waitForSelector('.card h2:has-text("Ethereum")', { timeout: 120000 }).catch(() => console.log('no Ethereum card'))
+    await page.waitForSelector('.pos-card:has-text("Ethereum")', { timeout: 120000 }).catch(() => console.log('no Ethereum card'))
     await page.waitForTimeout(3000)
     await page.screenshot({ path: `${outPrefix}.png`, fullPage: true })
     console.log('metrics:', (await page.locator('.metric').allInnerTexts()).map((t) => t.replace(/\n/g, ' ')).join(' | '))
@@ -198,6 +198,8 @@ const anvil = async (method, params) =>
   // the Boucle opens prefilled (« Fermer / réduire » or « Augmenter ») and the flow below signs it
   if (mode === 'rebalance') {
     await page.locator('nav >> text=Positions').first().click()
+    // position cards are collapsed: open the first one, then its « Health factor cible » block
+    await page.locator('.pos-card .pos-toggle').first().click({ timeout: 120000 })
     await page.locator('.card summary:has-text("Health factor cible")').first().click({ timeout: 120000 })
     if (process.env.HF_TARGET) await page.locator('.card label:has-text("Cible") select').first().selectOption({ label: process.env.HF_TARGET })
     await page.waitForTimeout(1000)

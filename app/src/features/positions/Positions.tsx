@@ -9,12 +9,13 @@ import { isCorrelated } from '../../domain/pairs'
 import { apyTone, hfTone } from '../../ui/tone'
 import { fmtAddress, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtNum, fmtPct, fmtUsd, fmtX } from '../../ui/format'
 import { daysToMaturity, isExpired, needsRenewal } from '../../protocols/pendle/pt'
-import { Card, Fold, Metric, Notice, useSlow } from '../../ui/primitives'
+import { Card, Fold, Metric, Notice, Tag, useSlow } from '../../ui/primitives'
 import type { Pick } from '../scanner/Scanner'
 import { MorphoPositions, type MorphoTotals } from './MorphoPositions'
 import { V4Positions } from './V4Positions'
 import type { V4Seed } from '../loop/aavev4/V4View'
 import { PositionHistory } from './PositionHistory'
+import { PositionCard } from './PositionCard'
 import { HfProjection } from './HfProjection'
 import { thresholdOf } from '../../domain/positionBar'
 import { HfTargetBlock } from './HfTarget'
@@ -149,7 +150,7 @@ export function Positions({
 
   return (
     <GainReport.Provider value={reportGain}>
-      <Card>
+      <Card title="Vue d’ensemble">
         <label className="field">
           <span>Adresse {account && !typed ? '(portefeuille connecté)' : '(lecture seule)'}</span>
           <input placeholder={account ?? '0x…'} value={typed} onChange={(e) => setTyped(e.target.value)} spellCheck={false} />
@@ -184,6 +185,7 @@ export function Positions({
               value={done ? (lowest ? fmtHf(lowest.hf) : '∞') : undefined}
               tone={lowest && hfTone(lowest.hf, lowest.correlated)}
               sub={lowest?.label}
+              tile
             />
             <Metric
               label="Gain réel"
@@ -339,34 +341,46 @@ function MarketPosition({
     snapshot.reserves.map((r) => [r.aToken.toLowerCase(), { token: r.token.address, symbol: r.token.symbol, decimals: r.config.decimals }]),
   )
   const nowPrices = new Map(snapshot.reserves.map((r) => [r.token.address.toLowerCase(), Number(r.price) / 1e8]))
+  const warnings = (pt && (isExpired(pt) || ptDays! < 14) ? 1 : 0) + s.endingSoon.length + excluded.length
   return (
-    <Card
+    <PositionCard
       title={
         <>
           {collateral.reserve.token.symbol}
           {s.debtBase > 0n && ` / ${debt.reserve.token.symbol}`}
-          <span className="card-sub">
-            <Place text={marketPlace(market)} />
-          </span>
         </>
       }
-      aside={
+      place={<Place text={marketPlace(market)} />}
+      hf={healthFactor}
+      tone={tone}
+      levered={s.debtBase > 0n}
+      tags={
+        <>
+          {emode && <Tag>eMode {emode.label}</Tag>}
+          {pt && ptDays !== undefined && <Tag tone={ptTone === 'warn' || ptTone === 'bad' ? 'warn' : undefined}>PT · {fmtMaturity(pt.expiry)}</Tag>}
+        </>
+      }
+      warnings={warnings}
+      equity={fmtUsd(s.equityBase)}
+      apy={fmtPct(s.apy)}
+      apyTone={apyTone(s.apy)}
+      actions={
         s.debtBase > 0n && (
-          <div className="actions">
+          <>
             {canRenew && (
-              <button className="btn" onClick={() => manage('renew')}>
+              <button className="btn small" onClick={() => manage('renew')}>
                 Renouveler
               </button>
             )}
             {canReinvest && (
-              <button className="btn" onClick={() => manage('reinvest')}>
+              <button className="btn small" onClick={() => manage('reinvest')}>
                 Réinvestir
               </button>
             )}
-            <button className="btn" onClick={() => manage()}>
+            <button className="btn small" onClick={() => manage()}>
               Gérer
             </button>
-          </div>
+          </>
         )
       }
     >
@@ -377,7 +391,6 @@ function MarketPosition({
         ) : (
           <Metric label="Levier" value={fmtX(s.leverage)} sub={emode ? `eMode ${emode.label}` : 'sans eMode'} />
         )}
-        <Metric label="Health factor" value={fmtHf(healthFactor)} tone={tone} sub={correlated ? 'paire corrélée' : undefined} />
         <Metric
           label="APY net"
           value={fmtPct(s.apy)}
@@ -513,6 +526,6 @@ function MarketPosition({
           </table>
         </Fold>
       )}
-    </Card>
+    </PositionCard>
   )
 }

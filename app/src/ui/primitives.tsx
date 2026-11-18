@@ -49,9 +49,10 @@ export const NA = null
 const shown = (value: ReactNode | undefined, w?: number) => (value === undefined ? <Skel w={w} /> : value === null ? <span className="na">—</span> : value)
 
 /** Tile: label of 3 words at most, a value (undefined = being read, null = not computable), one line of sub-text at most. */
-export function Metric({ label, value, sub, tone }: { label: ReactNode; value?: ReactNode; sub?: ReactNode; tone?: Tone }) {
+export function Metric({ label, value, sub, tone, tile }: { label: ReactNode; value?: ReactNode; sub?: ReactNode; tone?: Tone; tile?: boolean }) {
+  // `tile`: a red value turns the whole tile red (the lowest health factor of the overview); amber always does
   return (
-    <div className={`metric ${value === null ? '' : (tone ?? '')}`}>
+    <div className={`metric ${value === null ? '' : (tone ?? '')} ${tile && tone === 'bad' && value !== null ? 'danger' : ''}`}>
       <div className="metric-label">{label}</div>
       <div className="metric-value">{shown(value)}</div>
       {sub && <div className="metric-sub">{sub}</div>}

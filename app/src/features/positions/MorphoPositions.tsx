@@ -19,8 +19,9 @@ import { withData } from '../../services/queryData'
 import { daysToMaturity, isExpired, needsRenewal, ptInfosQuery, type PtInfo } from '../../protocols/pendle/pt'
 import { isCorrelated } from '../../domain/pairs'
 import { apyTone, hfTone } from '../../ui/tone'
-import { fmtLltv, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../../ui/format'
-import { Card, Fold, Metric, Notice } from '../../ui/primitives'
+import { fmtLltv, fmtAmount, fmtDate, fmtDollars, fmtMaturity, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../../ui/format'
+import { Card, Fold, Metric, Notice, Tag } from '../../ui/primitives'
+import { PositionCard } from './PositionCard'
 import { morphoMarketName, type MorphoTab } from '../loop/morpho/MorphoView'
 import { PositionHistory } from './PositionHistory'
 import { HfProjection } from './HfProjection'
@@ -222,28 +223,44 @@ function MorphoPosition({
     [m.collateral.address.toLowerCase(), unitUsd(sides.collateral, m.collateral.decimals)],
     [m.loan.address.toLowerCase(), unitUsd(sides.loan, m.loan.decimals)],
   ])
+  const warnings = (pt && (isExpired(pt) || ptDays! < 14) ? 1 : 0) + (u.authorized ? 1 : 0)
   return (
-    <Card
+    <PositionCard
       title={
         <>
           {ptShortSymbol(m.collateral.symbol)} / {m.loan.symbol}
-          <span className="card-sub">
-            <Place text={`Morpho · ${net.label}`} /> · LLTV {fmtLltv(m.lltv)}
-            {!m.listed && (m.source === 'chain' ? ' · marché lu sur la chaîne' : ' · marché non listé')}
-          </span>
         </>
       }
-      aside={
-        <div className="actions">
+      place={
+        <>
+          <Place text={`Morpho · ${net.label}`} />
+          {!m.listed && (m.source === 'chain' ? ' · marché lu sur la chaîne' : ' · marché non listé')}
+        </>
+      }
+      hf={hf}
+      tone={tone}
+      levered={u.debt > 0n}
+      tags={
+        <>
+          <Tag>LLTV {fmtLltv(m.lltv)}</Tag>
+          {pt && <Tag tone={ptTone === 'warn' || ptTone === 'bad' ? 'warn' : undefined}>PT · {fmtMaturity(pt.expiry)}</Tag>}
+        </>
+      }
+      warnings={warnings}
+      equity={fmtUsd(equity)}
+      apy={apy !== undefined ? fmtPct(apy) : undefined}
+      apyTone={apyTone(apy)}
+      actions={
+        <>
           {pt && needsRenewal(pt) && u.debt > 0n && (
-            <button className="btn" onClick={() => onManage(m, 'roll')}>
+            <button className="btn small" onClick={() => onManage(m, 'roll')}>
               Renouveler
             </button>
           )}
-          <button className="btn" onClick={() => onManage(m, 'close', Number.isFinite(leverage) ? leverage : undefined)}>
+          <button className="btn small" onClick={() => onManage(m, 'close', Number.isFinite(leverage) ? leverage : undefined)}>
             Gérer
           </button>
-        </div>
+        </>
       }
     >
       <div className="metrics">
@@ -253,7 +270,6 @@ function MorphoPosition({
         ) : (
           <Metric label="Levier" value={fmtX(leverage)} />
         )}
-        <Metric label="Health factor" value={fmtHf(hf)} tone={tone} sub={correlated ? 'paire corrélée' : undefined} />
         <Metric
           label="APY net"
           value={apy !== undefined ? fmtPct(apy) : '—'}
@@ -339,6 +355,6 @@ function MorphoPosition({
           reference={u.debt > 0n ? { address: m.loan.address, symbol: m.loan.symbol } : undefined}
         />
       )}
-    </Card>
+    </PositionCard>
   )
 }
