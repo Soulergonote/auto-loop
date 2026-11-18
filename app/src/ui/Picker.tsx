@@ -15,7 +15,7 @@ export type PickerOption = {
 }
 
 /**
- * Choice in a long list (tokens, markets): a button that opens a panel with a search field and extra columns.
+ * Choice in a list: a button that opens a menu (a short list) or a window with a search field and extra columns (tokens, markets).
  * Arrow keys move, Enter picks, Escape or a click elsewhere closes.
  */
 export function Picker({
@@ -102,11 +102,14 @@ export function Picker({
           )}
         </span>
         <span className="picker-caret" aria-hidden="true">
-          ▾
+          ▼
         </span>
       </button>
+      {/* a long list (tokens, markets) opens as a window over a veiled page; a short one as a menu under its field */}
+      {open && searchable && <div className="picker-veil" aria-hidden="true" onClick={() => setOpen(false)} />}
       {open && (
-        <div className={`picker-pop ${wide ? 'wide' : ''}`}>
+        <div className={`picker-pop ${searchable ? 'modal' : ''} ${wide ? 'wide' : ''}`} role={searchable ? 'dialog' : undefined} aria-labelledby={`${id}-l`}>
+          {searchable && <div className="picker-title">{label}</div>}
           {searchable && (
             <input
               ref={search}

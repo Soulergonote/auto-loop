@@ -67,24 +67,22 @@ export function RiskPanel({
       value={`${worst ? `${worst.label.toLowerCase()} ${worst.value} · ` : ''}${collateral} −5 % : ${hfAfterDrop(healthFactor, 0.05) < 1 ? 'liquidé' : `HF ${fmtHf(hfAfterDrop(healthFactor, 0.05))}`} · APY nul si emprunt à ${fmtPct(zeroWith)}`}
     >
       <RiskSignalList signals={signals} />
+      {/* scenario chips: ink text, amber when the drop leads to the amber zone, red fill when it ends liquidated */}
+      <div className="scen">
+        <span className="scen-label">
+          HF si {collateral} baisse (aujourd’hui {fmtHf(healthFactor)})
+        </span>
+        {DROPS.map((d) => {
+          const hf = hfAfterDrop(healthFactor, d)
+          return (
+            <span key={d} className={`scen-chip ${hf < 1 ? 'bad' : (hfClass(hf) ?? '')}`}>
+              −{fmtPct(d, 0)} : {hf < 1 ? 'liquidé' : fmtHf(hf)}
+            </span>
+          )
+        })}
+      </div>
       <table className="reserves risk">
         <tbody>
-          <tr>
-            <th colSpan={DROPS.length + 1}>
-              Health factor si {collateral} baisse face à {debt} (aujourd’hui {fmtHf(healthFactor)})
-            </th>
-          </tr>
-          <tr>
-            {DROPS.map((d) => {
-              const hf = hfAfterDrop(healthFactor, d)
-              return (
-                <td key={d} className={hfClass(hf)}>
-                  −{fmtPct(d, 0)} : {hf < 1 ? 'liquidé' : fmtHf(hf)}
-                </td>
-              )
-            })}
-            <td />
-          </tr>
           <tr>
             <th colSpan={DROPS.length + 1}>
               Taux d’emprunt {debt} qui rend l’APY nul (aujourd’hui {fmtPct(borrowApy)})

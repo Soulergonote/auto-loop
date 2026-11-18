@@ -3,6 +3,7 @@
  * depeg, exit at the position's size and, on Morpho, the largest borrower's share. Each signal is read on its own;
  * one that cannot be read is left out, never guessed.
  */
+import { Metric } from '../../../ui/primitives'
 import { useQuery } from '@tanstack/react-query'
 import type { Address, Hex } from 'viem'
 import { maxDrawdown, ratioSeries, riskSignals, type RiskSignal } from '../../../domain/riskSignals'
@@ -69,18 +70,14 @@ export function useRiskSignals({ chainId, collateral, debt, correlated, oracleRa
   })
 }
 
-/** The signals as a grid of facts, coloured by the charter's tones. */
+/** The signals as tiles (3 per row in « Risques »): a value to watch makes an amber tile, ink text on it. */
 export function RiskSignalList({ signals }: { signals: RiskSignal[] }) {
   if (signals.length === 0) return null
   return (
-    <dl className="breakdown signals">
+    <div className="metrics risk-tiles">
       {signals.map((s) => (
-        <div key={s.key}>
-          <dt>{s.label}</dt>
-          <dd className={s.tone ? `${s.tone}-text` : undefined}>{s.value}</dd>
-          <dd className="muted small">{s.detail}</dd>
-        </div>
+        <Metric key={s.key} label={s.label} value={s.value} tone={s.tone} sub={s.detail} />
       ))}
-    </dl>
+    </div>
   )
 }

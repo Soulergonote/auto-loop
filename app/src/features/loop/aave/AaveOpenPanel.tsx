@@ -617,7 +617,8 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
         )}
         <div className="grid2">
           <CapitalField
-            label={capitalOptions.length > 1 ? 'Capital' : `Capital en ${C.token.symbol}`}
+            label="Capital"
+            symbol={C.token.symbol}
             balance={capBalance}
             decimals={K.decimals}
             amountText={amountText}

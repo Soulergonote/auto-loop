@@ -202,6 +202,13 @@ select {
 }
 .inputrow { display: flex; gap: var(--s2); }
 .inputrow select { width: auto; flex: 0 0 auto; max-width: 45%; }
+/* amount: the token on the right inside the field, « ≈ $ » then « solde · Max » under it */
+.amount-row { position: relative; }
+.amount-row input { flex: 1; min-width: 0; }
+.amount-unit { position: absolute; right: var(--s3); top: 50%; transform: translateY(-50%); font: 600 var(--t-input)/1 var(--f-body); color: var(--muted); pointer-events: none; }
+.amount-row:has(.amount-unit) input { padding-right: 72px; }
+.amount-foot { display: flex; justify-content: space-between; align-items: center; gap: var(--s1) var(--s2); flex-wrap: wrap; min-height: 24px; }
+.amount-foot .shares { margin: 0; align-items: center; }
 /* checkbox: an 18 px Bloc square, the action colour with a white tick when checked */
 input[type='checkbox'] {
   appearance: none; -webkit-appearance: none; flex: none; width: 18px; height: 18px; min-height: 0; padding: 0; margin: 0;
@@ -318,6 +325,11 @@ tr.dim > td { color: var(--muted); }
   background: var(--white); border: var(--bw) solid var(--ink); border-radius: var(--r); box-shadow: var(--sh-lg);
 }
 .picker-pop.wide { width: max(100%, 480px); }
+/* window: 480 px, search first, the page behind veiled in ink at 40 % */
+.picker-veil { position: fixed; inset: 0; z-index: 40; background: rgb(17 17 17 / 0.4); }
+.picker-pop.modal { position: fixed; z-index: 41; left: 50%; top: 12vh; transform: translateX(-50%); width: min(480px, calc(100vw - 32px)); max-width: none; max-height: 76vh; padding: var(--s4); gap: var(--s3); }
+.picker-pop.modal .picker-list { max-height: none; flex: 1; min-height: 0; }
+.picker-title { font: 800 var(--t-d4)/1.25 var(--f-display); font-stretch: 87.5%; }
 .picker-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; }
 .picker-row { display: grid; align-items: center; gap: var(--s3); min-height: 40px; padding: 0 var(--s2); border: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
 .picker-row + .picker-row { border-top: 1px solid var(--rule); }
@@ -409,7 +421,7 @@ tr.dim > td { color: var(--muted); }
 .outcome ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
 .rebalance-up { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s3); }
 /* capital: one-tap shares of the wallet balance */
-.shares { display: flex; gap: var(--s1); margin-top: var(--s1); }
+.shares { display: flex; gap: var(--s1); margin-top: var(--s1); flex-wrap: wrap; }
 .chip { min-height: 24px; padding: 0 var(--s2); font: 600 var(--t-label)/1 var(--f-body); color: var(--ink); background: var(--white); border: var(--bw-sm) solid var(--ink); border-radius: var(--r-sm); cursor: pointer; }
 .chip:hover { background: var(--sel-soft); }
 
@@ -423,6 +435,15 @@ tr.dim > td { color: var(--muted); }
 .breakdown .total dd { font-weight: 600; }
 .breakdown.signals { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--s2) var(--s5); margin-bottom: var(--s3); }
 .breakdown.signals dd.small { font-size: var(--t-label); }
+
+/* « Risques »: smaller tile values, scenario chips */
+.risk-tiles .metric-value { font-size: var(--t-d3); }
+.scen { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.scen-label { font-size: var(--t-label); font-weight: 600; color: var(--muted); margin-right: var(--s1); flex-basis: 100%; }
+.scen-chip { font: 600 var(--t-ui)/1 var(--f-body); padding: var(--s2); border: var(--bw-sm) solid var(--ink); border-radius: var(--r-sm); background: var(--white); color: var(--ink); }
+.scen-chip.warn { background: var(--warn-bg); }
+.scen-chip.bad { background: var(--bad-bg); }
+.reserves.risk th { padding-top: var(--s3); }
 
 /* ---------- charts ---------- */
 /* LineChart: ink line, today's dot in the action colour, light grid, dashed red reference */

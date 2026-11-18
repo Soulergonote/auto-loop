@@ -6,8 +6,8 @@ import { fmtAmount, fmtBps, fmtDate, fmtDays, fmtDollars, fmtPct } from '../../.
 import { Metric, NA, Segmented } from '../../../ui/primitives'
 import { apyTone } from '../../../ui/tone'
 
-/** Shares of the wallet balance offered as one-tap amounts. */
-const SHARES = [25, 50, 100] as const
+/** Shares of the wallet balance offered as one-tap amounts; the whole balance is « Max ». */
+const SHARES = [25, 50] as const
 
 /** An amount as the input expects it: no grouping spaces, a dot, at most 8 decimals. */
 const inputText = (amount: bigint, decimals: number) => fmtAmount(amount, decimals, 8).replace(/\s/g, '').replace(',', '.')
@@ -22,38 +22,44 @@ export function CapitalField(p: {
   decimals: number
   amountText: string
   setAmountText: (s: string) => void
-  /** the token choice, when there is one */
+  /** the token choice, when there is one, on the right of the number */
   tokenSelect?: ReactNode
+  /** the token, shown inside the field when there is no choice */
+  symbol?: string
   /** value of the amount in dollars, once it parses */
   usd?: string
   /** a line under the field (the gas reserve of a native capital) */
   note?: string
 }) {
   const balance = p.balance
+  const set = (share: bigint) => balance !== undefined && p.setAmountText(inputText((balance * share) / 100n, p.decimals))
   return (
     <div className="field">
-      <span>
-        {p.label}
-        {balance !== undefined && (
-          <button className="link" onClick={() => p.setAmountText(inputText(balance, p.decimals))}>
-            solde {fmtAmount(balance, p.decimals)}
-          </button>
-        )}
-      </span>
-      <div className="inputrow">
-        {p.tokenSelect}
+      <span>{p.label}</span>
+      {/* the number on the left, the token on the right inside the field */}
+      <div className="inputrow amount-row">
         <input aria-label="Montant du capital" inputMode="decimal" value={p.amountText} onChange={(e) => p.setAmountText(e.target.value)} />
+        {p.tokenSelect || (p.symbol && <span className="amount-unit">{p.symbol}</span>)}
       </div>
-      {balance !== undefined && balance > 0n && (
-        <div className="shares" role="group" aria-label="Part du solde">
-          {SHARES.map((share) => (
-            <button key={share} type="button" className="chip" onClick={() => p.setAmountText(inputText((balance * BigInt(share)) / 100n, p.decimals))}>
-              {share} %
-            </button>
-          ))}
-        </div>
-      )}
-      {p.usd !== undefined && <span className="muted small">≈ {p.usd}</span>}
+      <div className="amount-foot">
+        <span className="muted small">{p.usd !== undefined ? `≈ ${p.usd}` : ''}</span>
+        {balance !== undefined && (
+          <span className="shares" role="group" aria-label="Part du solde">
+            <span className="muted small">solde {fmtAmount(balance, p.decimals)}</span>
+            {balance > 0n &&
+              SHARES.map((share) => (
+                <button key={share} type="button" className="chip" onClick={() => set(BigInt(share))}>
+                  {share} %
+                </button>
+              ))}
+            {balance > 0n && (
+              <button type="button" className="chip" onClick={() => set(100n)}>
+                Max
+              </button>
+            )}
+          </span>
+        )}
+      </div>
       {p.note && <span className="muted small">{p.note}</span>}
     </div>
   )
