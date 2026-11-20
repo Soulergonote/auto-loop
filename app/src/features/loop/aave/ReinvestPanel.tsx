@@ -107,11 +107,12 @@ export function ReinvestPanel({ reserves: base, emode, user, account, aggregator
         out.push({ id: `swap:${r.token.address}`, kind: 'swap', sell: r.token, amount: reward.amount, side: r.side })
       }
       if (action.kind === 'swap') {
-        const known = all.find((r) => r.token.address.toLowerCase() === reward.token.toLowerCase())
+        // the token the wallet holds after the claim: a Merkl wrapper's underlying, not the wrapper
+        const known = all.find((r) => r.token.address.toLowerCase() === reward.paid.toLowerCase())
         out.push({
-          id: `swap:${reward.token}`,
+          id: `swap:${reward.paid}`,
           kind: 'swap',
-          sell: { address: reward.token, symbol: reward.symbol, name: reward.symbol, decimals: reward.decimals },
+          sell: { address: reward.paid, symbol: reward.symbol, name: reward.symbol, decimals: reward.decimals },
           amount: reward.amount,
           side: known?.side ?? { price: BigInt(Math.round(reward.price * 1e8)), decimals: reward.decimals },
         })

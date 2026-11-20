@@ -26,11 +26,35 @@ export const distributorAbi = parseAbi([
   'function claim(address[] users, address[] tokens, uint256[] amounts, bytes32[][] proofs)',
   'function claimed(address user, address token) view returns (uint208 amount, uint48 timestamp, bytes32 merkleRoot)',
 ])
+/** Merkl's PullTokenWrapper: a reward token the Distributor pays out as `token()`, its underlying. */
+const wrapperAbi = parseAbi(['function token() view returns (address)', 'function distributor() view returns (address)'])
+
+/**
+ * Underlying paid out for each Merkl wrapper among `tokens` (lower-cased keys). A token counts as a wrapper only when
+ * it answers both `token()` and `distributor()` with the Distributor: any other token keeps its own address.
+ */
+export function wrapperUnderlyings(tokens: Address[], results: ({ result?: unknown } | undefined)[]): Map<string, Address> {
+  const out = new Map<string, Address>()
+  tokens.forEach((t, i) => {
+    const underlying = results[2 * i]?.result
+    const distributor = results[2 * i + 1]?.result
+    if (typeof underlying !== 'string' || typeof distributor !== 'string') return
+    if (distributor.toLowerCase() !== MERKL_DISTRIBUTOR.toLowerCase() || /^0x0{40}$/i.test(underlying)) return
+    out.set(t.toLowerCase(), underlying as Address)
+  })
+  return out
+}
 const withdrawAbi = parseAbi(['function withdraw(address asset, uint256 amount, address to) returns (uint256)'])
 
 /** A reward the Distributor will pay now: the Merkle tree's cumulative amount minus what was already claimed on-chain. */
 export type Claimable = {
+  /** token of the Merkle tree, what `claim` takes */
   token: Address
+  /**
+   * token the wallet receives: `token` itself, or the underlying of a Merkl wrapper (PullTokenWrapper, e.g. Monad's
+   * "WMON" rewards), which the Distributor pays out unwrapped
+   */
+  paid: Address
   symbol: string
   decimals: number
   /** cumulative amount in the tree, what `claim` takes */
@@ -51,7 +75,12 @@ export type MerklClaimData = (MerklUserRewards[number] & {
  * Rewards claimable on `chainId`. `claimedOnChain` (by lower-cased token) wins over Merkl's own "claimed", which
  * lags the chain by hours: right after a claim the API still shows it as claimable.
  */
-export function claimables(data: MerklClaimData | undefined, chainId: number, claimedOnChain: Map<string, bigint>): Claimable[] {
+export function claimables(
+  data: MerklClaimData | undefined,
+  chainId: number,
+  claimedOnChain: Map<string, bigint>,
+  unwrapped: Map<string, Address> = new Map(),
+): Claimable[] {
   return (data ?? [])
     .filter((c) => c.chain.id === chainId)
     .flatMap((c) => c.rewards)
@@ -61,7 +90,8 @@ export function claimables(data: MerklClaimData | undefined, chainId: number, cl
       const claimed = claimedOnChain.get(token.toLowerCase()) ?? BigInt(r.claimed)
       const amount = cumulative - claimed
       if (amount <= 0n || !r.proofs?.length) return []
-      return [{ token, symbol: r.token.symbol, decimals: r.token.decimals, cumulative, amount, proofs: r.proofs as Hex[], price: r.token.price ?? 0 }]
+      const paid = unwrapped.get(token.toLowerCase()) ?? token
+      return [{ token, paid, symbol: r.token.symbol, decimals: r.token.decimals, cumulative, amount, proofs: r.proofs as Hex[], price: r.token.price ?? 0 }]
     })
 }
 
@@ -84,7 +114,8 @@ export type RewardAction =
 
 /** What happens to each claimed reward, given the market's reserves and the loop's collateral. */
 export function rewardAction(c: Claimable, reserves: SnapReserve[], collateral: Address): RewardAction {
-  const token = c.token.toLowerCase()
+  // judged on what the wallet receives: a wrapper's underlying
+  const token = c.paid.toLowerCase()
   const col = collateral.toLowerCase()
   if (token === col) return { kind: 'capital' }
   const reserve = reserves.find((r) => r.aToken.toLowerCase() === token)
@@ -186,6 +217,15 @@ export function useClaimables(chainId: number, account: Address | undefined) {
     allowFailure: true,
     query: { enabled: !!account && tokens.length > 0, refetchInterval: 30_000 },
   })
+  // a wrapper's underlying is what lands in the wallet, the token to swap after the claim (read once, it never changes)
+  const wrappers = useReadContracts({
+    contracts: tokens.flatMap((token) => [
+      { chainId, address: token, abi: wrapperAbi, functionName: 'token' } as const,
+      { chainId, address: token, abi: wrapperAbi, functionName: 'distributor' } as const,
+    ]),
+    allowFailure: true,
+    query: { enabled: tokens.length > 0, staleTime: Infinity },
+  })
   const claimedOnChain = new Map<string, bigint>()
   tokens.forEach((t, i) => {
     const r = onChain.data?.[i]?.result as readonly [bigint, number, Hex] | undefined
@@ -196,6 +236,7 @@ export function useClaimables(chainId: number, account: Address | undefined) {
     void onChain.refetch()
   }
   // before the on-chain read answers, nothing is offered: the API alone can show an already claimed reward
-  const ready = !!data && (tokens.length === 0 || !!onChain.data)
-  return { claimables: ready ? claimables(data, chainId, claimedOnChain) : [], ready, error: api.error, refetch }
+  const ready = !!data && (tokens.length === 0 || (!!onChain.data && !!wrappers.data))
+  const unwrapped = wrapperUnderlyings(tokens, wrappers.data ?? [])
+  return { claimables: ready ? claimables(data, chainId, claimedOnChain, unwrapped) : [], ready, error: api.error, refetch }
 }

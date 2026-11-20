@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { claimables, rewardAction, type Claimable, type MerklClaimData } from './reinvest'
+import { claimables, MERKL_DISTRIBUTOR, rewardAction, wrapperUnderlyings, type Claimable, type MerklClaimData } from './reinvest'
 import { addr, reserve } from '../../test/testReserves'
 
 const usde = reserve(0, 'USDe')
@@ -23,14 +23,34 @@ describe('reinvest: what is claimable', () => {
     expect(claimables(data, 8453, new Map())).toEqual([])
   })
 
+  it('swaps the underlying a Merkl wrapper pays out, not the wrapper (Monad WMON, 20 Nov 2026)', () => {
+    const wrapper = addr(0x561)
+    const other = addr(0x562)
+    const unwrapped = wrapperUnderlyings([wrapper, other, WXPL], [
+      { result: WXPL },
+      { result: MERKL_DISTRIBUTOR },
+      // token() but another distributor: not a Merkl wrapper
+      { result: WXPL },
+      { result: addr(0x999) },
+      // a plain token reverts on both
+      { error: new Error('revert') },
+      { error: new Error('revert') },
+    ] as never)
+    expect([...unwrapped]).toEqual([[wrapper.toLowerCase(), WXPL]])
+    const [c] = claimables(api([reward(wrapper, '10', '0')]), 9745, new Map(), unwrapped)
+    expect([c.token, c.paid]).toEqual([wrapper, WXPL])
+    expect(claimables(api([reward(WXPL, '10', '0')]), 9745, new Map())[0].paid).toBe(WXPL)
+  })
+
   it('skips a reward without proofs (not in the tree yet)', () => {
     expect(claimables(api([reward(WXPL, '10', '0', 1, [])]), 9745, new Map())).toEqual([])
   })
 })
 
 describe('reinvest: what each reward becomes', () => {
-  const c = (token: string, units: number, price = 1): Claimable => ({
+  const c = (token: string, units: number, price = 1, paid = token): Claimable => ({
     token: token as never,
+    paid: paid as never,
     symbol: 'X',
     decimals: 18,
     cumulative: 0n,
@@ -43,6 +63,8 @@ describe('reinvest: what each reward becomes', () => {
   it('leaves the collateral aToken where it is and takes the collateral itself as capital', () => {
     expect(rewardAction(c(usde.aToken, 10), reserves, usde.token.address).kind).toBe('deposited')
     expect(rewardAction(c(usde.token.address, 10), reserves, usde.token.address).kind).toBe('capital')
+    // a Merkl wrapper of the collateral: the claim pays the collateral itself
+    expect(rewardAction(c(addr(0x561), 10, 1, usde.token.address), reserves, usde.token.address).kind).toBe('capital')
   })
 
   it('withdraws another aToken (here the debt asset) and swaps any other token, if worth at least 1 $', () => {

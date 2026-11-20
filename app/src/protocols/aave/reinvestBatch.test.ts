@@ -92,7 +92,16 @@ describe('walletSwapProblem', () => {
 const base = (over: Partial<ReinvestBatch> = {}): ReinvestBatch => ({
   user: USER,
   rewards: [
-    { token: MORPHO.address, symbol: 'MORPHO', decimals: 18, cumulative: AMOUNT * 2n, amount: AMOUNT, proofs: ['0x' + '11'.repeat(32)] as Hex[], price: 2 },
+    {
+      token: MORPHO.address,
+      paid: MORPHO.address,
+      symbol: 'MORPHO',
+      decimals: 18,
+      cumulative: AMOUNT * 2n,
+      amount: AMOUNT,
+      proofs: ['0x' + '11'.repeat(32)] as Hex[],
+      price: 2,
+    },
   ],
   pool: POOL,
   withdrawals: [],
