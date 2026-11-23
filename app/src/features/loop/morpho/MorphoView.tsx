@@ -343,12 +343,12 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
               <dt>Collatéral</dt>
               <dd>
                 {market.collateral.symbol}
-                <ExtLink href={pendleMarketUrl(net.chain.id, pt?.market)} title={`${market.collateral.symbol} sur Pendle`} />
                 {pt
                   ? ` · PT, APY implicite ${fmtPct(collateralApy)}`
                   : market.collateralYield
                     ? ` · rendement propre ${fmtPct(market.collateralYield.apy)} (${yieldSourceText(market.collateralYield)})`
                     : ''}
+                <ExtLink href={pendleMarketUrl(net.chain.id, pt?.market)} title={`${market.collateral.symbol} sur Pendle`} />
               </dd>
               <dt>Emprunt</dt>
               <dd>

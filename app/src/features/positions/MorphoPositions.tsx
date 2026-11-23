@@ -232,7 +232,6 @@ function MorphoPosition({
         <>
           {ptShortSymbol(m.collateral.symbol)} / {m.loan.symbol}
           <ExtLink href={morphoMarketUrl(m.chainId, m.id)} title="Marché sur Morpho" />
-          <ExtLink href={pendleMarketUrl(m.chainId, pt?.market)} title={`${m.collateral.symbol} sur Pendle`} />
         </>
       }
       place={
@@ -333,6 +332,7 @@ function MorphoPosition({
               </td>
               <td className="num" data-label="APY">
                 {collateralApy ? `${fmtPct(collateralApy)} ${pt ? 'fixe' : 'token'}` : '—'}
+                <ExtLink href={pendleMarketUrl(m.chainId, pt?.market)} title={`${m.collateral.symbol} sur Pendle`} />
               </td>
             </tr>
             <tr>

@@ -99,8 +99,10 @@ type Line = {
   /** tells apart the markets of one group (Morpho: the oracle) */
   note?: string
   pair: string
-  /** ↗ after the pair: the market on the protocol's app, and Pendle for a PT */
+  /** ↗ after the pair: the market on the protocol's app */
   links: { href?: string; title: string }[]
+  /** ↗ next to a PT's fixed yield in « Détail »: its Pendle market */
+  ptUrl?: string
   /** where the Merkl page of the bonus is: known (Aave v3 campaigns) or looked up on Merkl (Morpho, Aave v4) */
   bonus?: { urls: string[] } | { chainId: number; morpho: string } | { chainId: number; v4: { collateral: Address; debt: Address } }
   place: string
@@ -155,6 +157,7 @@ function ApyBreakdown({ line: l, bonusUrls = [] }: { line: Line; bonusUrls?: str
             <span role="rowheader">
               {c.label}
               {c.label === 'Bonus Merkl' && bonusUrls.map((u) => <ExtLink key={u} href={u} title="Bonus sur Merkl" />)}
+              {l.parts.nativeFixed && c.label === 'Rendement fixe du PT' && <ExtLink href={l.ptUrl} title="Marché du PT sur Pendle" />}
             </span>
             <span role="cell" className="num muted">
               {c.rate !== undefined && c.factor !== undefined && `${fmtPct(c.rate)} × ${fmtX(c.factor, true)}`}
@@ -274,10 +277,8 @@ export function Scanner({
             rewards: r.rewardsApy,
           },
           pair: `${r.collateral.token.symbol} / ${r.debt.token.symbol}`,
-          links: [
-            { href: aaveMarketUrl(snapshot.market), title: `Marché ${marketPlace(snapshot.market)}` },
-            { href: pendleMarketUrl(snapshot.market.chain.id, r.collateral.pt?.market), title: `${r.collateral.token.symbol} sur Pendle` },
-          ],
+          links: [{ href: aaveMarketUrl(snapshot.market), title: `Marché ${marketPlace(snapshot.market)}` }],
+          ptUrl: pendleMarketUrl(snapshot.market.chain.id, r.collateral.pt?.market),
           bonus: { urls: [...new Set(r.campaigns.flatMap((c) => (c.merklUrl ? [c.merklUrl] : [])))] },
           place: marketPlace(snapshot.market),
           protocol: 'aave',
@@ -342,10 +343,8 @@ export function Scanner({
           },
           note: `oracle ${r.market.oracleType ? `${r.market.oracleType} ` : ''}${fmtAddress(r.market.params.oracle)}`,
           pair: `${ptShortSymbol(r.market.collateral.symbol)} / ${r.market.loan.symbol}`,
-          links: [
-            { href: morphoMarketUrl(n.chain.id, r.market.id), title: 'Marché sur Morpho' },
-            { href: pendleMarketUrl(n.chain.id, r.pt?.market), title: `${r.market.collateral.symbol} sur Pendle` },
-          ],
+          links: [{ href: morphoMarketUrl(n.chain.id, r.market.id), title: 'Marché sur Morpho' }],
+          ptUrl: pendleMarketUrl(n.chain.id, r.pt?.market),
           bonus: { chainId: n.chain.id, morpho: r.market.id },
           place: `Morpho · ${n.label}`,
           protocol: 'morpho',

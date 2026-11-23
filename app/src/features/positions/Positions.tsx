@@ -349,7 +349,6 @@ function MarketPosition({
       title={
         <>
           {collateral.reserve.token.symbol}
-          <ExtLink href={pendleMarketUrl(market.chain.id, pt?.market)} title={`${collateral.reserve.token.symbol} sur Pendle`} />
           {s.debtBase > 0n && <>{` / ${debt.reserve.token.symbol}`}</>}
           <ExtLink href={aaveMarketUrl(market)} title={`Marché ${marketPlace(market)}`} />
         </>
@@ -484,6 +483,7 @@ function MarketPosition({
                     <span className="muted">
                       {' '}
                       + {fmtPct(h.reserve.native.apy)} {h.reserve.native.fixedUntil ? 'fixe' : 'token'}
+                      <ExtLink href={pendleMarketUrl(market.chain.id, h.reserve.pt?.market)} title={`${h.reserve.token.symbol} sur Pendle`} />
                     </span>
                   )}
                 </td>

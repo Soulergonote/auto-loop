@@ -128,10 +128,7 @@ function AaveViewBody({
               <tbody>
                 {[r.collateral, r.debt].map((x) => (
                   <tr key={x.token.address}>
-                    <td className="lead">
-                      {x.token.symbol}
-                      <ExtLink href={pendleMarketUrl(m.chain.id, x.pt?.market)} title={`${x.token.symbol} sur Pendle`} />
-                    </td>
+                    <td className="lead">{x.token.symbol}</td>
                     <td className="num" data-label="Prix oracle">
                       {fmtPrice(x.price)}
                     </td>
@@ -145,6 +142,7 @@ function AaveViewBody({
                           <span className="muted">
                             {' '}
                             + {fmtPct(x.native.apy)} {x.native.fixedUntil ? 'fixe' : 'token'}
+                            <ExtLink href={pendleMarketUrl(m.chain.id, x.pt?.market)} title={`${x.token.symbol} sur Pendle`} />
                           </span>
                         )}
                         {x.supplyRewardApr > 0 && <span className="reward"> + {fmtPct(x.supplyRewardApr)} Merkl</span>}
