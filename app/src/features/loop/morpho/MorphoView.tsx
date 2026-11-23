@@ -12,6 +12,9 @@ import { explainError } from '../../../chain/tx'
 import { fmtLltv, fmtAddress, fmtAmount, fmtDollars, fmtPct, ptShortSymbol } from '../../../ui/format'
 import { useBalances } from '../../../chain/walletTokens'
 import { Picker } from '../../../ui/Picker'
+import { morphoMarketUrl, pendleMarketUrl } from '../../../services/links'
+import { bonusPagesQuery, morphoBonusPage } from '../../../services/merkl'
+import { ExtLink } from '../../../ui/ExtLink'
 import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, SummaryTitle, TxResult, useSlow } from '../../../ui/primitives'
 import { MorphoOpenPanel } from './MorphoOpenPanel'
 import { MorphoClosePanel } from './MorphoClosePanel'
@@ -192,6 +195,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
   })
   const ptQuery = useQuery(ptInfosQuery(chainId, market ? [market.collateral.address] : []))
   const pt = market ? ptQuery.data?.get(market.collateral.address.toLowerCase()) : undefined
+  const bonusPages = useQuery(bonusPagesQuery(chainId, !!market && market.borrowRewardsApr > 0))
   const batch = useAtomicBatch(chainId, account) === true
   const slow = useSlow(listed.isPending)
   const [revoking, setRevoking] = useState<string>()
@@ -323,10 +327,23 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
           >
             <dl className="preview">
               <dt>Marché</dt>
-              <dd className="mono">{market.id}</dd>
+              <dd className="mono">
+                {market.id}
+                <ExtLink href={morphoMarketUrl(net.chain.id, market.id)} title="Marché sur Morpho" />
+              </dd>
+              {market.borrowRewardsApr > 0 && (
+                <>
+                  <dt>Bonus</dt>
+                  <dd>
+                    {fmtPct(market.borrowRewardsApr)} sur l’emprunt
+                    <ExtLink href={morphoBonusPage(bonusPages.data, market.id)} title="Bonus sur Merkl" />
+                  </dd>
+                </>
+              )}
               <dt>Collatéral</dt>
               <dd>
                 {market.collateral.symbol}
+                <ExtLink href={pendleMarketUrl(net.chain.id, pt?.market)} title={`${market.collateral.symbol} sur Pendle`} />
                 {pt
                   ? ` · PT, APY implicite ${fmtPct(collateralApy)}`
                   : market.collateralYield

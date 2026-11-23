@@ -7,6 +7,8 @@ import { snapshotQuery, userPositionQuery, type Snapshot, type UserPosition } fr
 import { merklBalances, summarizePosition, userRewardsQuery, type PositionSummary } from './positions'
 import { isCorrelated } from '../../domain/pairs'
 import { apyTone, hfTone } from '../../ui/tone'
+import { aaveMarketUrl, pendleMarketUrl } from '../../services/links'
+import { ExtLink } from '../../ui/ExtLink'
 import { fmtAddress, fmtAmount, fmtDate, fmtDollars, fmtHf, fmtMaturity, fmtNum, fmtPct, fmtUsd, fmtX } from '../../ui/format'
 import { daysToMaturity, isExpired, needsRenewal } from '../../protocols/pendle/pt'
 import { Card, Fold, Metric, Notice, Tag, useSlow } from '../../ui/primitives'
@@ -347,7 +349,9 @@ function MarketPosition({
       title={
         <>
           {collateral.reserve.token.symbol}
-          {s.debtBase > 0n && ` / ${debt.reserve.token.symbol}`}
+          <ExtLink href={pendleMarketUrl(market.chain.id, pt?.market)} title={`${collateral.reserve.token.symbol} sur Pendle`} />
+          {s.debtBase > 0n && <>{` / ${debt.reserve.token.symbol}`}</>}
+          <ExtLink href={aaveMarketUrl(market)} title={`Marché ${marketPlace(market)}`} />
         </>
       }
       place={<Place text={marketPlace(market)} />}
@@ -510,7 +514,10 @@ function MarketPosition({
             <tbody>
               {paying.map((c) => (
                 <tr key={c.campaign.name + c.campaign.token}>
-                  <td className="lead">{c.campaign.name}</td>
+                  <td className="lead">
+                    {c.campaign.name}
+                    <ExtLink href={c.campaign.merklUrl} title="Campagne sur Merkl" />
+                  </td>
                   <td className="num" data-label="APR affiché">
                     {fmtPct(c.campaign.apr)}
                   </td>

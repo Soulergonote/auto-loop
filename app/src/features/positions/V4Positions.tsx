@@ -8,6 +8,8 @@ import { v4BorrowApy } from '../../protocols/aavev4/state'
 import { withData } from '../../services/queryData'
 import { isCorrelated } from '../../domain/pairs'
 import { apyTone, hfTone } from '../../ui/tone'
+import { aaveV4SpokeUrl } from '../../services/links'
+import { ExtLink } from '../../ui/ExtLink'
 import { fmtAmount, fmtDollars, fmtLltv, fmtPct, fmtUsd, fmtX } from '../../ui/format'
 import { Card, Fold, Metric, Notice, Tag } from '../../ui/primitives'
 import { PositionCard } from './PositionCard'
@@ -109,11 +111,15 @@ function V4Position({ position: p, summary: s, onManage }: { position: V4SpokePo
   const manage = (tab: V4Tab, leverage?: number, opts?: { amount?: string; target?: number }) =>
     C && D && onManage({ chainId: p.chainId, spoke: p.spoke.address, collateralId: C.reserve.reserveId, debtId: D.reserve.reserveId, tab, leverage, ...opts })
   const single = supplies.length === 1 && debts.length === 1
-  const title = single ? `${supplies[0].reserve.token.symbol} / ${debts[0].reserve.token.symbol}` : p.spoke.name
   const unmarked = supplies.some((h) => !h.collateral && h.reserve.collateralFactor > 0) && levered
   return (
     <PositionCard
-      title={title}
+      title={
+        <>
+          {single ? `${supplies[0].reserve.token.symbol} / ${debts[0].reserve.token.symbol}` : p.spoke.name}
+          <ExtLink href={aaveV4SpokeUrl(p.chainId, p.spoke.address)} title={`Spoke ${p.spoke.name} sur Aave v4`} />
+        </>
+      }
       place={<Place text={`Aave v4 · ${chainLabel(p.chainId)}`} />}
       hf={p.healthFactor}
       tone={levered ? hfTone(p.healthFactor, correlated) : undefined}

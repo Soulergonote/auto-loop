@@ -19,6 +19,8 @@ import { withData } from '../../services/queryData'
 import { daysToMaturity, isExpired, needsRenewal, ptInfosQuery, type PtInfo } from '../../protocols/pendle/pt'
 import { isCorrelated } from '../../domain/pairs'
 import { apyTone, hfTone } from '../../ui/tone'
+import { morphoMarketUrl, pendleMarketUrl } from '../../services/links'
+import { ExtLink } from '../../ui/ExtLink'
 import { fmtLltv, fmtAmount, fmtDate, fmtDollars, fmtMaturity, fmtPct, fmtUsd, fmtX, ptShortSymbol } from '../../ui/format'
 import { Card, Fold, Metric, Notice, Tag } from '../../ui/primitives'
 import { PositionCard } from './PositionCard'
@@ -229,6 +231,8 @@ function MorphoPosition({
       title={
         <>
           {ptShortSymbol(m.collateral.symbol)} / {m.loan.symbol}
+          <ExtLink href={morphoMarketUrl(m.chainId, m.id)} title="Marché sur Morpho" />
+          <ExtLink href={pendleMarketUrl(m.chainId, pt?.market)} title={`${m.collateral.symbol} sur Pendle`} />
         </>
       }
       place={

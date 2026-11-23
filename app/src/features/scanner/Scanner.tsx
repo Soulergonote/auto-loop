@@ -2,7 +2,9 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import { useQueries, useQuery } from '@tanstack/react-query'
 import type { Address } from 'viem'
 import { MARKETS, MORPHO_NETWORKS, aggregatorsFor, getMarket, marketPlace, networkName, type Market } from '../../config'
-import { merklQuery } from '../../services/merkl'
+import { bonusPagesQuery, merklQuery, morphoBonusPage, v4BonusPage } from '../../services/merkl'
+import { aaveMarketUrl, aaveV4SpokeUrl, morphoMarketUrl, pendleMarketUrl } from '../../services/links'
+import { ExtLink } from '../../ui/ExtLink'
 import { withData } from '../../services/queryData'
 import { snapshotQuery } from '../../protocols/aave/snapshot'
 import { scanMarket, type ScanFlag } from './aaveScan'
@@ -97,6 +99,10 @@ type Line = {
   /** tells apart the markets of one group (Morpho: the oracle) */
   note?: string
   pair: string
+  /** ↗ after the pair: the market on the protocol's app, and Pendle for a PT */
+  links: { href?: string; title: string }[]
+  /** where the Merkl page of the bonus is: known (Aave v3 campaigns) or looked up on Merkl (Morpho, Aave v4) */
+  bonus?: { urls: string[] } | { chainId: number; morpho: string } | { chainId: number; v4: { collateral: Address; debt: Address } }
   place: string
   protocol: 'aave' | 'morpho'
   tags: ReactNode[]
@@ -137,7 +143,7 @@ const flagTags = (flags: (ScanFlag | MorphoScanFlag)[]) =>
   ))
 
 /** The net APY of a line, one row per contribution (deposit rate apart from the token's own yield), the net APY last. */
-function ApyBreakdown({ line: l }: { line: Line }) {
+function ApyBreakdown({ line: l, bonusUrls = [] }: { line: Line; bonusUrls?: string[] }) {
   const { lines, total } = apyLines(l.parts, { lends: l.protocol === 'aave' })
   const signed = (x: number) => `${x > 0 ? '+' : ''}${fmtPct(x)}`
   return (
@@ -146,7 +152,10 @@ function ApyBreakdown({ line: l }: { line: Line }) {
       <div className="contribs" role="table" aria-label="Décomposition de l’APY net">
         {lines.map((c) => (
           <div role="row" key={c.label}>
-            <span role="rowheader">{c.label}</span>
+            <span role="rowheader">
+              {c.label}
+              {c.label === 'Bonus Merkl' && bonusUrls.map((u) => <ExtLink key={u} href={u} title="Bonus sur Merkl" />)}
+            </span>
             <span role="cell" className="num muted">
               {c.rate !== undefined && c.factor !== undefined && `${fmtPct(c.rate)} × ${fmtX(c.factor, true)}`}
             </span>
@@ -265,6 +274,11 @@ export function Scanner({
             rewards: r.rewardsApy,
           },
           pair: `${r.collateral.token.symbol} / ${r.debt.token.symbol}`,
+          links: [
+            { href: aaveMarketUrl(snapshot.market), title: `Marché ${marketPlace(snapshot.market)}` },
+            { href: pendleMarketUrl(snapshot.market.chain.id, r.collateral.pt?.market), title: `${r.collateral.token.symbol} sur Pendle` },
+          ],
+          bonus: { urls: [...new Set(r.campaigns.flatMap((c) => (c.merklUrl ? [c.merklUrl] : [])))] },
           place: marketPlace(snapshot.market),
           protocol: 'aave',
           tags: [
@@ -328,6 +342,11 @@ export function Scanner({
           },
           note: `oracle ${r.market.oracleType ? `${r.market.oracleType} ` : ''}${fmtAddress(r.market.params.oracle)}`,
           pair: `${ptShortSymbol(r.market.collateral.symbol)} / ${r.market.loan.symbol}`,
+          links: [
+            { href: morphoMarketUrl(n.chain.id, r.market.id), title: 'Marché sur Morpho' },
+            { href: pendleMarketUrl(n.chain.id, r.pt?.market), title: `${r.market.collateral.symbol} sur Pendle` },
+          ],
+          bonus: { chainId: n.chain.id, morpho: r.market.id },
           place: `Morpho · ${n.label}`,
           protocol: 'morpho',
           tags: [
@@ -376,6 +395,8 @@ export function Scanner({
         },
         note: `spoke ${C.spoke.name}`,
         pair: `${C.token.symbol} / ${D.token.symbol}`,
+        links: [{ href: aaveV4SpokeUrl(C.chainId, C.spoke.address), title: `Spoke ${C.spoke.name} sur Aave v4` }],
+        bonus: { chainId: C.chainId, v4: { collateral: C.token.address, debt: D.token.address } },
         place: `Aave v4 · ${C.network}`,
         protocol: 'aave',
         tags: [
@@ -415,6 +436,21 @@ export function Scanner({
     }
     return out.sort((a, b) => b.apy - a.apy)
   }, [snapshotData, merklData, chainIds, morphoNets, morphoListData, morphoPts, targetHf, amountUsd, v4.data])
+
+  // Merkl pages of the Morpho and Aave v4 bonuses, read only on the chains that have one
+  const bonusChains = useMemo(
+    () => [...new Set(rows.flatMap((r) => (r.rewardsApy > 0 && r.bonus && 'chainId' in r.bonus ? [r.bonus.chainId] : [])))].sort((a, b) => a - b),
+    [rows],
+  )
+  const { data: bonusPages } = useQueries({ queries: bonusChains.map((id) => bonusPagesQuery(id)), combine: withData })
+  const bonusUrls = (r: Line): string[] => {
+    const b = r.bonus
+    if (!b) return []
+    if ('urls' in b) return b.urls
+    const pages = bonusPages[bonusChains.indexOf(b.chainId)]
+    const urls = 'morpho' in b ? [morphoBonusPage(pages, b.morpho)] : [v4BonusPage(pages, b.v4.collateral, 'supply'), v4BonusPage(pages, b.v4.debt, 'borrow')]
+    return [...new Set(urls.filter((u): u is string => !!u))]
+  }
 
   // past depeg of the correlated pairs (I4): daily prices over 90 days, one DefiLlama request per 25 tokens
   const depegTokens = useMemo(() => {
@@ -628,7 +664,12 @@ export function Scanner({
                   <Fragment key={r.group}>
                     <tr className={`${r.open ? 'clickable' : ''} ${r.fits ? '' : 'dim'} ${open ? 'open' : ''}`} onClick={r.open}>
                       <td className="lead">
-                        <b className="scan-pair">{r.pair}</b>
+                        <b className="scan-pair">
+                          {r.pair}
+                          {r.links.map((l) => (
+                            <ExtLink key={l.title} href={l.href} title={l.title} />
+                          ))}
+                        </b>
                         <div className="tags">
                           <span className="scan-place">
                             <Place text={r.place} />
@@ -670,6 +711,7 @@ export function Scanner({
                       </td>
                       <td data-label="Bonus Merkl" className="num detail">
                         {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : <span className="na">—</span>}
+                        {r.rewardsApy > 0 && bonusUrls(r).map((u) => <ExtLink key={u} href={u} title="Bonus sur Merkl" />)}
                         {r.rewardsEnd !== undefined && <div className="muted small">jusqu’au {fmtDate(r.rewardsEnd)}</div>}
                       </td>
                       {amountUsd !== undefined && (
@@ -700,7 +742,7 @@ export function Scanner({
                     {open && (
                       <tr className="scan-detail">
                         <td colSpan={amountUsd !== undefined ? 8 : 7}>
-                          <ApyBreakdown line={r} />
+                          <ApyBreakdown line={r} bonusUrls={bonusUrls(r)} />
                           {variants.length > 0 && (
                             <table className="reserves variants">
                               <thead>

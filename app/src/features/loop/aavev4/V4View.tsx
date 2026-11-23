@@ -10,6 +10,9 @@ import { useAtomicBatch } from '../../../chain/batch'
 import { explainError } from '../../../chain/tx'
 import { fmtAddress, fmtAmount, fmtDollars, fmtLltv, fmtPct } from '../../../ui/format'
 import { Picker } from '../../../ui/Picker'
+import { aaveV4SpokeUrl } from '../../../services/links'
+import { bonusPagesQuery, v4BonusPage } from '../../../services/merkl'
+import { ExtLink } from '../../../ui/ExtLink'
 import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, SummaryTitle, useSlow } from '../../../ui/primitives'
 import { V4OpenPanel } from './V4OpenPanel'
 import { V4ClosePanel } from './V4ClosePanel'
@@ -222,6 +225,7 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
   const slow = useSlow(list.isPending)
   const s = state.data
   const explorer = net.chain.blockExplorers?.default.url
+  const bonusPages = useQuery(bonusPagesQuery(chainId, !!pair && (pair.collateral.supplyRewardApy > 0 || pair.debt.borrowRewardApy > 0)))
 
   // the account's premium follows its collaterals: this one alone, or what the spoke reports when others back it too
   const riskPremium = collateral ? (s?.user?.otherPositions ? s.user.riskPremium : collateral.collateralRisk) : 0
@@ -231,7 +235,17 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
     <>
       {notes}
       {!net.executor && <V4DeployPanel net={net} onReady={onExecutor} />}
-      <Card title="Marché">
+      <Card
+        title={
+          <>
+            Marché
+            <ExtLink
+              href={pair && aaveV4SpokeUrl(chainId, pair.collateral.spoke.address)}
+              title={pair ? `Spoke ${pair.collateral.spoke.name} sur Aave v4` : 'Aave v4'}
+            />
+          </>
+        }
+      >
         {networkSelect}
         {spoke && pair ? (
           <>
@@ -307,14 +321,26 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
                 {pair.collateral.token.symbol} · réserve {pair.collateral.reserveId}
                 {pair.collateral.hub && ` · hub ${pair.collateral.hub}`} · prêt {fmtPct(pair.collateral.supplyApy)}
                 {pair.collateral.underlyingApy > 0 && ` + rendement propre ${fmtPct(pair.collateral.underlyingApy)}`}
-                {pair.collateral.supplyRewardApy > 0 && <span className="reward"> + {fmtPct(pair.collateral.supplyRewardApy)} récompenses</span>}
+                {pair.collateral.supplyRewardApy > 0 && (
+                  <span className="reward">
+                    {' '}
+                    + {fmtPct(pair.collateral.supplyRewardApy)} récompenses
+                    <ExtLink href={v4BonusPage(bonusPages.data, pair.collateral.token.address, 'supply')} title="Bonus sur Merkl" />
+                  </span>
+                )}
               </dd>
               <dt>Emprunt</dt>
               <dd>
                 {pair.debt.token.symbol} · réserve {pair.debt.reserveId}
                 {pair.debt.hub && ` · hub ${pair.debt.hub}`} · {fmtPct(pair.debt.borrowApy)} de base
                 {riskPremium > 0 && ` + prime de risque ${fmtPct(pair.debt.borrowApy * riskPremium)}`}
-                {pair.debt.borrowRewardApy > 0 && <span className="reward"> − {fmtPct(pair.debt.borrowRewardApy)} récompenses</span>}
+                {pair.debt.borrowRewardApy > 0 && (
+                  <span className="reward">
+                    {' '}
+                    − {fmtPct(pair.debt.borrowRewardApy)} récompenses
+                    <ExtLink href={v4BonusPage(bonusPages.data, pair.debt.token.address, 'borrow')} title="Bonus sur Merkl" />
+                  </span>
+                )}
               </dd>
               <dt>Liquidité</dt>
               <dd>

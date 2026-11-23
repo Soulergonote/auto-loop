@@ -17,6 +17,8 @@ import { type Pick } from '../../scanner/Scanner'
 import { needsRenewal } from '../../../protocols/pendle/pt'
 import { yieldSourceText } from '../../../services/yield/nativeYield'
 import { toBase } from '../../../domain/math'
+import { aaveMarketUrl, pendleMarketUrl } from '../../../services/links'
+import { ExtLink } from '../../../ui/ExtLink'
 
 /** How the Boucle screen opens a pair: eMode and leverage, the tab, and for « Ouvrir » a capital amount and token. */
 export type Seed = { emode: number; leverage: number; tab?: Pick['tab']; amount?: string; capital?: Address }
@@ -97,7 +99,14 @@ function AaveViewBody({
       {!DEMO && (pt || r?.debt.pt) && m.executorVersion === 2 && !m.executorPendle && m.executorSource === 'wallet' && (
         <DeployPanel market={m} upgrade="pendle" onReady={onExecutor} />
       )}
-      <Card title="Marché">
+      <Card
+        title={
+          <>
+            Marché
+            <ExtLink href={aaveMarketUrl(m)} title={`Marché ${protocolName(m)} ${m.label}`} />
+          </>
+        }
+      >
         {selectors}
         {market.error && <Notice>Lecture d’Aave impossible : {market.error.message.split('\n')[0]}</Notice>}
         {r === null && <Notice tone="bad">Cette paire n’est pas listée sur Aave v3 {m.label}.</Notice>}
@@ -119,7 +128,10 @@ function AaveViewBody({
               <tbody>
                 {[r.collateral, r.debt].map((x) => (
                   <tr key={x.token.address}>
-                    <td className="lead">{x.token.symbol}</td>
+                    <td className="lead">
+                      {x.token.symbol}
+                      <ExtLink href={pendleMarketUrl(m.chain.id, x.pt?.market)} title={`${x.token.symbol} sur Pendle`} />
+                    </td>
                     <td className="num" data-label="Prix oracle">
                       {fmtPrice(x.price)}
                     </td>

@@ -186,6 +186,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn.swap { width: 44px; min-height: 44px; padding: 0; font-size: 16px; }
 .link { background: none; border: 0; padding: 0; color: var(--ink); font-size: var(--t-label); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .link:hover { text-decoration-thickness: 2px; }
+/* ↗ to a protocol or Merkl page, next to a name: discreet, ink on hover */
+.ext { margin-left: 1px; color: var(--muted); font-size: var(--t-label); font-weight: 600; text-decoration: none; }
+.ext::after { content: '↗'; }
+.ext:hover { color: var(--ink); }
 .actions { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
 
 /* ---------- inputs ---------- */

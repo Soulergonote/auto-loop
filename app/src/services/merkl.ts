@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { isAddress, type Address } from 'viem'
 import { DEMO, type Market } from '../config'
 import { fmtHf } from '../ui/format'
+import { merklOpportunityUrl } from './links'
 
 /**
  * Merkl incentive campaigns on Aave v3 (public API, no key). What each campaign type rewards, as the API
@@ -46,11 +47,14 @@ export type Campaign = {
   endsAt?: number
   description?: string
   url?: string
+  /** the opportunity's page on app.merkl.xyz */
+  merklUrl?: string
 }
 
 type Hook = { healthFactorThreshold?: string; borrowBytesLike?: string[]; [k: string]: unknown }
 
 type Opportunity = {
+  id?: string
   type: string
   action: string
   name: string
@@ -114,6 +118,7 @@ export function toCampaign(o: Opportunity): Campaign | undefined {
     endsAt: end > 0 ? end : undefined,
     description: o.description,
     url: o.depositUrl,
+    merklUrl: o.id ? merklOpportunityUrl(o.id) : undefined,
   }
 }
 
@@ -148,6 +153,47 @@ export const merklQuery = (chainId: number) => ({
   staleTime: 5 * 60_000,
   retry: 1,
 })
+
+/**
+ * Merkl pages of the bonuses the app reads from Morpho's and Aave v4's own APIs, which do not name the Merkl
+ * opportunity: told apart by the protocol page Merkl sends to (`depositUrl`): the Morpho market id, or the Aave v4
+ * asset on pro.aave.com with the side in the opportunity type (AAVE_V4_*_SUPPLY / _LENDING or _BORROW / _BORROWING).
+ */
+export type BonusPage = { url: string; depositUrl: string; type: string }
+
+export async function fetchBonusPages(chainId: number, signal: AbortSignal): Promise<BonusPage[]> {
+  const out: BonusPage[] = []
+  for (const protocol of ['morpho', 'aave'])
+    for (let page = 0; page < 3; page++) {
+      const q = new URLSearchParams({ chainId: String(chainId), mainProtocolId: protocol, status: 'LIVE', items: String(PAGE), page: String(page) })
+      const res = await fetch(`${MERKL_API}?${q}`, { signal })
+      if (!res.ok) throw new Error(`Merkl : HTTP ${res.status}`)
+      const list = (await res.json()) as Opportunity[]
+      for (const o of list)
+        if (o.id && o.depositUrl && (protocol === 'morpho' || o.type.startsWith('AAVE_V4_')))
+          out.push({ url: merklOpportunityUrl(o.id), depositUrl: o.depositUrl.toLowerCase(), type: o.type })
+      if (list.length < PAGE) break
+    }
+  return out
+}
+
+export const bonusPagesQuery = (chainId: number, enabled = true) => ({
+  queryKey: ['merkl-pages', chainId],
+  queryFn: ({ signal }: { signal: AbortSignal }) => fetchBonusPages(chainId, signal),
+  enabled: enabled && !DEMO,
+  staleTime: 30 * 60_000,
+  retry: 1,
+})
+
+/** Merkl page of the bonus on borrowing in a Morpho market. */
+export const morphoBonusPage = (pages: BonusPage[] | undefined, marketId: string) =>
+  pages?.find((p) => p.depositUrl.includes(`/market/${marketId.toLowerCase()}`))?.url
+
+/** Merkl page of the bonus on supplying (collateral) or borrowing (debt) an asset on Aave v4. */
+export function v4BonusPage(pages: BonusPage[] | undefined, asset: string, side: 'supply' | 'borrow') {
+  const borrow = (t: string) => /BORROW/.test(t)
+  return pages?.find((p) => p.depositUrl.endsWith(`/${asset.toLowerCase()}`) && borrow(p.type) === (side === 'borrow'))?.url
+}
 
 export function useCampaigns(market: Market) {
   return useQuery(merklQuery(market.chain.id))

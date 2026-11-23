@@ -40,8 +40,8 @@ export function CampaignTable({ campaigns, yields, excluded, borrowed }: Props) 
           return (
             <tr key={c.name + c.token}>
               <td className="lead">
-                {c.url ? (
-                  <a href={c.url} target="_blank" rel="noreferrer">
+                {c.merklUrl ? (
+                  <a href={c.merklUrl} target="_blank" rel="noreferrer" title="Campagne sur Merkl">
                     {c.name}
                   </a>
                 ) : (

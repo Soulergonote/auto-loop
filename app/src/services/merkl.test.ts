@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { campaignsForPair, campaignYields, daysLeft, eligibleForPosition, parseNetOf, rewardsOverHorizon, toCampaign } from './merkl'
+import {
+  campaignsForPair,
+  campaignYields,
+  daysLeft,
+  eligibleForPosition,
+  morphoBonusPage,
+  parseNetOf,
+  rewardsOverHorizon,
+  toCampaign,
+  v4BonusPage,
+} from './merkl'
 
 // Shapes copied from api.merkl.xyz/v4/opportunities (2026-11-01), addresses shortened to test ones.
 const A_USDE = '0x00000000000000000000000000000000000000a1'
@@ -105,5 +115,19 @@ describe('Merkl campaigns', () => {
     const y = campaignYields(campaignsForPair([c], collateral, debt), 2, collateral, debt)
     // 20 % on equity at 2x, paid 9 days out of 90
     expect(rewardsOverHorizon(y, 90, now)).toBeCloseTo(0.02)
+  })
+})
+
+describe('Merkl pages of Morpho and Aave v4 bonuses', () => {
+  const pages = [
+    { url: 'https://app.merkl.xyz/opportunities/1', depositUrl: 'https://app.morpho.org/base/market/0xabc/usde-usdc#market', type: 'MORPHOBORROW' },
+    { url: 'https://app.merkl.xyz/opportunities/2', depositUrl: 'https://pro.aave.com/explore/asset/1/0xdd', type: 'AAVE_V4_HUB_NET_LENDING' },
+    { url: 'https://app.merkl.xyz/opportunities/3', depositUrl: 'https://pro.aave.com/explore/asset/1/0xdd', type: 'AAVE_V4_HUB_NET_BORROWING' },
+  ]
+  it('finds the page by market id or by asset and side', () => {
+    expect(morphoBonusPage(pages, '0xABC')).toBe('https://app.merkl.xyz/opportunities/1')
+    expect(morphoBonusPage(pages, '0xabd')).toBeUndefined()
+    expect(v4BonusPage(pages, '0xDD', 'supply')).toBe('https://app.merkl.xyz/opportunities/2')
+    expect(v4BonusPage(pages, '0xDD', 'borrow')).toBe('https://app.merkl.xyz/opportunities/3')
   })
 })
