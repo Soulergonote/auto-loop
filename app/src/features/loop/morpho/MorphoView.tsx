@@ -247,7 +247,13 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
           <TxResult market={net} result={moved.result} />
         </Card>
       )}
-      <Card title="Marché">
+      <Card
+        title={
+          <ExtLink href={market && morphoMarketUrl(net.chain.id, market.id)} title="Marché sur Morpho">
+            Marché
+          </ExtLink>
+        }
+      >
         {networkSelect}
         <div className="market-row two">
           {market ? (
@@ -328,27 +334,35 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
             <dl className="preview">
               <dt>Marché</dt>
               <dd className="mono">
-                {market.id}
-                <ExtLink href={morphoMarketUrl(net.chain.id, market.id)} title="Marché sur Morpho" />
+                <ExtLink href={morphoMarketUrl(net.chain.id, market.id)} title="Marché sur Morpho">
+                  {market.id}
+                </ExtLink>
               </dd>
               {market.borrowRewardsApr > 0 && (
                 <>
                   <dt>Bonus</dt>
                   <dd>
-                    {fmtPct(market.borrowRewardsApr)} sur l’emprunt
-                    <ExtLink href={morphoBonusPage(bonusPages.data, market.id)} title="Bonus sur Merkl" />
+                    <ExtLink href={morphoBonusPage(bonusPages.data, market.id, market.loan.address)} title="Bonus sur Merkl">
+                      {fmtPct(market.borrowRewardsApr)} sur l’emprunt
+                    </ExtLink>
                   </dd>
                 </>
               )}
               <dt>Collatéral</dt>
               <dd>
                 {market.collateral.symbol}
-                {pt
-                  ? ` · PT, APY implicite ${fmtPct(collateralApy)}`
-                  : market.collateralYield
-                    ? ` · rendement propre ${fmtPct(market.collateralYield.apy)} (${yieldSourceText(market.collateralYield)})`
-                    : ''}
-                <ExtLink href={pendleMarketUrl(net.chain.id, pt?.market)} title={`${market.collateral.symbol} sur Pendle`} />
+                {pt ? (
+                  <>
+                    {' · PT, '}
+                    <ExtLink href={pendleMarketUrl(net.chain.id, pt.market)} title={`${market.collateral.symbol} sur Pendle`}>
+                      APY implicite {fmtPct(collateralApy)}
+                    </ExtLink>
+                  </>
+                ) : market.collateralYield ? (
+                  ` · rendement propre ${fmtPct(market.collateralYield.apy)} (${yieldSourceText(market.collateralYield)})`
+                ) : (
+                  ''
+                )}
               </dd>
               <dt>Emprunt</dt>
               <dd>

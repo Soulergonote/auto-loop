@@ -237,13 +237,12 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
       {!net.executor && <V4DeployPanel net={net} onReady={onExecutor} />}
       <Card
         title={
-          <>
+          <ExtLink
+            href={pair && aaveV4SpokeUrl(chainId, pair.collateral.spoke.address)}
+            title={pair ? `Spoke ${pair.collateral.spoke.name} sur Aave v4` : 'Aave v4'}
+          >
             Marché
-            <ExtLink
-              href={pair && aaveV4SpokeUrl(chainId, pair.collateral.spoke.address)}
-              title={pair ? `Spoke ${pair.collateral.spoke.name} sur Aave v4` : 'Aave v4'}
-            />
-          </>
+          </ExtLink>
         }
       >
         {networkSelect}
@@ -324,8 +323,10 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
                 {pair.collateral.supplyRewardApy > 0 && (
                   <span className="reward">
                     {' '}
-                    + {fmtPct(pair.collateral.supplyRewardApy)} récompenses
-                    <ExtLink href={v4BonusPage(bonusPages.data, pair.collateral.token.address, 'supply')} title="Bonus sur Merkl" />
+                    +{' '}
+                    <ExtLink href={v4BonusPage(bonusPages.data, pair.collateral.token.address, 'supply')} title="Bonus sur Merkl">
+                      {fmtPct(pair.collateral.supplyRewardApy)} récompenses
+                    </ExtLink>
                   </span>
                 )}
               </dd>
@@ -337,8 +338,10 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
                 {pair.debt.borrowRewardApy > 0 && (
                   <span className="reward">
                     {' '}
-                    − {fmtPct(pair.debt.borrowRewardApy)} récompenses
-                    <ExtLink href={v4BonusPage(bonusPages.data, pair.debt.token.address, 'borrow')} title="Bonus sur Merkl" />
+                    −{' '}
+                    <ExtLink href={v4BonusPage(bonusPages.data, pair.debt.token.address, 'borrow')} title="Bonus sur Merkl">
+                      {fmtPct(pair.debt.borrowRewardApy)} récompenses
+                    </ExtLink>
                   </span>
                 )}
               </dd>

@@ -189,6 +189,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* ↗ to a protocol or Merkl page, next to a name: discreet, ink on hover */
 .ext { margin-left: 1px; color: var(--muted); font-size: var(--t-label); font-weight: 600; text-decoration: none; }
 .ext::after { content: '↗'; }
+/* the text itself as the link (Boucle): bold, underlined like any link */
+.ext-text { color: inherit; font-weight: 600; }
 .ext:hover { color: var(--ink); }
 .actions { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
 

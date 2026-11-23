@@ -104,7 +104,7 @@ type Line = {
   /** ↗ next to a PT's fixed yield in « Détail »: its Pendle market */
   ptUrl?: string
   /** where the Merkl page of the bonus is: known (Aave v3 campaigns) or looked up on Merkl (Morpho, Aave v4) */
-  bonus?: { urls: string[] } | { chainId: number; morpho: string } | { chainId: number; v4: { collateral: Address; debt: Address } }
+  bonus?: { urls: string[] } | { chainId: number; morpho: string; loan: Address } | { chainId: number; v4: { collateral: Address; debt: Address } }
   place: string
   protocol: 'aave' | 'morpho'
   tags: ReactNode[]
@@ -345,7 +345,7 @@ export function Scanner({
           pair: `${ptShortSymbol(r.market.collateral.symbol)} / ${r.market.loan.symbol}`,
           links: [{ href: morphoMarketUrl(n.chain.id, r.market.id), title: 'Marché sur Morpho' }],
           ptUrl: pendleMarketUrl(n.chain.id, r.pt?.market),
-          bonus: { chainId: n.chain.id, morpho: r.market.id },
+          bonus: { chainId: n.chain.id, morpho: r.market.id, loan: r.market.loan.address },
           place: `Morpho · ${n.label}`,
           protocol: 'morpho',
           tags: [
@@ -447,7 +447,8 @@ export function Scanner({
     if (!b) return []
     if ('urls' in b) return b.urls
     const pages = bonusPages[bonusChains.indexOf(b.chainId)]
-    const urls = 'morpho' in b ? [morphoBonusPage(pages, b.morpho)] : [v4BonusPage(pages, b.v4.collateral, 'supply'), v4BonusPage(pages, b.v4.debt, 'borrow')]
+    const urls =
+      'morpho' in b ? [morphoBonusPage(pages, b.morpho, b.loan)] : [v4BonusPage(pages, b.v4.collateral, 'supply'), v4BonusPage(pages, b.v4.debt, 'borrow')]
     return [...new Set(urls.filter((u): u is string => !!u))]
   }
 

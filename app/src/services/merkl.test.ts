@@ -120,13 +120,25 @@ describe('Merkl campaigns', () => {
 
 describe('Merkl pages of Morpho and Aave v4 bonuses', () => {
   const pages = [
-    { url: 'https://app.merkl.xyz/opportunities/1', depositUrl: 'https://app.morpho.org/base/market/0xabc/usde-usdc#market', type: 'MORPHOBORROW' },
-    { url: 'https://app.merkl.xyz/opportunities/2', depositUrl: 'https://pro.aave.com/explore/asset/1/0xdd', type: 'AAVE_V4_HUB_NET_LENDING' },
-    { url: 'https://app.merkl.xyz/opportunities/3', depositUrl: 'https://pro.aave.com/explore/asset/1/0xdd', type: 'AAVE_V4_HUB_NET_BORROWING' },
+    {
+      url: 'https://app.merkl.xyz/opportunities/1',
+      depositUrl: 'https://app.morpho.org/base/market/0xabc/usde-usdc#market',
+      type: 'MORPHOBORROW',
+      identifier: '',
+    },
+    { url: 'https://app.merkl.xyz/opportunities/2', depositUrl: 'https://pro.aave.com/explore/asset/1/0xdd', type: 'AAVE_V4_HUB_NET_LENDING', identifier: '' },
+    {
+      url: 'https://app.merkl.xyz/opportunities/3',
+      depositUrl: 'https://pro.aave.com/explore/asset/1/0xdd',
+      type: 'AAVE_V4_HUB_NET_BORROWING',
+      identifier: '',
+    },
+    { url: 'https://app.merkl.xyz/opportunities/4', depositUrl: 'https://app.morpho.org/arc/borrow', type: 'MORPHOBORROW_SINGLETOKEN', identifier: '0x36' },
   ]
   it('finds the page by market id or by asset and side', () => {
     expect(morphoBonusPage(pages, '0xABC')).toBe('https://app.merkl.xyz/opportunities/1')
     expect(morphoBonusPage(pages, '0xabd')).toBeUndefined()
+    expect(morphoBonusPage(pages, '0xabd', '0x36')).toBe('https://app.merkl.xyz/opportunities/4')
     expect(v4BonusPage(pages, '0xDD', 'supply')).toBe('https://app.merkl.xyz/opportunities/2')
     expect(v4BonusPage(pages, '0xDD', 'borrow')).toBe('https://app.merkl.xyz/opportunities/3')
   })

@@ -159,7 +159,7 @@ export const merklQuery = (chainId: number) => ({
  * opportunity: told apart by the protocol page Merkl sends to (`depositUrl`): the Morpho market id, or the Aave v4
  * asset on pro.aave.com with the side in the opportunity type (AAVE_V4_*_SUPPLY / _LENDING or _BORROW / _BORROWING).
  */
-export type BonusPage = { url: string; depositUrl: string; type: string }
+export type BonusPage = { url: string; depositUrl: string; type: string; identifier: string }
 
 export async function fetchBonusPages(chainId: number, signal: AbortSignal): Promise<BonusPage[]> {
   const out: BonusPage[] = []
@@ -171,7 +171,7 @@ export async function fetchBonusPages(chainId: number, signal: AbortSignal): Pro
       const list = (await res.json()) as Opportunity[]
       for (const o of list)
         if (o.id && o.depositUrl && (protocol === 'morpho' || o.type.startsWith('AAVE_V4_')))
-          out.push({ url: merklOpportunityUrl(o.id), depositUrl: o.depositUrl.toLowerCase(), type: o.type })
+          out.push({ url: merklOpportunityUrl(o.id), depositUrl: o.depositUrl.toLowerCase(), type: o.type, identifier: o.identifier.toLowerCase() })
       if (list.length < PAGE) break
     }
   return out
@@ -185,9 +185,13 @@ export const bonusPagesQuery = (chainId: number, enabled = true) => ({
   retry: 1,
 })
 
-/** Merkl page of the bonus on borrowing in a Morpho market. */
-export const morphoBonusPage = (pages: BonusPage[] | undefined, marketId: string) =>
-  pages?.find((p) => p.depositUrl.includes(`/market/${marketId.toLowerCase()}`))?.url
+/**
+ * Merkl page of the bonus on borrowing in a Morpho market: the market's own campaign, else one paying the borrow of
+ * the loan token on any market (MORPHOBORROW_SINGLETOKEN, identifier = the token).
+ */
+export const morphoBonusPage = (pages: BonusPage[] | undefined, marketId: string, loan?: string) =>
+  pages?.find((p) => p.depositUrl.includes(`/market/${marketId.toLowerCase()}`))?.url ??
+  (loan ? pages?.find((p) => p.type === 'MORPHOBORROW_SINGLETOKEN' && p.identifier === loan.toLowerCase())?.url : undefined)
 
 /** Merkl page of the bonus on supplying (collateral) or borrowing (debt) an asset on Aave v4. */
 export function v4BonusPage(pages: BonusPage[] | undefined, asset: string, side: 'supply' | 'borrow') {
@@ -270,7 +274,16 @@ export function headlineRewards(all: Campaign[] | undefined, r: Side) {
   const d = r.variableDebtToken.toLowerCase()
   const sum = (f: (c: Campaign) => boolean) => (all ?? []).filter(f).reduce((s, c) => s + c.apr, 0)
   return {
-    supply: sum((c) => (c.kind === 'supply' || c.kind === 'netLending') && c.token === a),
-    borrow: sum((c) => (c.kind === 'borrow' || c.kind === 'netBorrowing') && c.token === d),
+    supply: sum((c) => isHeadlineSupply(c, a)),
+    borrow: sum((c) => isHeadlineBorrow(c, d)),
   }
+}
+
+const isHeadlineSupply = (c: Campaign, aToken: string) => (c.kind === 'supply' || c.kind === 'netLending') && c.token === aToken
+const isHeadlineBorrow = (c: Campaign, debtToken: string) => (c.kind === 'borrow' || c.kind === 'netBorrowing') && c.token === debtToken
+
+/** Merkl page of the biggest headline campaign on supplying / borrowing a reserve (the « + x % Merkl » of a rate). */
+export function headlinePages(all: Campaign[] | undefined, r: Side) {
+  const best = (f: (c: Campaign) => boolean) => (all ?? []).filter((c) => f(c) && c.merklUrl).sort((x, y) => y.apr - x.apr)[0]?.merklUrl
+  return { supply: best((c) => isHeadlineSupply(c, r.aToken.toLowerCase())), borrow: best((c) => isHeadlineBorrow(c, r.variableDebtToken.toLowerCase())) }
 }

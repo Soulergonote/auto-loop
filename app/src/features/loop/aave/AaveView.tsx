@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { formatUnits, type Address } from 'viem'
 import { networkName, protocolName, DEMO, type AggregatorChoice, type Market, type Token } from '../../../config'
 import { eligibleEModes, useEModeCategories, useMarket, withEMode, withIncentives } from '../../../protocols/aave/useMarket'
-import { useCampaigns } from '../../../services/merkl'
+import { headlinePages, useCampaigns } from '../../../services/merkl'
 import { fmtDate, fmtPct, fmtPrice } from '../../../ui/format'
 import { WINDOWS, useRateAverages, type Window } from '../../../protocols/aave/rateHistory'
 import { useClaimables } from '../../../protocols/aave/reinvest'
@@ -101,10 +101,9 @@ function AaveViewBody({
       )}
       <Card
         title={
-          <>
+          <ExtLink href={aaveMarketUrl(m)} title={`Marché ${protocolName(m)} ${m.label}`}>
             Marché
-            <ExtLink href={aaveMarketUrl(m)} title={`Marché ${protocolName(m)} ${m.label}`} />
-          </>
+          </ExtLink>
         }
       >
         {selectors}
@@ -141,11 +140,25 @@ function AaveViewBody({
                         {x.native && (
                           <span className="muted">
                             {' '}
-                            + {fmtPct(x.native.apy)} {x.native.fixedUntil ? 'fixe' : 'token'}
-                            <ExtLink href={pendleMarketUrl(m.chain.id, x.pt?.market)} title={`${x.token.symbol} sur Pendle`} />
+                            +{' '}
+                            {x.native.fixedUntil ? (
+                              <ExtLink href={pendleMarketUrl(m.chain.id, x.pt?.market)} title={`${x.token.symbol} sur Pendle`}>
+                                {fmtPct(x.native.apy)} fixe
+                              </ExtLink>
+                            ) : (
+                              `${fmtPct(x.native.apy)} token`
+                            )}
                           </span>
                         )}
-                        {x.supplyRewardApr > 0 && <span className="reward"> + {fmtPct(x.supplyRewardApr)} Merkl</span>}
+                        {x.supplyRewardApr > 0 && (
+                          <span className="reward">
+                            {' '}
+                            +{' '}
+                            <ExtLink href={headlinePages(incentives.data, x).supply} title="Bonus sur Merkl">
+                              {fmtPct(x.supplyRewardApr)} Merkl
+                            </ExtLink>
+                          </span>
+                        )}
                         <Averages values={averages.data?.get(x.token.address.toLowerCase())?.supply} pending={averages.isPending} />
                       </div>
                     </td>
@@ -158,7 +171,15 @@ function AaveViewBody({
                             + {fmtPct(x.native.apy)} {x.native.fixedUntil ? 'fixe' : 'token'}
                           </span>
                         )}
-                        {x.borrowRewardApr > 0 && <span className="reward"> − {fmtPct(x.borrowRewardApr)} Merkl</span>}
+                        {x.borrowRewardApr > 0 && (
+                          <span className="reward">
+                            {' '}
+                            −{' '}
+                            <ExtLink href={headlinePages(incentives.data, x).borrow} title="Bonus sur Merkl">
+                              {fmtPct(x.borrowRewardApr)} Merkl
+                            </ExtLink>
+                          </span>
+                        )}
                         <Averages values={averages.data?.get(x.token.address.toLowerCase())?.borrow} pending={averages.isPending} />
                       </div>
                     </td>
