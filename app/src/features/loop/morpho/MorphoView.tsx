@@ -9,7 +9,7 @@ import { verifyMorphoExecutor } from '../../../chain/deploy'
 import { revokeMorphoAuthorization } from '../../../protocols/morpho/execute'
 import { useAtomicBatch } from '../../../chain/batch'
 import { explainError } from '../../../chain/tx'
-import { fmtLltv, fmtAddress, fmtAmount, fmtDollars, fmtPct, ptShortSymbol } from '../../../ui/format'
+import { fmtLltv, fmtAddress, fmtAmount, fmtDollars, fmtPct, fmtPrice, ptShortSymbol } from '../../../ui/format'
 import { useBalances } from '../../../chain/walletTokens'
 import { Picker } from '../../../ui/Picker'
 import { morphoMarketUrl, pendleMarketUrl } from '../../../services/links'
@@ -331,57 +331,81 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
             title="Taux Morpho"
             value={`emprunt ${market.loan.symbol} ${fmtPct(borrowApy)}${market.borrowRewardsApr > 0 ? ` − ${fmtPct(market.borrowRewardsApr)} récompenses` : ''} · LLTV ${fmtLltv(market.lltv)}`}
           >
-            <dl className="preview">
-              <dt>Marché</dt>
-              <dd className="mono">
-                <ExtLink href={morphoMarketUrl(net.chain.id, market.id)} title="Marché sur Morpho">
-                  {market.id}
-                </ExtLink>
-              </dd>
-              {market.borrowRewardsApr > 0 && (
-                <>
-                  <dt>Bonus</dt>
-                  <dd>
-                    <ExtLink href={morphoBonusPage(bonusPages.data, market.id, market.loan.address)} title="Bonus sur Merkl">
-                      {fmtPct(market.borrowRewardsApr)} sur l’emprunt
-                    </ExtLink>
-                  </dd>
-                </>
-              )}
-              <dt>Collatéral</dt>
-              <dd>
-                {market.collateral.symbol}
-                {pt ? (
-                  <>
-                    {' · PT, '}
-                    <ExtLink href={pendleMarketUrl(net.chain.id, pt.market)} title={`${market.collateral.symbol} sur Pendle`}>
-                      APY implicite {fmtPct(collateralApy)}
-                    </ExtLink>
-                  </>
-                ) : market.collateralYield ? (
-                  ` · rendement propre ${fmtPct(market.collateralYield.apy)} (${yieldSourceText(market.collateralYield)})`
-                ) : (
-                  ''
-                )}
-              </dd>
-              <dt>Emprunt</dt>
-              <dd>
-                {fmtPct(borrowApy)} {s?.borrowApy !== undefined ? '(taux de l’IRM lu on-chain)' : '(API Morpho)'}
-                {market.borrowRewardsApr > 0 && <span className="reward"> − {fmtPct(market.borrowRewardsApr)} récompenses</span>}
-              </dd>
-              <dt>Liquidité</dt>
-              <dd>
-                {usd(market.liquidityUsd)} · utilisation {fmtPct(market.utilization, 1)} ·{' '}
-                {market.collateralTotalUsd > 0 ? `collatéral déposé ${usd(market.collateralTotalUsd)}` : `emprunté ${usd(market.borrowUsd)}`}
-              </dd>
-              <dt>Oracle</dt>
-              <dd>
-                <a href={`${net.chain.blockExplorers?.default.url}/address/${market.params.oracle}`} target="_blank" rel="noreferrer">
-                  <span className="addr">{fmtAddress(market.params.oracle)}</span>
-                </a>{' '}
-                {market.oracleType ?? ''}
-              </dd>
-            </dl>
+            <table className="reserves cards">
+              <thead>
+                <tr>
+                  <th>Actif</th>
+                  <th className="num">Prix</th>
+                  <th className="num">LLTV</th>
+                  <th className="num">APY dépôt</th>
+                  <th className="num">APY emprunt</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="lead">{market.collateral.symbol}</td>
+                  <td className="num" data-label="Prix">
+                    {market.collateralUsd > 0 ? fmtPrice(BigInt(Math.round(market.collateralUsd * 1e8))) : '—'}
+                  </td>
+                  <td className="num" data-label="LLTV">
+                    {fmtLltv(market.lltv)}
+                  </td>
+                  <td className="num" data-label="APY dépôt">
+                    {pt ? (
+                      <ExtLink href={pendleMarketUrl(net.chain.id, pt.market)} title={`${market.collateral.symbol} sur Pendle`}>
+                        {fmtPct(collateralApy)} fixe
+                      </ExtLink>
+                    ) : market.collateralYield ? (
+                      <span title={yieldSourceText(market.collateralYield)}>{fmtPct(market.collateralYield.apy)} token</span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td className="num" data-label="APY emprunt">
+                    —
+                  </td>
+                </tr>
+                <tr>
+                  <td className="lead">{market.loan.symbol}</td>
+                  <td className="num" data-label="Prix">
+                    {market.loanUsd > 0 ? fmtPrice(BigInt(Math.round(market.loanUsd * 1e8))) : '—'}
+                  </td>
+                  <td className="num" data-label="LLTV">
+                    —
+                  </td>
+                  <td className="num" data-label="APY dépôt">
+                    —
+                  </td>
+                  <td className="num" data-label="APY emprunt">
+                    <div>
+                      {fmtPct(borrowApy)}
+                      {market.borrowRewardsApr > 0 && (
+                        <span className="reward">
+                          {' '}
+                          −{' '}
+                          <ExtLink href={morphoBonusPage(bonusPages.data, market.id, market.loan.address)} title="Bonus sur Merkl">
+                            {fmtPct(market.borrowRewardsApr)} Merkl
+                          </ExtLink>
+                        </span>
+                      )}
+                      <div className="muted small">{s?.borrowApy !== undefined ? 'taux de l’IRM lu on-chain' : 'taux de l’API Morpho'}</div>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="small">
+              Marché{' '}
+              <ExtLink href={morphoMarketUrl(net.chain.id, market.id)} title="Marché sur Morpho">
+                {fmtAddress(market.id)}
+              </ExtLink>{' '}
+              · liquidité {usd(market.liquidityUsd)} · utilisation {fmtPct(market.utilization, 1)} ·{' '}
+              {market.collateralTotalUsd > 0 ? `collatéral déposé ${usd(market.collateralTotalUsd)}` : `emprunté ${usd(market.borrowUsd)}`} · oracle{' '}
+              <a href={`${net.chain.blockExplorers?.default.url}/address/${market.params.oracle}`} target="_blank" rel="noreferrer">
+                <span className="addr">{fmtAddress(market.params.oracle)}</span>
+              </a>{' '}
+              {market.oracleType ?? ''}
+            </p>
             <p className="muted small">
               Sur Morpho, chaque marché est isolé : un collatéral, une dette, un oracle et un LLTV (seuil de liquidation) fixés à sa création. La liquidation a
               lieu quand le health factor (valeur du collatéral à l’oracle × LLTV / dette) passe sous 1.

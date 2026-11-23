@@ -8,7 +8,7 @@ import { readV4State, v4BorrowApy, v4PairKey, v4Sides, type V4Pair, type V4State
 import { verifyV4Executor } from '../../../chain/deploy'
 import { useAtomicBatch } from '../../../chain/batch'
 import { explainError } from '../../../chain/tx'
-import { fmtAddress, fmtAmount, fmtDollars, fmtLltv, fmtPct } from '../../../ui/format'
+import { fmtAddress, fmtAmount, fmtDollars, fmtLltv, fmtPct, fmtPrice } from '../../../ui/format'
 import { Picker } from '../../../ui/Picker'
 import { aaveV4SpokeUrl } from '../../../services/links'
 import { bonusPagesQuery, v4BonusPage } from '../../../services/merkl'
@@ -307,50 +307,97 @@ export function V4View({ net, networkSelect, account, aggregator, common, notes,
             title="Taux Aave v4"
             value={`emprunt ${pair.debt.token.symbol} ${fmtPct(borrowApy)}${pair.debt.borrowRewardApy > 0 ? ` − ${fmtPct(pair.debt.borrowRewardApy)} récompenses` : ''} · seuil ${fmtLltv(pair.collateral.collateralFactor)}`}
           >
-            <dl className="preview">
-              <dt>Spoke</dt>
-              <dd>
-                {pair.collateral.spoke.name}{' '}
-                <a href={`${explorer}/address/${pair.collateral.spoke.address}`} target="_blank" rel="noreferrer" title={pair.collateral.spoke.address}>
-                  <span className="addr">{fmtAddress(pair.collateral.spoke.address)}</span>
-                </a>
-              </dd>
-              <dt>Collatéral</dt>
-              <dd>
-                {pair.collateral.token.symbol} · réserve {pair.collateral.reserveId}
-                {pair.collateral.hub && ` · hub ${pair.collateral.hub}`} · prêt {fmtPct(pair.collateral.supplyApy)}
-                {pair.collateral.underlyingApy > 0 && ` + rendement propre ${fmtPct(pair.collateral.underlyingApy)}`}
-                {pair.collateral.supplyRewardApy > 0 && (
-                  <span className="reward">
-                    {' '}
-                    +{' '}
-                    <ExtLink href={v4BonusPage(bonusPages.data, pair.collateral.token.address, 'supply')} title="Bonus sur Merkl">
-                      {fmtPct(pair.collateral.supplyRewardApy)} récompenses
-                    </ExtLink>
-                  </span>
-                )}
-              </dd>
-              <dt>Emprunt</dt>
-              <dd>
-                {pair.debt.token.symbol} · réserve {pair.debt.reserveId}
-                {pair.debt.hub && ` · hub ${pair.debt.hub}`} · {fmtPct(pair.debt.borrowApy)} de base
-                {riskPremium > 0 && ` + prime de risque ${fmtPct(pair.debt.borrowApy * riskPremium)}`}
-                {pair.debt.borrowRewardApy > 0 && (
-                  <span className="reward">
-                    {' '}
-                    −{' '}
-                    <ExtLink href={v4BonusPage(bonusPages.data, pair.debt.token.address, 'borrow')} title="Bonus sur Merkl">
-                      {fmtPct(pair.debt.borrowRewardApy)} récompenses
-                    </ExtLink>
-                  </span>
-                )}
-              </dd>
-              <dt>Liquidité</dt>
-              <dd>
-                empruntable {usd(pair.debt.borrowableUsd)} · dépôt encore possible {usd(pair.collateral.suppliableUsd)}
-                {s && ` · flash loan Morpho jusqu’à ${fmtAmount(s.flashLiquidity, pair.debt.token.decimals)} ${pair.debt.token.symbol}`}
-              </dd>
-            </dl>
+            <table className="reserves cards">
+              <thead>
+                <tr>
+                  <th>Actif</th>
+                  <th className="num">Prix oracle</th>
+                  <th className="num">Seuil liq.</th>
+                  <th className="num">APY dépôt</th>
+                  <th className="num">APY emprunt</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="lead">
+                    {pair.collateral.token.symbol}
+                    <div className="muted small">
+                      réserve {pair.collateral.reserveId}
+                      {pair.collateral.hub && ` · hub ${pair.collateral.hub}`}
+                    </div>
+                  </td>
+                  <td className="num" data-label="Prix oracle">
+                    {fmtPrice(pair.collateral.price)}
+                  </td>
+                  <td className="num" data-label="Seuil liq.">
+                    {fmtLltv(pair.collateral.collateralFactor)}
+                  </td>
+                  <td className="num" data-label="APY dépôt">
+                    <div>
+                      {fmtPct(pair.collateral.supplyApy)}
+                      {pair.collateral.underlyingApy > 0 && <span className="muted"> + {fmtPct(pair.collateral.underlyingApy)} token</span>}
+                      {pair.collateral.supplyRewardApy > 0 && (
+                        <span className="reward">
+                          {' '}
+                          +{' '}
+                          <ExtLink href={v4BonusPage(bonusPages.data, pair.collateral.token.address, 'supply')} title="Bonus sur Merkl">
+                            {fmtPct(pair.collateral.supplyRewardApy)} Merkl
+                          </ExtLink>
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="num" data-label="APY emprunt">
+                    —
+                  </td>
+                </tr>
+                <tr>
+                  <td className="lead">
+                    {pair.debt.token.symbol}
+                    <div className="muted small">
+                      réserve {pair.debt.reserveId}
+                      {pair.debt.hub && ` · hub ${pair.debt.hub}`}
+                    </div>
+                  </td>
+                  <td className="num" data-label="Prix oracle">
+                    {fmtPrice(pair.debt.price)}
+                  </td>
+                  <td className="num" data-label="Seuil liq.">
+                    —
+                  </td>
+                  <td className="num" data-label="APY dépôt">
+                    —
+                  </td>
+                  <td className="num" data-label="APY emprunt">
+                    <div>
+                      {fmtPct(pair.debt.borrowApy)}
+                      {riskPremium > 0 && <span className="muted"> + {fmtPct(pair.debt.borrowApy * riskPremium)} prime</span>}
+                      {pair.debt.borrowRewardApy > 0 && (
+                        <span className="reward">
+                          {' '}
+                          −{' '}
+                          <ExtLink href={v4BonusPage(bonusPages.data, pair.debt.token.address, 'borrow')} title="Bonus sur Merkl">
+                            {fmtPct(pair.debt.borrowRewardApy)} Merkl
+                          </ExtLink>
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="small">
+              Spoke{' '}
+              <ExtLink href={aaveV4SpokeUrl(chainId, pair.collateral.spoke.address)} title={`Spoke ${pair.collateral.spoke.name} sur Aave v4`}>
+                {pair.collateral.spoke.name}
+              </ExtLink>{' '}
+              (
+              <a href={`${explorer}/address/${pair.collateral.spoke.address}`} target="_blank" rel="noreferrer" title={pair.collateral.spoke.address}>
+                <span className="addr">{fmtAddress(pair.collateral.spoke.address)}</span>
+              </a>
+              ) · empruntable {usd(pair.debt.borrowableUsd)} · dépôt encore possible {usd(pair.collateral.suppliableUsd)}
+              {s && ` · flash loan Morpho jusqu’à ${fmtAmount(s.flashLiquidity, pair.debt.token.decimals)} ${pair.debt.token.symbol}`}
+            </p>
             <p className="muted small">
               Sur Aave v4, la position vit dans un spoke : ses collatéraux y garantissent ses dettes. La liquidation a lieu quand le health factor (valeur des
               collatéraux × seuil / dette) passe sous 1. Le taux d’emprunt est le taux de base de la réserve, augmenté d’une prime de risque qui dépend des

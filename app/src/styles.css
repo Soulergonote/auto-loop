@@ -297,6 +297,7 @@ input[type='range']::-moz-range-thumb { width: 16px; height: 22px; background: v
 .reserves td.bad { color: var(--bad); }
 .reserves td.good { color: var(--good); }
 .reserves td.lead { font-weight: 600; }
+.reserves td.lead .small { font-weight: 400; }
 .reserves th.sortable { padding: 0; }
 .reserves th.sortable button { width: 100%; padding: var(--s2); border: 0; background: none; color: inherit; font: inherit; text-align: inherit; cursor: pointer; }
 .reserves th.sortable button:hover { color: var(--ink); }
