@@ -234,15 +234,29 @@ const anvil = async (method, params) =>
     await page.waitForTimeout(8000)
     if (process.env.TARGET) {
       const sel = page.locator('label:has-text("Déplacement") select')
-      // the routes come in as each place is read (spokes, Aave pools, Morpho markets)
+      // the routes come in as each place is read (spokes, Aave pools, Morpho markets): up to 3 min on a fork. A single
+      // possible move shows no selector: after 20 s without one, that move is taken
       let options = []
-      for (let i = 0; i < 30 && !options.some((t) => t.startsWith(process.env.TARGET)); i++) {
+      for (let i = 0; i < 90; i++) {
         if (i) await page.waitForTimeout(2000)
+        if (!(await sel.count())) {
+          if (i >= 10) break
+          continue
+        }
         options = await sel.locator('option').allTextContents()
+        if (options.some((t) => t.startsWith(process.env.TARGET))) break
       }
       const label = options.find((t) => t.startsWith(process.env.TARGET))
-      console.log('target:', label ?? `none of ${options.join(' | ')}`)
-      await sel.selectOption({ label })
+      if (!label && !(await sel.count())) console.log('target: the only move offered')
+      else if (!label) {
+        console.log('target: none of', options.join(' | '))
+        await page.screenshot({ path: `${outPrefix}-avant.png`, fullPage: true })
+        if (process.env.E2E_STRICT) process.exitCode = 1
+        return browser.close()
+      } else {
+        console.log('target:', label)
+        await sel.selectOption({ label })
+      }
     }
   }
   // AGG=Velora|KyberSwap forces one aggregator instead of the best-price comparison
@@ -323,17 +337,21 @@ const anvil = async (method, params) =>
   if (!(await btn.isEnabled())) fail(`bouton désactivé : ${await btn.getAttribute('title')}`)
   if (await btn.isEnabled()) {
     await btn.click()
-    for (let i = 0; i < 60; i++) {
+    // until the outcome, up to 4 min: a hash or « Transaction incluse » shows mid-way, and a v4 refinance to a new spoke
+    // (6 steps) takes about 85 s on a fork (25/11/2026)
+    let waited = 0
+    for (let i = 0; i < 240; i++, waited++) {
       await page.waitForTimeout(1000)
       const t = await page.locator('main, .page').first().innerText()
       if (
-        /Position ouverte|Position augmentée|Position réduite|Position fermée|Collatéral changé|Dette changée|PT renouvelé|Position déplacée|Position refinancée|réussi|Transaction incluse|0x[0-9a-f]{64}|échoué|Erreur|Revert/i.test(
+        /Position ouverte|Position augmentée|Position réduite|Position fermée|Collatéral changé|Dette changée|PT renouvelé|Position déplacée|Position refinancée|réussi|échoué|Erreur|Revert/i.test(
           t,
         ) &&
         i > 3
       )
         break
     }
+    console.log('waited:', waited, 's')
     await page.screenshot({ path: `${outPrefix}-apres.png`, fullPage: true })
     console.log('wallet calls:', [...new Set(await page.evaluate(() => window.__calls))].join(','))
     const after = (await page.locator('.notice, .success').allTextContents()).join(' | ')
