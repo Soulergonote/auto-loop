@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { depegTone, maxDrawdown, ratioSeries, riskSignals } from './riskSignals'
+import { depegTone, despike, maxDrawdown, ratioSeries, riskSignals } from './riskSignals'
 
 const pts = (prices: number[], step = 14_400, t0 = 1_000_000) => prices.map((price, i) => ({ timestamp: t0 + i * step, price }))
 
@@ -12,6 +12,15 @@ describe('ratioSeries', () => {
   it('skips points without a close match or with a zero price', () => {
     expect(ratioSeries(pts([1, 1]), pts([1], 14_400, 1_000_000 + 40_000))).toEqual([])
     expect(ratioSeries(pts([1, 0, 1]), pts([1, 1, 1]))).toEqual([1, 1])
+  })
+})
+
+describe('despike', () => {
+  it('drops isolated outliers but keeps a lasting fall', () => {
+    expect(maxDrawdown(despike([1, 1, 1.22, 1, 1]))).toBe(0)
+    expect(maxDrawdown(despike([1, 1, 1.2, 1.2, 1, 1, 1], 2))).toBe(0)
+    expect(maxDrawdown(despike([1, 1, 0.9, 0.9, 0.9, 1]))).toBeCloseTo(0.1)
+    expect(despike([1, 0.5])).toEqual([1, 0.5])
   })
 })
 

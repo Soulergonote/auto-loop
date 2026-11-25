@@ -21,7 +21,7 @@ import { Card, Fold, Notice, Segmented, Skel, Tag, useSlow } from '../../ui/prim
 import type { MorphoTab } from '../loop/morpho/MorphoView'
 import { priceChartsQuery } from '../../services/priceHistory'
 import { tokenKey } from '../../services/yield/copies'
-import { depegTone, maxDrawdown, ratioSeries } from '../../domain/riskSignals'
+import { depegTone, despike, maxDrawdown, ratioSeries } from '../../domain/riskSignals'
 import { useSparklines, type SeriesSource } from './sparklines'
 import { Sparkline } from '../../ui/Sparkline'
 import { Logo, Place } from '../../ui/Logo'
@@ -468,7 +468,7 @@ export function Scanner({
     const a = charts.data.get(tokenKey({ chainId: r.tokens.chainId, address: r.tokens.collateral }))
     const b = charts.data.get(tokenKey({ chainId: r.tokens.chainId, address: r.tokens.debt }))
     if (!a || !b) return null
-    const dd = maxDrawdown(ratioSeries(a, b, 12 * 3600))
+    const dd = maxDrawdown(despike(ratioSeries(a, b, 12 * 3600)))
     return depegTone(dd, true) === 'good' ? null : (
       <Tag key="depeg" tone="warn">
         décroché −{fmtPct(dd, 1)} sur {DEPEG_DAYS} j

@@ -39,6 +39,20 @@ export function ratioSeries(a: PricePoint[], b: PricePoint[], maxGap = 3 * 3600)
   return out
 }
 
+/**
+ * Rolling median over `half` samples on each side: removes a price aggregator's isolated outliers (DefiLlama prices
+ * USDm on MegaETH at 0.82 for a few hours several times in September 2026 while the Aave oracle and the market held
+ * 1), so a short spike no longer reads as a depeg. A fall that lasts more than `half` samples stays.
+ */
+export function despike(series: number[], half = 1): number[] {
+  if (series.length < 2 * half + 1) return series
+  return series.map((_, i) => {
+    // a full window everywhere, shifted inwards at both ends
+    const start = Math.min(Math.max(0, i - half), series.length - 2 * half - 1)
+    return series.slice(start, start + 2 * half + 1).sort((x, y) => x - y)[half]
+  })
+}
+
 /** Largest fall from a running peak, as a fraction (0 for a series that only rises). */
 export function maxDrawdown(series: number[]): number {
   let peak = 0

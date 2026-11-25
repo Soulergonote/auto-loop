@@ -6,7 +6,7 @@
 import { Metric } from '../../../ui/primitives'
 import { useQuery } from '@tanstack/react-query'
 import type { Address, Hex } from 'viem'
-import { maxDrawdown, ratioSeries, riskSignals, type RiskSignal } from '../../../domain/riskSignals'
+import { despike, maxDrawdown, ratioSeries, riskSignals, type RiskSignal } from '../../../domain/riskSignals'
 import { fetchTopBorrower } from '../../../protocols/morpho/markets'
 import { priceChartsQuery } from '../../../services/priceHistory'
 import { llamaQuotes, tokenKey } from '../../../services/yield/copies'
@@ -56,7 +56,8 @@ export function useRiskSignals({ chainId, collateral, debt, correlated, oracleRa
     correlated,
     oracleRatio,
     marketRatio: spotC && spotD ? spotC / spotD : undefined,
-    drawdown: series.length >= 2 ? maxDrawdown(series) : undefined,
+    // 6 h prices: a spike up to 12 h long is an aggregator outlier, not a depeg
+    drawdown: series.length >= 2 ? maxDrawdown(despike(series, 2)) : undefined,
     days: SIGNAL_DAYS,
     exitLoss: exit?.loss,
     exitNoRoute: exit?.noRoute,
