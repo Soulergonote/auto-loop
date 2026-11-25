@@ -41,8 +41,9 @@ export const AGGREGATORS: Record<AggregatorId, Aggregator> = {
   oneinch: {
     label: '1inch',
     router: '0x111111125421cA6dc452d289314280a0f8842A65',
-    // Swap API v6.0 answers on these (checked 2026-11-12); Plasma and MegaETH answer 404
-    chains: [1, 10, 56, 130, 137, 143, 146, 999, 5042, 8453, 42161, 43114, 59144],
+    // Swap API v6.0 answers on these (checked 2026-11-12); Plasma and MegaETH answer 404. Gnosis added 2026-11-25:
+    // AggregationRouterV6 has code at the usual address there (same size as on Ethereum), API quote not yet tried with the key.
+    chains: [1, 10, 56, 100, 130, 137, 143, 146, 999, 5042, 8453, 42161, 43114, 59144],
     routerOn: { 999: '0x5281602aDc446A94eB48d055F514A6d8d5bEe176', 5042: '0xE08cab0828A67291EC4Af1Fb3E7F867e206A6bdA' },
     optional: true,
   },
