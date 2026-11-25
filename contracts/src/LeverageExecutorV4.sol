@@ -394,7 +394,8 @@ contract LeverageExecutorV4 is IMorphoFlashLoanCallback, ReentrancyGuard, SwapEx
         if (morpho) _grant(auth.morpho);
         r = _refinance(p, collateral, debt);
         if (morpho) _revoke(auth.morpho);
-        // aToken allowances and credit delegations given by signature on Aave v3 are spent exactly
+        // aToken allowances and credit delegations given by signature on Aave v3 cannot be renounced by the spender:
+        // what the call did not spend stays, usable only for this same caller (internal audit R1, I-01)
         if (exit && p.from.venue == Venue.AaveV4) {
             TAKER.renounceWithdrawAllowance(p.from.target, p.from.collateralId, msg.sender);
         }

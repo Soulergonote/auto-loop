@@ -602,12 +602,7 @@ contract LeverageExecutorMorpho is IMorphoFlashLoanCallback, ReentrancyGuard, Sw
             repaid = pool.repay(m.loanToken, amount, 2, user);
             IERC20(m.loanToken).forceApprove(address(pool), 0);
             // 2. take the aTokens (Aave checks the account's health on a partial move) and withdraw them
-            address aToken = pool.getReserveData(m.collateralToken).aTokenAddress;
-            uint256 aAmount =
-                p.collateralAmount == type(uint256).max ? IERC20(aToken).balanceOf(user) : p.collateralAmount;
-            if (aAmount == 0) revert ZeroAmount();
-            IERC20(aToken).safeTransferFrom(user, address(this), aAmount);
-            moved = pool.withdraw(m.collateralToken, aAmount, address(this));
+            moved = _pullAaveCollateral(pool, m.collateralToken, p.collateralAmount, user);
             // 3. supply on Morpho for the user, 4. borrow what was repaid (Morpho checks the LLTV)
             _supplyCollateral(m, moved, user);
             MORPHO.borrow(m, repaid, 0, user, address(this));
@@ -624,6 +619,23 @@ contract LeverageExecutorMorpho is IMorphoFlashLoanCallback, ReentrancyGuard, Sw
         _out[0] = repaid;
         _out[1] = moved;
         owed = amount;
+    }
+
+    /// @dev Pulls `amount` aTokens of `asset` from `user` (max = all) and withdraws what this transfer credited,
+    /// never the amount asked: a pool that rounds aToken transfers half up (SparkLend, Aave v3.0 to v3.3) may credit
+    /// 1 wei less (internal audit R1, L-01). Everything when nothing was held before; otherwise only the balance
+    /// gained, so that aTokens donated to the contract stay where they are (same rule as LeverageExecutorV2).
+    function _pullAaveCollateral(IAaveV3Pool pool, address asset, uint256 amount, address user)
+        internal
+        returns (uint256 withdrawn)
+    {
+        IERC20 aToken = IERC20(pool.getReserveData(asset).aTokenAddress);
+        if (amount == type(uint256).max) amount = aToken.balanceOf(user);
+        if (amount == 0) revert ZeroAmount();
+        uint256 held = aToken.balanceOf(address(this));
+        aToken.safeTransferFrom(user, address(this), amount);
+        withdrawn =
+            pool.withdraw(asset, held == 0 ? type(uint256).max : aToken.balanceOf(address(this)) - held, address(this));
     }
 
     // ---------------------------------------------------------------------------------------------

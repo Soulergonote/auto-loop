@@ -145,6 +145,10 @@ Rapport complet : [Audit interne du contrat v2](https://claude.ai/artifact/61hHE
 - **Opcodes Cancun (I-09).** Le bytecode contient `PUSH0` et `MCOPY`. Une sonde `eth_call` les accepte, ainsi que `TSTORE`, sur Ethereum, Arbitrum, Base, Avalanche, Optimism, Polygon, BNB Chain, Mantle, Linea et Sonic ; Plasma aussi (la v1 contient `MCOPY` et y tourne). Monad n'est pas joignable depuis l'environnement cloud : simuler le déploiement avant.
 - `forge coverage` ne compile pas (Aave local trop profond pour la pile sans optimiseur, même avec `--ir-minimum`) ; chaque erreur du contrat est déclenchée par au moins un test.
 
+### Audit interne R1 : V4, Morpho et swapDebt (25/11/2026)
+
+Rapport complet : [Audit interne R1 : V4, Morpho et swapDebt](https://claude.ai/artifact/Txugcks2HnkjbR2EfkSwx2). Périmètre : `LeverageExecutorV4`, `LeverageExecutorMorpho`, `swapDebt` et l'emprunt dans le rappel de la v2, `SwapExecutorBase`. Aucune faille critique, haute ou moyenne ; 1 constat faible (L-01, corrigé dans le contrat Morpho, preuve sur fork SparkLend dans `test/fork/EthereumForkAuditR1.t.sol`), 10 informatifs. La v2 et la V4 ne changent pas de bytecode. Tests ajoutés : `test/v4/V4AuditR1.t.sol`, `test/morpho/MorphoAuditR1.t.sol`.
+
 ### Limites connues (v2)
 
 - **Audit interne seulement.** Pas d'audit externe ; rien n'est déployé sur un réseau réel. L'app déploie la v2 (avec Morpho Blue comme prêteur gratuit, sans Balancer à cause de L-02) et n'en utilise que `open` et `close` à une étape ; les chaînes de swaps, le capital en un autre token et `swapCollateral` ne sont pas encore proposés dans l'interface.
@@ -195,6 +199,7 @@ ETH_RPC_URL=https://ethereum-rpc.publicnode.com forge test --match-contract Ethe
 - **11 tests locaux** (`test/morpho/MorphoRefinance.t.sol`, vrai Morpho Blue et pool Aave v3 de test) : Aave → Morpho en entier, en partie et par permit, Morpho → Aave, aller-retour, health factor minimum, pool hors liste, sans autorisation ni délégation, appelant seul concerné, constructeur.
 - **Fork Ethereum, 4/4** (`test/fork/EthereumForkRefinance.t.sol`, vrai pool Aave v3 Core et vrai Morpho) : 10 wstETH / 10 000 USDC d'Aave vers le marché Morpho wstETH / USDC (LLTV 86 %) puis retour un jour plus tard avec approvals ; aller par permit de l'aToken et signatures Morpho ; retour par `delegationWithSig` ; health factor minimum. Rien ne reste dans le contrat, l'autorisation Morpho est retirée.
 - Taille : 20 479 octets (limite 24 576). Le bytecode et le constructeur ont changé : l'adresse commune CREATE2 change, l'app reconnaît encore l'ancien contrat (`EXECUTOR_BYTECODE_MORPHO_0`) et propose de passer au nouveau pour refinancer.
+- Audit interne R1 (25/11/2026), L-01 corrigé : le refinancement Aave → Morpho retirait exactement le montant d'aTokens demandé ; sur un pool qui arrondit au plus proche (SparkLend, Aave v3.0 à v3.3), un déplacement partiel pouvait échouer de 1 wei. Il retire maintenant ce que le transfert a crédité (tout si le contrat ne détenait rien, sinon le delta), comme la v2. Taille 20 731 octets ; l'adresse commune change encore, l'app reconnaît le contrat précédent (`EXECUTOR_BYTECODE_MORPHO_1`), qui reste utilisable : l'app déplace toujours la position entière.
 
 ### Limites connues (Morpho)
 
