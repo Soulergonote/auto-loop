@@ -49,7 +49,7 @@ const DUST = 1_000_000n
 
 type Open = { market: Market; snapshot: Snapshot; position: UserPosition; campaigns?: Campaign[]; summary: PositionSummary; correlated: boolean }
 
-/** Every Aave v3 position of an address across the app's networks (total first, then one card per network), then its Morpho Blue positions. */
+/** Every Aave v3 position of an address across the app’s networks (total first, then one card per network), then its Morpho Blue and Aave v4 positions. */
 export function Positions({
   account,
   onManage,
@@ -159,7 +159,9 @@ export function Positions({
         </label>
         {typed.trim() && !isAddress(typed.trim()) && <Notice>Adresse invalide.</Notice>}
         {!user && (
-          <p className="muted">Connecter le portefeuille ou coller une adresse : ses positions Aave v3 et Morpho Blue s’affichent pour tous les réseaux.</p>
+          <p className="muted">
+            Connecter le portefeuille ou coller une adresse : ses positions Aave v3, Aave v4 et Morpho Blue s’affichent pour tous les réseaux.
+          </p>
         )}
         {user && (count > 0 || pending > 0) && (
           <div className="metrics">
@@ -207,7 +209,7 @@ export function Positions({
         )}
         {done && count === 0 && !morpho?.pending && failed.length < markets.length && (
           <div className="actions">
-            <span className="muted">Aucune position Aave v3 ni Morpho Blue sur ces réseaux. Le Scanner liste les boucles disponibles.</span>
+            <span className="muted">Aucune position Aave v3, Aave v4 ni Morpho Blue sur ces réseaux. Le Scanner liste les boucles disponibles.</span>
             <button className="btn" onClick={onScan}>
               Ouvrir le Scanner
             </button>
