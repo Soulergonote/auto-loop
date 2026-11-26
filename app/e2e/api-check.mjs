@@ -1,5 +1,5 @@
 // Checks that every outside API the app reads still answers in the shape the app expects (S1, weekly workflow):
-// Velora and KyberSwap quotes, Pendle markets, Morpho's GraphQL, Merkl campaigns, DefiLlama prices and charts.
+// Velora and KyberSwap quotes, Pendle markets, Morpho's REST API, Merkl campaigns, DefiLlama prices and charts.
 //   node e2e/api-check.mjs        prints one line per API, exits 1 if any fails
 // Same calls and fields as src/services/quotes/quotes.ts, src/protocols/pendle/pt.ts, src/protocols/morpho/api.ts,
 // src/services/merkl.ts and src/services/priceHistory.ts.
@@ -75,18 +75,24 @@ const checks = {
     return `${body.markets.length} marchés actifs sur Ethereum`
   },
   async morpho() {
-    const body = await json('https://blue-api.morpho.org/graphql', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query:
-          '{ markets(first: 3, where: { chainId_in: [1] }) { items { marketId lltv loanAsset { address symbol decimals } state { borrowApy liquidityAssetsUsd } } } }',
-      }),
-    })
-    const items = body?.data?.markets?.items
-    need(Array.isArray(items) && items.length > 0 && /^0x[0-9a-f]{64}$/i.test(items[0].marketId) && items[0].loanAsset?.address, 'markets.items')
-    need(!body.errors, JSON.stringify(body.errors ?? '').slice(0, 160))
-    return `${items.length} marchés lus`
+    const M = 'https://api.morpho.org/v0/blue'
+    const list = await json(`${M}/markets?chain_id=1&listed=true&limit=3`)
+    const m = list?.data?.[0]
+    need(m && /^0x[0-9a-f]{64}$/i.test(m.market_id) && m.loan_token && m.collateral_token && m.oracle_address && m.irm_address && m.lltv_wad, 'markets[]')
+    need(typeof list.cursor === 'string', 'cursor')
+    const hist = await json(`${M}/markets/1:${m.market_id}/state/history?lookback=thirty_days`)
+    need(Array.isArray(hist.data) && hist.data.every((p) => typeof p.timestamp === 'number' && p.total_borrow_assets && p.total_borrow_shares), 'state/history')
+    const user = '0x9F0DCa77E93A980750A6d1102C54D4713d7Df952'
+    const pos = await json(`${M}/users/${user}/positions?chain_ids=1&limit=5`)
+    need(Array.isArray(pos.data) && pos.data.every((p) => p.chain_id && p.market_id && p.collateral_assets !== undefined), 'users/positions')
+    const p0 = pos.data[0]
+    if (p0) {
+      const ph = await json(`${M}/markets/1:${p0.market_id}/users/${user}/position/history?lookback=inception`)
+      need(Array.isArray(ph.data) && ph.data.every((p) => typeof p.timestamp === 'number' && p.borrow_shares !== undefined), 'position/history')
+    }
+    const price = await json(`https://api.morpho.org/v0/tokens/1:${m.loan_token}/price`)
+    need(typeof price?.data?.price === 'number', 'tokens/price')
+    return `${list.data.length} marchés, ${hist.data.length} jours d’historique, ${pos.data.length} positions lus`
   },
   async merkl() {
     const q = new URLSearchParams({ chainId: '8453', mainProtocolId: 'aave', status: 'LIVE', items: '20', page: '0', campaigns: 'true' })

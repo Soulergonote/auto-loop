@@ -502,7 +502,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             leverage={loopLev}
             extra={collateralApy * loopLev + merklApy}
             pending={series.isPending && series.fetchStatus !== 'idle'}
-            source="API Morpho"
+            source="API Morpho (totaux par jour)"
             replay={{ chainId: net.chain.id, collateral: C, debt: L, liquidationThreshold: M.lltv, correlated, capitalUsd: Number(capitalBase) / 1e8 }}
           />
         )}

@@ -922,11 +922,11 @@ export function Scanner({
           <p className="muted small">
             « Écart » est le rendement du collatéral moins le coût de l’emprunt, sans levier ni bonus : ce que la paire rapporte par unité de levier, la mesure
             à comparer entre deux paires. Le rendement du collatéral compte le taux de dépôt et le rendement propre des tokens à rendement (wstETH, sUSDe,
-            syrupUSDC…), pris à la source la plus récente qui connaît le token (taux publié on-chain, Pendle, API Morpho, sinon moyenne de l’adaptateur de prix
-            Aave) ; le coût de l’emprunt retranche celui d’une dette qui en a un. Sans source, l’étiquette « rendement du token non compté » le signale. Pour un
-            PT Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe de son marché Pendle, valable jusqu’à l’échéance. « Détail » montre
-            l’APY net, une ligne par contribution ; « + N marchés » regroupe les autres marchés Morpho de la même paire sur le même réseau (autre LLTV ou autre
-            oracle).
+            syrupUSDC…), pris à la source la plus récente qui connaît le token (taux publié on-chain, prix de part d’un coffre, Pendle, sinon moyenne de
+            l’adaptateur de prix Aave) ; le coût de l’emprunt retranche celui d’une dette qui en a un. Sans source, l’étiquette « rendement du token non compté
+            » le signale. Pour un PT Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe de son marché Pendle, valable jusqu’à l’échéance.
+            « Détail » montre l’APY net, une ligne par contribution ; « + N marchés » regroupe les autres marchés Morpho de la même paire sur le même réseau
+            (autre LLTV ou autre oracle).
           </p>
           <p className="muted small">
             « Moy. 30 j » est l’APY net moyen des 30 derniers jours au levier de la ligne, « Stabilité » son écart-type (la plus stable en tête) : la courbe de
@@ -952,10 +952,9 @@ export function Scanner({
           </p>
           <p className="muted small">
             Morpho Blue : chaque marché listé par Morpho (un collatéral, un actif emprunté, une LLTV), au levier qui donne ce health factor, plafonné au levier
-            d’un health factor de 1,02 comme le curseur. Taux de l’API Morpho, relus on-chain à l’ouverture ; « Bonus Merkl » y additionne les récompenses
-            d’emprunt que l’API compte et les campagnes Merkl qu’elle ignore, lues sur Merkl : dépôt du collatéral (sur ce marché ou sur tout marché), au levier
-            ; emprunt aussi sur un réseau lu on-chain. Une campagne à public restreint est écartée, une campagne à règles non lues porte « conditions Merkl ».
-            Les marchés avec un avertissement rouge de l’API sont écartés.
+            d’un health factor de 1,02 comme le curseur. Marchés de l’API Morpho, taux lus on-chain sur l’IRM de chaque marché ; « Bonus Merkl » y additionne
+            les campagnes Merkl : dépôt du collatéral (sur ce marché ou sur tout marché), au levier ; emprunt, au levier moins un. Une campagne à public
+            restreint est écartée, une campagne à règles non lues porte « conditions Merkl ». Les marchés avec un avertissement rouge de l’API sont écartés.
           </p>
         </Fold>
       </Card>

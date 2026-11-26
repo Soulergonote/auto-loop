@@ -26,7 +26,7 @@ export const MORPHO_BLUE: Record<number, Address> = {
 
 /**
  * Morpho Blue as a lending platform (LeverageExecutorMorpho): the app networks where Morpho Blue is deployed and its
- * API (blue-api.morpho.org, market list and rates) answers, or whose markets can be read on-chain (`onchain`). Checked
+ * API (api.morpho.org, the market list; blue-api.morpho.org when checked) answers, or whose markets are found in Morpho's logs (`onchain`). Checked
  * 2026-11-09: the API refuses Avalanche, BNB and Plasma; Sonic has no API data. Ethereum first, as Azerty asked; Arc
  * added 2026-11-10.
  */

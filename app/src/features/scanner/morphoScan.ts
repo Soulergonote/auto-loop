@@ -1,6 +1,6 @@
 /**
  * Scanner rows for Morpho Blue: every listed market of a network, looped at the leverage that gives a target health
- * factor, ranked by yield on equity. Rates come from the Morpho API (the open screen re-reads them on-chain), a PT's
+ * factor, ranked by yield on equity. Rates are the IRM's, read on-chain with the list (the open screen reads them again), a PT's
  * yield from its Pendle market. Pure functions, tested without a chain.
  */
 import { morphoBorrowApyAfter } from '../../domain/irm'

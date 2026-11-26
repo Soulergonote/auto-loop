@@ -54,18 +54,19 @@ async function quote(tokenIn: Address, tokenOut: Address, amountIn: bigint) {
   return { data: b.data.data as Hex, out: BigInt(b.data.amountOut) }
 }
 
-const api = await (
-  await fetch('https://blue-api.morpho.org/graphql', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      query: `{ markets(first: 1, where: {chainId_in: [5042], collateralAssetAddress_in: ["${CBTC}"], loanAssetAddress_in: ["${USDC}"], listed: true}, orderBy: SupplyAssetsUsd, orderDirection: Desc) { items { marketId lltv irmAddress oracle { address } } } }`,
-    }),
-  })
-).json()
-const m = api.data.markets.items[0]
-const market = { loanToken: USDC, collateralToken: CBTC, oracle: m.oracle.address as Address, irm: m.irmAddress as Address, lltv: BigInt(m.lltv) }
-console.log('market', m.marketId, 'lltv', Number(market.lltv) / 1e18, 'executor', X)
+// the largest listed cirBTC / USDC market of Arc, from Morpho's REST API
+const listed = (await (
+  await fetch(`https://api.morpho.org/v0/blue/markets?chain_id=5042&listed=true&collateral_token=${CBTC}&loan_token=5042:${USDC}`)
+).json()) as { data: { market_id: string; oracle_address: string; irm_address: string; lltv_wad: string }[] }
+const sized = await Promise.all(
+  listed.data.map(async (x) => {
+    const st = (await (await fetch(`https://api.morpho.org/v0/blue/markets/5042:${x.market_id}/state`)).json()) as { data: { total_supply_assets: string } }
+    return { ...x, supply: BigInt(st.data.total_supply_assets) }
+  }),
+)
+const m = sized.sort((a, b) => (b.supply > a.supply ? 1 : -1))[0]
+const market = { loanToken: USDC, collateralToken: CBTC, oracle: m.oracle_address as Address, irm: m.irm_address as Address, lltv: BigInt(m.lltv_wad) }
+console.log('market', m.market_id, 'lltv', Number(market.lltv) / 1e18, 'executor', X)
 
 const capital = 1000_000000n
 const debt = 2000_000000n

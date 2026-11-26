@@ -1,6 +1,6 @@
 /**
- * Hand-kept data for intrinsic yields (see tokenYield.ts for how it is used). Most tokens need nothing here: Pendle and
- * Morpho's API are read for any address. Add a token here only when:
+ * Hand-kept data for intrinsic yields (see tokenYield.ts for how it is used). Most tokens need nothing here: Pendle's API
+ * is read for any address. Add a token here only when:
  *
  * - its contract publishes its own current rate (`ONCHAIN_RATES`): the most exact source, read on-chain;
  * - it is an ERC-4626 vault no API knows (`VAULTS`): its share price is read now and 7 days ago, on-chain;
