@@ -38,7 +38,7 @@ const legs = (s: Extract<SeriesSource, { kind: 'aave' }>): [AaveSeriesLeg, AaveS
 ]
 
 /**
- * 30-day mini-curves of the shown lines (J3), one request per API and per 10 legs or markets (all the filtered lines when the
+ * 30-day mini-curves of the shown lines (J3), one request per 10 Aave legs and one per Morpho market (all the filtered lines when the
  * Scanner sorts by history, A6). `ready` false holds the reading back (A6: until every network answered, so the
  * whole list is not read again at each arrival). `lines` gives each
  * line's source, leverage and today's APY; the answer maps a line key to its points (absent = no history).
