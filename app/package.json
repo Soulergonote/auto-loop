@@ -10,8 +10,9 @@
     "test": "vitest run",
     "typecheck": "tsc -b",
     "lint": "eslint .",
-    "format": "prettier --write src e2e",
-    "format:check": "prettier --check src e2e"
+    "format": "prettier --write src e2e scripts",
+    "format:check": "prettier --check src e2e scripts",
+    "snapshot": "vite-node scripts/scanner-snapshot.ts public/scanner.json"
   },
   "dependencies": {
     "@tanstack/react-query": "5.104.4",

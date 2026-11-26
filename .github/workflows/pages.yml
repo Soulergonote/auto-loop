@@ -5,9 +5,13 @@ on:
     branches: [main]
     paths: ['app/**', '.github/workflows/pages.yml']
   workflow_dispatch:
+  # D1: the Scanner's snapshot, read and published every hour
+  schedule:
+    - cron: '7 * * * *'
 
 permissions:
-  contents: read
+  # write: the daily history goes to the `data` branch
+  contents: write
   pages: write
   id-token: write
 
@@ -29,9 +33,33 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci
-      - run: npm run lint
-      - run: npm run format:check
-      - run: npm test
+      # the hourly run only refreshes the data: the code was checked when it was pushed
+      - if: github.event_name != 'schedule'
+        run: npm run lint
+      - if: github.event_name != 'schedule'
+        run: npm run format:check
+      - if: github.event_name != 'schedule'
+        run: npm test
+      # D1: what the Scanner reads, read from here and published with the site; a failure publishes without it
+      - name: Instantané du Scanner
+        run: npm run snapshot
+        continue-on-error: true
+        timeout-minutes: 10
+      - name: Historique maison (branche data, un relevé par jour)
+        if: hashFiles('app/public/scanner.json') != ''
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          DATA: ${{ runner.temp }}/data
+        run: |
+          if git fetch --depth=1 origin data:data; then git worktree add "$DATA" data; else git worktree add --orphan -b data "$DATA"; fi
+          npx vite-node scripts/scanner-history.ts public/scanner.json "$DATA/history"
+          cd "$DATA"
+          git add history
+          if ! git diff --cached --quiet; then
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -q -m "Historique du Scanner $(date -u +%F)"
+            git push origin data
+          fi
       - run: npm run build
         env:
           # public by design: it ends up in the bundle (free key, only its quota at stake)

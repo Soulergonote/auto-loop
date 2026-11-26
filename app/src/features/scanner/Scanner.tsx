@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import type { Address } from 'viem'
-import { MARKETS, MORPHO_NETWORKS, aggregatorsFor, getMarket, marketPlace, networkName, type Market } from '../../config'
+import { getMarket, marketPlace, networkName, type Market } from '../../config'
 import { bonusPagesQuery, merklQuery, morphoBonusPage, morphoCampaignsQuery, v4BonusPage } from '../../services/merkl'
 import { aaveMarketUrl, aaveV4SpokeUrl, morphoMarketUrl, pendleMarketUrl } from '../../services/links'
 import { ExtLink } from '../../ui/ExtLink'
@@ -32,6 +32,8 @@ import type { V4Seed } from '../loop/aavev4/V4View'
 import { v4ReservesQuery } from '../../protocols/aavev4/reserves'
 import { scanV4 } from './v4Scan'
 import { apyLines, type ApyParts } from '../../domain/apyParts'
+import { SCANNABLE, SCANNABLE_MORPHO, ptTokensOf } from './snapshotPlan'
+import { scannerSnapshotAt } from '../../services/scannerSnapshot'
 import { stabilityStats } from '../../domain/apyHistory'
 
 /** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (positions' Merkl rewards) or « Renouveler » (a PT near maturity). */
@@ -76,9 +78,6 @@ const FLAG_TAG: Record<ScanFlag | MorphoScanFlag, { text: string; tone?: 'good' 
   unlisted: { text: 'non listé', tone: 'warn' },
 }
 
-/** Markets the app can loop on: an aggregator quotes there. */
-const SCANNABLE = MARKETS.filter((m) => !m.soon && aggregatorsFor(m.chain.id).length > 0)
-const SCANNABLE_MORPHO = MORPHO_NETWORKS.filter((n) => aggregatorsFor(n.chain.id).length > 0)
 /** Networks the protocol filter leaves, one per chain (Ethereum Core and Prime are one network). */
 function networksOf(protocol: Protocol): { chainId: number; label: string }[] {
   const all = [
@@ -236,7 +235,7 @@ export function Scanner({
     combine: withData,
   })
   // a PT's yield is its Pendle implied APY: read for the PT collaterals of each network's listed markets
-  const ptTokens = morphoListData.map((list) => [...new Set((list ?? []).filter((m) => /^PT-/i.test(m.collateral.symbol)).map((m) => m.collateral.address))])
+  const ptTokens = morphoListData.map(ptTokensOf)
   // M7: Merkl campaigns on Morpho the API does not count (collateral; borrow too where the network is read on-chain)
   const { queries: morphoMerklQs, data: morphoMerklData } = useQueries({
     queries: morphoNets.map((n) => morphoCampaignsQuery(n.chain.id)),
@@ -583,7 +582,14 @@ export function Scanner({
     ...markets.map((m, i) => ({ label: networkName(m.label), pending: snapshots[i].isPending, failed: snapshots[i].isError })),
     ...morphoNets.map((n, i) => ({ label: n.label, pending: morphoLists[i].isPending, failed: morphoLists[i].isError })),
   ])
+  // D1: networks still shown from the hourly snapshot (their live read not back yet)
+  const snapAt = scannerSnapshotAt()
+  const fromSnapshot = new Set([
+    ...markets.filter((_, i) => snapAt !== undefined && snapshots[i].dataUpdatedAt === snapAt).map((m) => networkName(m.label)),
+    ...morphoNets.filter((_, i) => snapAt !== undefined && morphoLists[i].dataUpdatedAt === snapAt).map((n) => n.label),
+  ])
   const status = sourceStatus({
+    snapshot: snapAt !== undefined ? { at: snapAt, networks: fromSnapshot.size } : undefined,
     networks: progress,
     readAt: Math.max(0, ...snapshots.map((q) => q.dataUpdatedAt), ...morphoLists.map((q) => q.dataUpdatedAt)),
     silent: [

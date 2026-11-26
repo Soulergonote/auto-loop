@@ -294,6 +294,7 @@ Chaque dossier de `src/` a un rôle unique ; les dépendances vont de haut en ba
 | `generated/` | Bytecode des contrats, écrit par `contracts/script/export-bytecode.cjs`. Ne pas modifier à la main. |
 | `test/` | Données et aides de test partagées. Les tests unitaires sont à côté de leur fichier (`x.test.ts`). |
 | `e2e/` (hors `src/`) | Test de bout en bout sur fork : `fork.sh` (re-fork, déploiement, fonds de test), `run.cjs` (Chromium + portefeuille de test). |
+| `scripts/` (hors `src/`) | Instantané horaire du Scanner (D1) : `scanner-snapshot.ts` lit avec le code de l’app ce que lit le Scanner (`features/scanner/snapshotPlan.ts`) et écrit `public/scanner.json`, que la page charge au démarrage (`services/scannerSnapshot.ts`) avant de relire en direct ; `scanner-history.ts` en tire un relevé par jour des taux de chaque réserve, poussé par le workflow Pages sur la branche `data` (`history/AAAA-MM-JJ.json`). En local : `npm run snapshot`. |
 
 Qualité : `npm run lint` (eslint), `npm run format:check` (prettier), `npm test` (vitest), `npm run typecheck` ; les quatre passent en CI avant chaque publication.
 

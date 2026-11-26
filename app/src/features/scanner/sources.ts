@@ -19,13 +19,27 @@ export function networkProgress(sources: { label: string; pending: boolean; fail
 const hhmm = (ms: number) => new Date(ms).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 
 /** « 14 réseaux lus à 14:32 · en échec : Sonic · sans réponse : Pendle ». Undefined while nothing is read. */
-export function sourceStatus({ networks, readAt, silent }: { networks: NetworkProgress[]; readAt: number; silent: (string | false | undefined)[] }) {
+export function sourceStatus({
+  networks,
+  readAt,
+  silent,
+  snapshot,
+}: {
+  networks: NetworkProgress[]
+  readAt: number
+  silent: (string | false | undefined)[]
+  /** D1: networks still shown from the hourly snapshot while read live, and when it was taken */
+  snapshot?: { at: number; networks: number }
+}) {
   const read = networks.filter((n) => n.state === 'read').length
   const failed = networks.filter((n) => n.state === 'failed').map((n) => n.label)
   if (read === 0 && failed.length === 0) return undefined
   const quiet = silent.filter((s): s is string => !!s)
+  const n = snapshot?.networks ?? 0
   return [
-    `${read} réseau${read > 1 ? 'x' : ''} lu${read > 1 ? 's' : ''}${readAt > 0 ? ` à ${hhmm(readAt)}` : ''}`,
+    n > 0
+      ? `instantané de ${hhmm(snapshot!.at)} · ${n} réseau${n > 1 ? 'x' : ''} en relecture`
+      : `${read} réseau${read > 1 ? 'x' : ''} lu${read > 1 ? 's' : ''}${readAt > 0 ? ` à ${hhmm(readAt)}` : ''}`,
     failed.length > 0 && `en échec : ${failed.join(', ')}`,
     quiet.length > 0 && `sans réponse : ${quiet.join(', ')}`,
   ]

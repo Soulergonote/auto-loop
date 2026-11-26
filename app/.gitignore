@@ -3,3 +3,5 @@ dist
 .env
 .env.local
 *.tsbuildinfo
+# hourly Scanner snapshot (D1), written by the Pages workflow
+public/scanner.json

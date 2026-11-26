@@ -32,6 +32,13 @@ describe('sourceStatus', () => {
   it('gives the time of the reading', () => {
     expect(sourceStatus({ networks: [networks[0]], readAt: Date.UTC(2026, 10, 15, 14, 32), silent: [] })).toMatch(/^1 réseau lu à \d\d:\d\d$/)
   })
+  it('says the snapshot is shown while networks are read again (D1)', () => {
+    const at = Date.UTC(2026, 10, 26, 14, 0)
+    expect(sourceStatus({ networks, readAt: at, silent: [], snapshot: { at, networks: 3 } })).toMatch(
+      /^instantané de \d\d:\d\d · 3 réseaux en relecture · en échec : Sonic$/,
+    )
+    expect(sourceStatus({ networks: [networks[0]], readAt: at, silent: [], snapshot: { at, networks: 0 } })).toMatch(/^1 réseau lu à/)
+  })
   it('is undefined while nothing is read', () => {
     expect(sourceStatus({ networks: [{ label: 'Base', state: 'pending' }], readAt: 0, silent: [] })).toBeUndefined()
   })
