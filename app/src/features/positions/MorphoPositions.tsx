@@ -94,9 +94,9 @@ export function MorphoPositions({
     })),
     combine: withData,
   })
-  const ptChains = useMemo(() => [...new Set(markets.map((m) => m.chainId))], [markets])
+  const chainIds = useMemo(() => [...new Set(markets.map((m) => m.chainId))], [markets])
   const { data: ptData } = useQueries({
-    queries: ptChains.map((id) =>
+    queries: chainIds.map((id) =>
       ptInfosQuery(
         id,
         markets.filter((m) => m.chainId === id).map((m) => m.collateral.address),
@@ -104,7 +104,7 @@ export function MorphoPositions({
     ),
     combine: withData,
   })
-  const { data: campaignData } = useQueries({ queries: ptChains.map((id) => morphoCampaignsQuery(id)), combine: withData })
+  const { data: campaignData } = useQueries({ queries: chainIds.map((id) => morphoCampaignsQuery(id)), combine: withData })
 
   const rows = useMemo(
     () =>
@@ -113,12 +113,12 @@ export function MorphoPositions({
         if (!state?.user) return []
         const sides = morphoSides(market, state.price)
         if (toBase(state.user.collateral, sides.collateral) < DUST_USD && state.user.debt === 0n) return []
-        const pt = ptData[ptChains.indexOf(market.chainId)]?.get(market.collateral.address.toLowerCase())
-        const campaigns = campaignData[ptChains.indexOf(market.chainId)]
+        const pt = ptData[chainIds.indexOf(market.chainId)]?.get(market.collateral.address.toLowerCase())
+        const campaigns = campaignData[chainIds.indexOf(market.chainId)]
         const merkl = morphoMerkl(campaigns, { id: market.id, collateral: market.collateral.address, loan: market.loan.address })
         return [{ market, state, pt, merkl }]
       }),
-    [markets, stateData, ptData, ptChains, campaignData],
+    [markets, stateData, ptData, chainIds, campaignData],
   )
   const pending = list.isPending || states.some((s) => s.isPending)
   const totals = useMemo<MorphoTotals>(() => {

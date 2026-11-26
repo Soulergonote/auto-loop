@@ -35,8 +35,8 @@ export type SupplyLoss = {
   /** fall of the share price */ share: number
 }
 
-/** price drops under this are rounding, not a loss */
-const LOSS_TOLERANCE = 1e-6
+/** price drops under this are rounding (a day's interest is above 1e-5 only on rates over 0.4 % a year), not a loss */
+const LOSS_TOLERANCE = 1e-5
 
 /** Days the supply share's price fell (bad debt realized), oldest first. Pure, tested. */
 export function supplyLosses(points: RestStatePoint[]): SupplyLoss[] {

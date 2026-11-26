@@ -12,9 +12,21 @@
  *   oracle price, and the result says so.
  */
 import { getPublicClient } from '@wagmi/core'
-import { decodeEventLog, getAddress, parseAbiItem, zeroAddress, type Address, type Hex } from 'viem'
+import {
+  createPublicClient,
+  decodeEventLog,
+  getAddress,
+  http,
+  parseAbiItem,
+  toEventSelector,
+  toHex,
+  zeroAddress,
+  type Address,
+  type Hex,
+  type PublicClient,
+} from 'viem'
 import { wagmiConfig } from '../../chain/wagmi'
-import { LLAMA_CHAIN, MORPHO_NETWORKS } from '../../config'
+import { ARCHIVE_LOG_RPCS, LLAMA_CHAIN, MORPHO_NETWORKS } from '../../config'
 import { morphoGet, selector, type RestPositionPoint } from '../../protocols/morpho/api'
 
 export type FlowKind = 'supply' | 'withdraw' | 'borrow' | 'repay' | 'seized' | 'liquidationRepay'
@@ -226,6 +238,18 @@ export function changedWindows(points: PositionPoint[], nowSec: number): [number
   return out
 }
 
+const MORPHO_TOPICS = MORPHO_EVENTS.map((e) => toEventSelector(e))
+
+type RawLog = { transactionHash: Hex; blockNumber: Hex; blockTimestamp?: Hex; logIndex: Hex; topics: [Hex, ...Hex[]] | []; data: Hex }
+const fromRawLog = (l: RawLog): MorphoLog => ({
+  transactionHash: l.transactionHash,
+  blockNumber: BigInt(l.blockNumber),
+  blockTimestamp: l.blockTimestamp ? BigInt(l.blockTimestamp) : undefined,
+  logIndex: Number(l.logIndex),
+  topics: l.topics,
+  data: l.data,
+})
+
 type MorphoLog = { transactionHash: Hex; blockNumber: bigint; blockTimestamp?: bigint | null; logIndex: number; topics: [Hex, ...Hex[]] | []; data: Hex }
 
 /** Runs `fn` over the items, `size` at a time (RPC requests of a history). */
@@ -272,6 +296,11 @@ export function morphoLogFlows(logs: MorphoLog[], user: Address, collateral: Mor
 
 /** log requests a history may make (each refused stretch is split in two) */
 const MAX_LOG_CALLS = 80
+/**
+ * requests to the archive RPC (1,000 blocks each: about 3 hours on Ethereum, 30 minutes on Base), which takes a stretch the
+ * app's RPC refuses: PublicNode keeps only a few months of logs and blocks, and its fallback is often rate-limited
+ */
+const MAX_ARCHIVE_CALLS = 800
 
 export async function morphoHistory(
   chainId: number,
@@ -292,44 +321,63 @@ export async function morphoHistory(
   const windows = changedWindows(points, Math.floor(Date.now() / 1000))
 
   const head = await client.getBlock()
-  const earlier = await client.getBlock({ blockNumber: head.number > 10_000n ? head.number - 10_000n : 0n })
-  const perBlock = Math.max(0.01, Number(head.timestamp - earlier.timestamp) / Number(head.number - earlier.number || 1n))
-  const times = new Map<bigint, number>([
-    [head.number, Number(head.timestamp)],
-    [earlier.number, Number(earlier.timestamp)],
-  ])
+  const times = new Map<bigint, number>([[head.number, Number(head.timestamp)]])
+  const archive = ARCHIVE_LOG_RPCS[chainId]
+  const archiveClient = archive && createPublicClient({ chain: net.chain, transport: http(archive.url, { retryCount: 2 }) })
   const timeOfBlock = async (n: bigint) => {
-    if (!times.has(n)) times.set(n, Number((await client.getBlock({ blockNumber: n })).timestamp))
+    if (!times.has(n)) {
+      const block = await client.getBlock({ blockNumber: n }).catch((e) => (archiveClient ? archiveClient.getBlock({ blockNumber: n }) : Promise.reject(e)))
+      times.set(n, Number(block.timestamp))
+    }
     return times.get(n)!
   }
-  /** a block at or a little before `ts`: a few guesses from the mean block time */
+  /**
+   * The last block at or before `ts` (within PAD): interpolation between the known blocks around it, halving when it
+   * stalls. The block time is not constant over a chain's life (Base went from 2 s to 0.2 s), so no single rate is used.
+   */
   const blockAt = async (ts: number) => {
-    let n = head.number - BigInt(Math.max(0, Math.round((Number(head.timestamp) - ts) / perBlock)))
-    for (let i = 0; i < 4; i++) {
-      n = n < 0n ? 0n : n > head.number ? head.number : n
-      const gap = (await timeOfBlock(n)) - ts
-      if (gap <= 0 && gap > -PAD) break
-      n -= BigInt(Math.round(gap / perBlock)) + (gap > 0 ? 1n : 0n)
+    if (ts >= Number(head.timestamp)) return head.number
+    let lo = 1n
+    let hi = head.number
+    for (const [n, t] of times) if (t <= ts && n > lo) lo = n
+    for (const [n, t] of times) if (t > ts && n < hi) hi = n
+    if ((await timeOfBlock(lo)) > ts) return lo
+    for (let i = 0; i < 40 && hi - lo > 1n && ts - (await timeOfBlock(lo)) > PAD; i++) {
+      const [tLo, tHi] = [await timeOfBlock(lo), await timeOfBlock(hi)]
+      let n = i % 3 === 2 ? (lo + hi) / 2n : lo + BigInt(Math.floor((Number(hi - lo) * (ts - tLo)) / Math.max(1, tHi - tLo)))
+      n = n <= lo ? lo + 1n : n >= hi ? hi - 1n : n
+      if ((await timeOfBlock(n)) <= ts) lo = n
+      else hi = n
     }
-    return n < 0n ? 0n : n > head.number ? head.number : n
+    return lo
   }
 
   let calls = 0
+  let archiveCalls = 0
   let complete = true
   const logs: MorphoLog[] = []
+  // raw request: viem filters on `args` for one event only, and the market id is what keeps the answer small
+  const getLogs = async (c: Pick<PublicClient, 'request'>, from: bigint, to: bigint) => {
+    const raw = (await c.request({
+      method: 'eth_getLogs',
+      params: [{ address: net.morpho, topics: [MORPHO_TOPICS, marketKey], fromBlock: toHex(from), toBlock: toHex(to) }],
+    } as never)) as RawLog[]
+    logs.push(...raw.map(fromRawLog))
+  }
+  const readArchive = async (from: bigint, to: bigint) => {
+    const step = BigInt(archive!.maxBlocks)
+    const chunks: bigint[] = []
+    for (let a = from; a <= to; a += step) chunks.push(a)
+    if (archiveCalls + chunks.length > MAX_ARCHIVE_CALLS) return void (complete = false)
+    archiveCalls += chunks.length
+    await inPool(chunks, (a) => getLogs(archiveClient!, a, a + step - 1n < to ? a + step - 1n : to).catch(() => void (complete = false)), 4)
+  }
   const read = async (from: bigint, to: bigint, depth = 0): Promise<void> => {
     if (calls++ >= MAX_LOG_CALLS) return void (complete = false)
     try {
-      logs.push(
-        ...((await client.getLogs({
-          address: net.morpho,
-          events: MORPHO_EVENTS,
-          args: { id: marketKey },
-          fromBlock: from,
-          toBlock: to,
-        } as never)) as MorphoLog[]),
-      )
+      await getLogs(client, from, to)
     } catch {
+      if (archiveClient) return readArchive(from, to)
       if (depth >= 8 || from >= to) return void (complete = false)
       const mid = (from + to) / 2n
       await read(from, mid, depth + 1)

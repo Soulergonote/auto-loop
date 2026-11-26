@@ -37,11 +37,10 @@ function sharePrice(p: RestStatePoint): number | undefined {
 const readSeries = (chainId: number, marketId: string, lookback: Lookback, days: number, signal?: AbortSignal, now = Date.now()) =>
   marketStateHistory(chainId, marketId, lookback, signal).then((p) => realizedBorrowSeries(p).filter((x) => x.t >= now - days * DAY_MS))
 
-/** Daily borrow rate of a Morpho Blue market over the last 90 days, for the loop history (I3) and the replay (A1). */
-export const readMorphoBorrowSeries = (chainId: number, marketId: string, signal?: AbortSignal, now = Date.now()) =>
-  readSeries(chainId, marketId, 'ninety_days', 91, signal, now)
-
-/** The same, from the market's 90-day totals shared with its details (marketInfo.ts): one request for both. */
+/**
+ * Daily borrow rate of a Morpho Blue market over the last 90 days, for the loop history (I3) and the replay (A1), from the
+ * market's 90-day totals shared with its details (marketInfo.ts): one request for both.
+ */
 export function useMorphoBorrowSeries(chainId: number, marketId: string, enabled = true) {
   return useQuery({
     ...morphoStateHistoryQuery(chainId, marketId, enabled),

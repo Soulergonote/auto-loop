@@ -43,6 +43,20 @@ export const ARCHIVE_RPCS: Record<number, string[]> = {
 }
 
 /**
+ * Keyless RPCs that answer eth_getLogs on old blocks, for the real-gain history of a Morpho position (positions/history.ts):
+ * PublicNode refuses logs older than a few months without a token. Tenderly gateways answer any block, 1,000 blocks per
+ * request, CORS *. Checked 26 Nov 2026.
+ */
+export const ARCHIVE_LOG_RPCS: Record<number, { url: string; maxBlocks: number }> = {
+  [mainnet.id]: { url: 'https://mainnet.gateway.tenderly.co', maxBlocks: 1000 },
+  [base.id]: { url: 'https://base.gateway.tenderly.co', maxBlocks: 1000 },
+  [arbitrum.id]: { url: 'https://arbitrum.gateway.tenderly.co', maxBlocks: 1000 },
+  [optimism.id]: { url: 'https://optimism.gateway.tenderly.co', maxBlocks: 1000 },
+  [polygon.id]: { url: 'https://polygon.gateway.tenderly.co', maxBlocks: 1000 },
+  [unichain.id]: { url: 'https://unichain.gateway.tenderly.co', maxBlocks: 1000 },
+}
+
+/**
  * Protected RPCs proposed on Ethereum (F7): the transaction goes to builders without passing through the public
  * mempool, so a big swap cannot be sandwiched. Both keyless, both answer eth_chainId 0x1 (checked 15 Nov 2026).
  * Useless on L2s with a sequencer (no public mempool).

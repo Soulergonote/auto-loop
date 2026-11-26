@@ -8,7 +8,7 @@
  * times the loan token's. No curation exists on the chains read from the logs: their markets are shown as not listed.
  */
 import { createPublicClient, getAddress, http, parseAbiItem, zeroAddress, type Address, type Hex } from 'viem'
-import { readContracts } from '@wagmi/core'
+import { multicall } from '@wagmi/core'
 import { wagmiConfig } from '../../chain/wagmi'
 import { erc20Abi, morphoAbi, morphoIrmAbi, morphoOracleAbi } from '../../chain/abi'
 import type { MorphoNetDef, MorphoOnchainSource } from '../../config'
@@ -171,8 +171,11 @@ export function buildOnchainMarkets(
 /** calls per multicall request: market() answers 192 bytes, so a few hundred stay well under what RPCs accept */
 const CALLS_PER_READ = 400
 
-/** Reads many calls of one chain in multicalls of CALLS_PER_READ, a few at a time. */
-async function readMany(contracts: readonly unknown[]): Promise<{ result?: unknown }[]> {
+/**
+ * Reads many calls of one chain in multicalls of CALLS_PER_READ, a few at a time. A refused multicall fails the read
+ * (readContracts would retry it as one request per call, hundreds at once).
+ */
+async function readMany(chainId: number, contracts: readonly unknown[]): Promise<{ result?: unknown }[]> {
   const parts: (readonly unknown[])[] = []
   for (let i = 0; i < contracts.length; i += CALLS_PER_READ) parts.push(contracts.slice(i, i + CALLS_PER_READ))
   const out: { result?: unknown }[][] = []
@@ -181,7 +184,7 @@ async function readMany(contracts: readonly unknown[]): Promise<{ result?: unkno
       ...(await Promise.all(
         parts
           .slice(i, i + 4)
-          .map((c) => readContracts(wagmiConfig, { contracts: c as never, allowFailure: true, batchSize: 64_000 }) as Promise<{ result?: unknown }[]>),
+          .map((c) => multicall(wagmiConfig, { chainId, contracts: c as never, allowFailure: true, batchSize: 64_000 }) as Promise<{ result?: unknown }[]>),
       )),
     )
   return out.flat()
@@ -197,7 +200,7 @@ export type MarketEntry = { id: Hex; listed: boolean; params?: MarketParams }
 export async function readMarketsOnchain(chainId: number, morpho: Address, entries: MarketEntry[], opts: BuildOptions = {}): Promise<MorphoMarket[]> {
   if (entries.length === 0) return []
   const needParams = entries.filter((e) => !e.params)
-  const base = await readMany([
+  const base = await readMany(chainId, [
     ...needParams.map((e) => ({ chainId, address: morpho, abi: morphoAbi, functionName: 'idToMarketParams', args: [e.id] }) as const),
     ...entries.map((e) => ({ chainId, address: morpho, abi: morphoAbi, functionName: 'market', args: [e.id] }) as const),
   ])
@@ -219,7 +222,7 @@ export async function readMarketsOnchain(chainId: number, morpho: Address, entri
   if (markets.length === 0) return []
 
   const tokenAddrs = [...new Set(markets.flatMap((x) => [x.params.loanToken, x.params.collateralToken]))]
-  const res = await readMany([
+  const res = await readMany(chainId, [
     ...tokenAddrs.flatMap((a) => [
       { chainId, address: a, abi: erc20Abi, functionName: 'symbol' } as const,
       { chainId, address: a, abi: erc20Abi, functionName: 'decimals' } as const,

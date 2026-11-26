@@ -3,13 +3,17 @@
  * Used to list markets and positions and for histories; anything shown as live state or signed is read on-chain.
  *
  * Limits (docs.morpho.org, 2026-11): 750 requests a minute per IP, and an IP that sends over 3,334 in 10 minutes is
- * banned for 7 days. So requests go through one queue of at most MAX_CONCURRENT at a time, a 429 is never retried here
- * (the queue stops until its Retry-After), and no list is read with one request per market.
+ * banned for 7 days. So requests go through one queue of at most MAX_CONCURRENT at a time, started at least MIN_GAP_MS
+ * apart (300 a minute at most, under the ban's 333 a minute held 10 minutes), a 429 is never retried here (the queue stops until its Retry-After), and no list is read
+ * with one request per market except the 30-day borrow rates (readMorphoBorrowBatch, a few dozen markets).
  */
 export const MORPHO_API = 'https://api.morpho.org'
 
 const MAX_CONCURRENT = 6
+const MIN_GAP_MS = 200
 let running = 0
+/** earliest start of the next request (ms) */
+let nextStart = 0
 const waiting: (() => void)[] = []
 /** no request before this time (ms) after a 429 */
 let pausedUntil = 0
@@ -17,6 +21,9 @@ let pausedUntil = 0
 async function slot(): Promise<() => void> {
   if (running >= MAX_CONCURRENT) await new Promise<void>((r) => waiting.push(r))
   running++
+  const wait = nextStart - Date.now()
+  nextStart = Math.max(Date.now(), nextStart) + MIN_GAP_MS
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait))
   return () => {
     running--
     waiting.shift()?.()

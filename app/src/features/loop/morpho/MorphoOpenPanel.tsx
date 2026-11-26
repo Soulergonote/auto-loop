@@ -174,10 +174,9 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
   const hf = newColl !== undefined ? morphoHf(newColl, newDebt, state.price, M.params.lltv) : undefined
   const worstHf = newCollMin !== undefined ? morphoHf(newCollMin, newDebt, state.price, M.params.lltv) : undefined
   const loopLev = newColl !== undefined ? morphoLeverage(newColl, newDebt, state.price) : undefined
-  const netBorrow = ctx.borrowApy
   // Merkl campaigns (collateral and borrow, M7) are added on equity
   const merklApy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoMerklApy(ctx.merkl, loopLev) : 0
-  const apy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoNetApy(loopLev, collateralApy, netBorrow) + merklApy : undefined
+  const apy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoNetApy(loopLev, collateralApy, ctx.borrowApy) + merklApy : undefined
   const series = useMorphoBorrowSeries(M.chainId, M.id, M.source !== 'chain')
   const correlated = isCorrelated({ price: sides.collateral.price, token: C }, { price: sides.loan.price, token: L })
   const signals = useRiskSignals({
@@ -217,8 +216,8 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
   const unreal = (worstHf !== undefined && worstHf < 1) || debtAmount > state.liquidity || !!lossIssue?.block
   if (pt && ptDays !== undefined && !ptExpired && ptDays < 14)
     warnings.push(`Échéance dans ${Math.floor(ptDays)} j : le rendement fixe ne court plus que jusqu’au ${fmtDate(pt.expiry)}.`)
-  if (fixedApy !== undefined && netBorrow > fixedApy)
-    warnings.push(`L’emprunt ${L.symbol} (${fmtPct(netBorrow)}) coûte plus que l’APY fixe du PT (${fmtPct(fixedApy)}) : la boucle perd chaque jour.`)
+  if (fixedApy !== undefined && ctx.borrowApy > fixedApy)
+    warnings.push(`L’emprunt ${L.symbol} (${fmtPct(ctx.borrowApy)}) coûte plus que l’APY fixe du PT (${fmtPct(fixedApy)}) : la boucle perd chaque jour.`)
   if (!pt && ctx.collateralApy === 0) warnings.push(`Aucun rendement connu pour ${C.symbol} : l’APY ne compte que le coût de l’emprunt.`)
   if (hf !== undefined && !unreal && hf < hfThresholds(correlated).ok)
     warnings.push(

@@ -69,14 +69,30 @@ export function findCopies(chainId: number, addresses: readonly string[], known:
   return value
 }
 
-/** Symbol and USD price of a token DefiLlama does not know, from Morpho's API (a chain it covers), else nothing. */
-async function morphoQuote(t: TokenRef): Promise<{ symbol: string; price: number } | undefined> {
-  const [info, price] = await Promise.all([
-    morphoGet<{ data: { symbol?: string } }>(`/v0/tokens/${selector(t.chainId, t.address)}`, undefined, AbortSignal.timeout(8_000)),
-    tokenPrices(t.chainId, [t.address], AbortSignal.timeout(8_000)),
-  ]).catch(() => [undefined, undefined] as const)
-  const p = price?.get(tokenKey(t))
-  return info?.data.symbol && p ? { symbol: info.data.symbol, price: p } : undefined
+/** tokens of one read priced through Morpho's API (two requests each) */
+const MAX_MORPHO_QUOTES = 20
+
+/**
+ * Symbol and USD price of the tokens DefiLlama does not know, from Morpho's API (a chain it covers): prices first, then
+ * the symbol of the priced ones only. Tokens without both are left out.
+ */
+async function morphoQuotes(chainId: number, tokens: TokenRef[]): Promise<Quoted[]> {
+  const list = tokens.slice(0, MAX_MORPHO_QUOTES)
+  if (list.length === 0) return []
+  const prices = await tokenPrices(
+    chainId,
+    list.map((t) => t.address),
+    AbortSignal.timeout(8_000),
+  ).catch(() => new Map<string, number>())
+  const priced = list.filter((t) => prices.has(tokenKey(t)))
+  const infos = await Promise.allSettled(
+    priced.map((t) => morphoGet<{ data: { symbol?: string } }>(`/v0/tokens/${selector(t.chainId, t.address)}`, undefined, AbortSignal.timeout(8_000))),
+  )
+  return priced.flatMap((t, i) => {
+    const r = infos[i]
+    const symbol = r.status === 'fulfilled' ? r.value.data.symbol : undefined
+    return symbol ? [{ ...t, symbol, price: prices.get(tokenKey(t))! }] : []
+  })
 }
 
 async function readCopies(chainId: number, addresses: string[], known: TokenRef[]): Promise<Map<string, TokenRef[]>> {
@@ -84,12 +100,17 @@ async function readCopies(chainId: number, addresses: string[], known: TokenRef[
   if (addresses.length === 0) return out
   const own = addresses.map((address) => ({ chainId, address }))
   const llama = await llamaQuotes([...own, ...known])
-  const tokens: Quoted[] = []
-  for (const t of own) {
-    // DefiLlama, else Morpho's API for the few it does not price
-    const q = llama.get(tokenKey(t)) ?? (await morphoQuote(t))
-    if (q && q.price > 0) tokens.push({ ...t, ...q })
-  }
+  // DefiLlama, else Morpho's API for the few it does not price
+  const tokens: Quoted[] = [
+    ...own.flatMap((t) => {
+      const q = llama.get(tokenKey(t))
+      return q ? [{ ...t, ...q }] : []
+    }),
+    ...(await morphoQuotes(
+      chainId,
+      own.filter((t) => !llama.has(tokenKey(t))),
+    )),
+  ].filter((t) => t.price > 0)
   const candidates: Quoted[] = known.flatMap((t) => {
     const q = llama.get(tokenKey(t))
     return q ? [{ ...t, address: t.address.toLowerCase(), ...q }] : []
