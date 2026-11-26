@@ -9,7 +9,6 @@ import {
   campaignYields,
   daysLeft,
   eligibleForPosition,
-  morphoBonusPage,
   parseNetOf,
   rewardsOverHorizon,
   toCampaign,
@@ -140,10 +139,7 @@ describe('Merkl pages of Morpho and Aave v4 bonuses', () => {
     },
     { url: 'https://app.merkl.xyz/opportunities/4', depositUrl: 'https://app.morpho.org/arc/borrow', type: 'MORPHOBORROW_SINGLETOKEN', identifier: '0x36' },
   ]
-  it('finds the page by market id or by asset and side', () => {
-    expect(morphoBonusPage(pages, '0xABC')).toBe('https://app.merkl.xyz/opportunities/1')
-    expect(morphoBonusPage(pages, '0xabd')).toBeUndefined()
-    expect(morphoBonusPage(pages, '0xabd', '0x36')).toBe('https://app.merkl.xyz/opportunities/4')
+  it('finds the page by asset and side', () => {
     expect(v4BonusPage(pages, '0xDD', 'supply')).toBe('https://app.merkl.xyz/opportunities/2')
     expect(v4BonusPage(pages, '0xDD', 'borrow')).toBe('https://app.merkl.xyz/opportunities/3')
   })
@@ -175,18 +171,17 @@ describe('Merkl on Morpho (M7)', () => {
 
   it('counts the collateral campaign of the market only, at L on equity', () => {
     const all = list.filter((c): c is NonNullable<typeof c> => !!c)
-    const m = morphoMerkl(all, usdeRlusd, false)
+    const m = morphoMerkl(all, usdeRlusd)
     expect(m.collateralApr).toBeCloseTo(0.0475, 10)
     expect(m.borrowApr).toBe(0)
     expect(morphoMerklApy(m, 10)).toBeCloseTo(0.475, 10)
     // another USDe market: the campaign names its market
-    expect(morphoMerkl(all, { ...usdeRlusd, id: '0x01' }, false)).toEqual(NO_MORPHO_MERKL)
+    expect(morphoMerkl(all, { ...usdeRlusd, id: '0x01' })).toEqual(NO_MORPHO_MERKL)
   })
 
-  it('takes borrow campaigns only where the Morpho API does not count them', () => {
+  it('counts borrow campaigns at L - 1 on equity', () => {
     const all = list.filter((c): c is NonNullable<typeof c> => !!c)
-    expect(morphoMerkl(all, oethUsdc, false).borrowApr).toBe(0)
-    const onchain = morphoMerkl(all, oethUsdc, true)
+    const onchain = morphoMerkl(all, oethUsdc)
     expect(onchain.borrowApr).toBeCloseTo(0.04853865, 6)
     expect(morphoMerklApy(onchain, 5)).toBeCloseTo(0.04853865 * 4, 6)
   })
@@ -196,6 +191,6 @@ describe('Merkl on Morpho (M7)', () => {
     expect(toMorphoCampaign({ ...base, campaigns: [{ params: { whitelist: ['0x1'] } }] })).toBeUndefined()
     const c = toMorphoCampaign({ ...base, campaigns: [{ params: { targetToken: usdeRlusd.collateral, hooks: [{}] } }] })!
     expect(c).toMatchObject({ side: 'collateral', market: undefined, conditional: true, apr: 0.02 })
-    expect(morphoMerkl([c], { ...usdeRlusd, id: '0x02' }, false).collateralApr).toBeCloseTo(0.02, 10)
+    expect(morphoMerkl([c], { ...usdeRlusd, id: '0x02' }).collateralApr).toBeCloseTo(0.02, 10)
   })
 })

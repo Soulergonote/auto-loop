@@ -139,7 +139,7 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
 
   const correlated = isCorrelated({ price: sides.collateral.price, token: C }, { price: sides.loan.price, token: L })
   const own = ctx.collateralApy
-  const mBorrow = ctx.borrowApy - ctx.rewardsApr
+  const mBorrow = ctx.borrowApy - ctx.merkl.borrowApr
 
   // amounts and both ends of the move
   const r = route
@@ -366,7 +366,7 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
               <dd>
                 Aave {fmtPct(aaveBorrowNet(aD))}
                 {aD.borrowRewardApr > 0 ? ` (récompenses ${fmtPct(aD.borrowRewardApr)} déduites)` : ''} · Morpho {fmtPct(mBorrow)}
-                {ctx.rewardsApr > 0 ? ` (récompenses ${fmtPct(ctx.rewardsApr)} déduites)` : ''}
+                {ctx.merkl.borrowApr > 0 ? ` (récompenses ${fmtPct(ctx.merkl.borrowApr)} déduites)` : ''}
               </dd>
               <dt>Collatéral {ptShortSymbol(C.symbol)}</dt>
               <dd>

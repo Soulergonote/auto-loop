@@ -174,8 +174,8 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
   const hf = newColl !== undefined ? morphoHf(newColl, newDebt, state.price, M.params.lltv) : undefined
   const worstHf = newCollMin !== undefined ? morphoHf(newCollMin, newDebt, state.price, M.params.lltv) : undefined
   const loopLev = newColl !== undefined ? morphoLeverage(newColl, newDebt, state.price) : undefined
-  const netBorrow = ctx.borrowApy - ctx.rewardsApr
-  // the API's borrow rewards are in netBorrow; Merkl campaigns it ignores (M7) are added on equity
+  const netBorrow = ctx.borrowApy
+  // Merkl campaigns (collateral and borrow, M7) are added on equity
   const merklApy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoMerklApy(ctx.merkl, loopLev) : 0
   const apy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoNetApy(loopLev, collateralApy, netBorrow) + merklApy : undefined
   const series = useMorphoBorrowSeries(M.chainId, M.id, M.source !== 'chain')
@@ -187,7 +187,6 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
     correlated,
     oracleRatio: Number(sides.collateral.price) / Number(sides.loan.price),
     exit: exitRead,
-    morpho: { id: M.id, totalBorrowShares: state.totals.totalBorrowShares, user: account, api: M.source !== 'chain' },
   })
 
   const problems: string[] = []
@@ -370,11 +369,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
         {
           label: 'APY net',
           value: unreal || (q && apy === undefined) ? NA : apy !== undefined ? fmtPct(apy) : undefined,
-          sub: pt
-            ? `dont ${fmtPct(collateralApy)} fixe sur le collatéral`
-            : ctx.rewardsApr > 0 || merklApy > 0
-              ? `bonus ${fmtPct(ctx.rewardsApr * ((loopLev ?? 1) - 1) + merklApy)} compris`
-              : 'taux variables, hors coûts',
+          sub: pt ? `dont ${fmtPct(collateralApy)} fixe sur le collatéral` : merklApy > 0 ? `bonus ${fmtPct(merklApy)} compris` : 'taux variables, hors coûts',
           tone: apyTone(apy),
           key: true,
         },
@@ -480,7 +475,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             leverage={loopLev}
             supplyApy={collateralApy}
             borrowApy={ctx.borrowApy}
-            rewardsApy={ctx.rewardsApr * (loopLev - 1) + merklApy}
+            rewardsApy={merklApy}
             correlated={correlated}
             apy={apy}
             signals={signals}
@@ -492,7 +487,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             leverage={loopLev}
             collateralYield={collateralApy}
             collateralLabel={pt ? `${ptShortSymbol(C.symbol)} (taux fixe)` : C.symbol}
-            rewards={ctx.rewardsApr * (loopLev - 1) + merklApy}
+            rewards={merklApy}
             rewardsLabel={merklApy > 0 ? 'Récompenses et Merkl' : 'Récompenses d’emprunt'}
             borrowCost={ctx.borrowApy}
             debtLabel={L.symbol}
@@ -505,7 +500,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
           <ApyHistory
             borrow={series.data}
             leverage={loopLev}
-            extra={collateralApy * loopLev + ctx.rewardsApr * (loopLev - 1) + merklApy}
+            extra={collateralApy * loopLev + merklApy}
             pending={series.isPending && series.fetchStatus !== 'idle'}
             source="API Morpho"
             replay={{ chainId: net.chain.id, collateral: C, debt: L, liquidationThreshold: M.lltv, correlated, capitalUsd: Number(capitalBase) / 1e8 }}

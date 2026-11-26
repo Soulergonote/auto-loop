@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import { useQueries, useQuery } from '@tanstack/react-query'
 import type { Address } from 'viem'
 import { getMarket, marketPlace, networkName, type Market } from '../../config'
-import { bonusPagesQuery, merklQuery, morphoBonusPage, morphoCampaignsQuery, v4BonusPage } from '../../services/merkl'
+import { bonusPagesQuery, merklQuery, morphoCampaignsQuery, v4BonusPage } from '../../services/merkl'
 import { aaveMarketUrl, aaveV4SpokeUrl, morphoMarketUrl, pendleMarketUrl } from '../../services/links'
 import { ExtLink } from '../../ui/ExtLink'
 import { withData } from '../../services/queryData'
@@ -105,11 +105,8 @@ type Line = {
   links: { href?: string; title: string }[]
   /** ↗ next to a PT's fixed yield in « Détail »: its Pendle market */
   ptUrl?: string
-  /** where the Merkl page of the bonus is: known (Aave v3 campaigns) or looked up on Merkl (Morpho, Aave v4) */
-  bonus?:
-    | { urls: string[] }
-    | { chainId: number; morpho: string; loan: Address; /** Merkl pages of the campaigns the app reads itself (M7) */ extra: string[] }
-    | { chainId: number; v4: { collateral: Address; debt: Address } }
+  /** where the Merkl page of the bonus is: known (Aave v3 and Morpho campaigns) or looked up on Merkl (Aave v4) */
+  bonus?: { urls: string[] } | { chainId: number; v4: { collateral: Address; debt: Address } }
   place: string
   protocol: 'aave' | 'morpho'
   tags: ReactNode[]
@@ -344,7 +341,6 @@ export function Scanner({
         lowCapacityUsd: LOW_CAPACITY_USD,
         equityUsd: amountUsd,
         merkl: morphoMerklData[i],
-        onchain: !!n.onchain,
       }))
         out.push({
           key: `morpho-${n.chain.id}-${r.market.id}`,
@@ -358,22 +354,19 @@ export function Scanner({
             native: r.collateralYield,
             nativeFixed: !!r.pt,
             borrow: r.grossBorrowApy,
-            rewards: r.market.borrowRewardsApr * (r.leverage - 1) + r.merklApy,
+            rewards: r.merklApy,
           },
-          note: `oracle ${r.market.oracleType ? `${r.market.oracleType} ` : ''}${fmtAddress(r.market.params.oracle)}`,
+          note: `oracle ${fmtAddress(r.market.params.oracle)}`,
           pair: `${ptShortSymbol(r.market.collateral.symbol)} / ${r.market.loan.symbol}`,
           links: [{ href: morphoMarketUrl(n.chain.id, r.market.id), title: 'Marché sur Morpho' }],
           ptUrl: pendleMarketUrl(n.chain.id, r.pt?.market),
-          bonus:
-            r.market.borrowRewardsApr > 0
-              ? { chainId: n.chain.id, morpho: r.market.id, loan: r.market.loan.address, extra: r.merkl.urls }
-              : { urls: r.merkl.urls },
+          bonus: { urls: r.merkl.urls },
           place: `Morpho · ${n.label}`,
           protocol: 'morpho',
           tags: [
             <Tag key="lltv">LLTV {fmtLltv(r.market.lltv)}</Tag>,
             r.pt && <span key="pt">{ptTag(r.pt.expiry)}</span>,
-            r.market.borrowRewardsApr + r.merklApy > 0 && (
+            r.merklApy > 0 && (
               <Tag key="bonus" tone="good">
                 bonus
               </Tag>
@@ -383,7 +376,7 @@ export function Scanner({
           leverage: r.leverage,
           apy: r.apy,
           nativeApy: r.nativeApy,
-          rewardsApy: r.market.borrowRewardsApr * (r.leverage - 1) + r.merklApy,
+          rewardsApy: r.merklApy,
           capacityUsd: r.capacityUsd,
           rewardsEnd: r.merkl.endsAt,
           ...sized(r, r.capacityUsd, r.pt ? 'pt' : r.stable ? 'stable' : r.correlated ? 'correlated' : 'other'),
@@ -470,10 +463,7 @@ export function Scanner({
     if (!b) return []
     if ('urls' in b) return b.urls
     const pages = bonusPages[bonusChains.indexOf(b.chainId)]
-    const urls =
-      'morpho' in b
-        ? [morphoBonusPage(pages, b.morpho, b.loan), ...b.extra]
-        : [v4BonusPage(pages, b.v4.collateral, 'supply'), v4BonusPage(pages, b.v4.debt, 'borrow')]
+    const urls = [v4BonusPage(pages, b.v4.collateral, 'supply'), v4BonusPage(pages, b.v4.debt, 'borrow')]
     return [...new Set(urls.filter((u): u is string => !!u))]
   }
 

@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { getAddress } from 'viem'
-import markets from '../../test/fixtures/morpho-markets.json'
-import { parseMarkets } from '../../protocols/morpho/markets'
+import { MORPHO_MARKETS } from '../../test/morphoMarkets'
 import { scanMorpho } from './morphoScan'
 import type { PtInfo } from '../../protocols/pendle/pt'
 import type { MorphoCampaign } from '../../services/merkl'
 
-const parsed = parseMarkets(1, markets as never)
+const parsed = MORPHO_MARKETS
 const bySymbol = (s: string) => parsed.find((m) => m.collateral.symbol === s)!
 const NOW = Date.UTC(2026, 10, 9) / 1000
 const pt = (token: string, expiry: number, impliedApy?: number): PtInfo => ({
@@ -54,12 +53,10 @@ describe('scanMorpho', () => {
     expect(rows.map((x) => x.apy)).toEqual([...rows.map((x) => x.apy)].sort((a, b) => b - a))
   })
 
-  it('leaves out expired PTs, red warnings and unpriced markets', () => {
+  it('leaves out expired PTs and unpriced markets', () => {
     const re = bySymbol('PT-reUSD-10DEC2026')
     const pts = new Map([[re.collateral.address.toLowerCase(), pt(re.collateral.address, NOW - 1, 0.1)]])
     expect(scanMorpho(parsed, { targetHf: 1.1, pts, nowSec: NOW }).some((r) => r.market.id === re.id)).toBe(false)
-    const red = parsed.map((m) => (m.id === re.id ? { ...m, warnings: [{ type: 'bad_debt_unrealized', level: 'RED' }] } : m))
-    expect(scanMorpho(red, { targetHf: 1.1, nowSec: NOW }).some((r) => r.market.id === re.id)).toBe(false)
     const unpriced = parsed.map((m) => (m.id === re.id ? { ...m, collateralUsd: 0 } : m))
     expect(scanMorpho(unpriced, { targetHf: 1.1, nowSec: NOW }).some((r) => r.market.id === re.id)).toBe(false)
   })
@@ -73,20 +70,20 @@ describe('scanMorpho', () => {
     expect(rows.find((r) => r.market.collateral.symbol === 'wstETH')!.flags).toContain('unlisted')
   })
 
-  it('adds the Merkl campaigns on the collateral at L, and on the borrow only for a network read on-chain (M7)', () => {
+  it('adds the Merkl campaigns on the collateral at L and on the borrow at L - 1 (M7)', () => {
     const base = scanMorpho(parsed, { targetHf: 1.1, nowSec: NOW }).find((r) => r.market.collateral.symbol === 'wstETH')!
     const m = base.market
     const campaigns: MorphoCampaign[] = [
       { side: 'collateral', market: m.id.toLowerCase(), token: m.collateral.address.toLowerCase(), apr: 0.02, conditional: false, endsAt: 1_800_000_000 },
       { side: 'borrow', market: m.id.toLowerCase(), token: m.loan.address.toLowerCase(), apr: 0.01, conditional: true },
     ]
-    const withApi = scanMorpho(parsed, { targetHf: 1.1, nowSec: NOW, merkl: campaigns }).find((r) => r.market.id === m.id)!
-    expect(withApi.merklApy).toBeCloseTo(0.02 * base.leverage, 10)
-    expect(withApi.apy).toBeCloseTo(base.apy + 0.02 * base.leverage, 10)
-    expect(withApi.merkl.endsAt).toBe(1_800_000_000)
-    expect(withApi.flags).not.toContain('conditional')
-    const onchain = scanMorpho(parsed, { targetHf: 1.1, nowSec: NOW, merkl: campaigns, onchain: true }).find((r) => r.market.id === m.id)!
-    expect(onchain.merklApy).toBeCloseTo(0.02 * base.leverage + 0.01 * (base.leverage - 1), 10)
-    expect(onchain.flags).toContain('conditional')
+    const collateralOnly = scanMorpho(parsed, { targetHf: 1.1, nowSec: NOW, merkl: campaigns.slice(0, 1) }).find((r) => r.market.id === m.id)!
+    expect(collateralOnly.merklApy).toBeCloseTo(0.02 * base.leverage, 10)
+    expect(collateralOnly.apy).toBeCloseTo(base.apy + 0.02 * base.leverage, 10)
+    expect(collateralOnly.merkl.endsAt).toBe(1_800_000_000)
+    expect(collateralOnly.flags).not.toContain('conditional')
+    const both = scanMorpho(parsed, { targetHf: 1.1, nowSec: NOW, merkl: campaigns }).find((r) => r.market.id === m.id)!
+    expect(both.merklApy).toBeCloseTo(0.02 * base.leverage + 0.01 * (base.leverage - 1), 10)
+    expect(both.flags).toContain('conditional')
   })
 })

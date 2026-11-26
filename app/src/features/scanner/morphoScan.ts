@@ -29,7 +29,7 @@ export type MorphoScanRow = {
   grossBorrowApy: number
   /** unlevered collateral yield (PT implied APY or the token's own) */
   collateralYield: number
-  /** Merkl campaigns the Morpho API does not count (M7), and their yield on equity at this leverage (in `apy`) */
+  /** Merkl campaigns (M7) on the collateral and the borrow, and their yield on equity at this leverage (in `apy`) */
   merkl: MorphoMerkl
   merklApy: number
   apy: number
@@ -52,18 +52,15 @@ export type MorphoScanOptions = {
   equityUsd?: number
   /** the network's live Merkl campaigns on Morpho (M7) */
   merkl?: MorphoCampaign[]
-  /** the network is read on-chain: no API rewards, so Merkl's borrow campaigns count too */
-  onchain?: boolean
 }
 
 const priced = (t: MorphoMarket['collateral'], usd: number) => ({ token: t, price: BigInt(Math.round(usd * 1e8)) })
 
-/** One row per market that can be looped: priced by the API, no red warning, a PT only before maturity with a known APY. */
+/** One row per market that can be looped: priced, a PT only before maturity with a known APY. */
 export function scanMorpho(markets: MorphoMarket[], opts: MorphoScanOptions): MorphoScanRow[] {
   const rows: MorphoScanRow[] = []
   for (const m of markets) {
     if (m.collateralUsd <= 0 || m.loanUsd <= 0 || m.lltv <= 0 || m.lltv >= 1) continue
-    if (m.warnings.some((w) => w.level === 'RED')) continue
     const pt = opts.pts?.get(m.collateral.address.toLowerCase())
     if (pt && isExpired(pt, opts.nowSec)) continue
     const leverage = Math.min(leverageAtMorphoHf(m.lltv, opts.targetHf), leverageAtMorphoHf(m.lltv, SLIDER_HF), MAX_SCAN_LEVERAGE)
@@ -73,8 +70,8 @@ export function scanMorpho(markets: MorphoMarket[], opts: MorphoScanOptions): Mo
     const E = opts.equityUsd ?? 0
     const after = E > 0 ? morphoBorrowApyAfter(m.borrowApy, m.borrowUsd + m.liquidityUsd, m.borrowUsd, (leverage - 1) * E) : undefined
     const grossBorrowApy = after ?? m.borrowApy
-    const borrowApy = grossBorrowApy - m.borrowRewardsApr
-    const merkl = opts.merkl ? morphoMerkl(opts.merkl, { id: m.id, collateral: m.collateral.address, loan: m.loan.address }, !!opts.onchain) : NO_MORPHO_MERKL
+    const borrowApy = grossBorrowApy
+    const merkl = opts.merkl ? morphoMerkl(opts.merkl, { id: m.id, collateral: m.collateral.address, loan: m.loan.address }) : NO_MORPHO_MERKL
     const merklApy = morphoMerklApy(merkl, leverage)
     const apy = morphoNetApy(leverage, collateralApy, borrowApy) + merklApy
     const C = priced(m.collateral, m.collateralUsd)
@@ -93,7 +90,7 @@ export function scanMorpho(markets: MorphoMarket[], opts: MorphoScanOptions): Mo
       healthFactor,
       nativeApy: collateralApy * leverage,
       borrowApy,
-      apyBefore: E > 0 ? morphoNetApy(leverage, collateralApy, m.borrowApy - m.borrowRewardsApr) + merklApy : undefined,
+      apyBefore: E > 0 ? morphoNetApy(leverage, collateralApy, m.borrowApy) + merklApy : undefined,
       grossBorrowApy,
       collateralYield: collateralApy,
       merkl,

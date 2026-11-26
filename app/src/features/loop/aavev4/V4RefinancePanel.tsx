@@ -20,7 +20,7 @@ import {
   type AaveSide,
 } from '../../../protocols/morpho/refinance'
 import { snapshotQuery, type Snapshot } from '../../../protocols/aave/snapshot'
-import { headlineRewards, merklQuery } from '../../../services/merkl'
+import { headlineRewards, merklQuery, morphoCampaignsQuery, morphoMerkl } from '../../../services/merkl'
 import { toBase } from '../../../domain/math'
 import { isCorrelated } from '../../../domain/pairs'
 import { fmtAmount, fmtDollars, fmtHf, fmtLltv, fmtPct } from '../../../ui/format'
@@ -84,6 +84,7 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
   const pools = useMemo(() => aaveMarketsOn(chainId), [chainId])
   const snapshots = useQueries({ queries: pools.map((p) => snapshotQuery(p)) })
   const campaigns = useQuery(merklQuery(chainId))
+  const morphoCampaigns = useQuery(morphoCampaignsQuery(chainId))
   const aaveSides = useQueries({
     queries: pools.map((p, i) => {
       const snap = snapshots[i].data
@@ -101,12 +102,7 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
   const markets = useMemo(
     () =>
       (morphoList.data ?? [])
-        .filter(
-          (m) =>
-            m.collateral.address.toLowerCase() === C.token.address.toLowerCase() &&
-            m.loan.address.toLowerCase() === D.token.address.toLowerCase() &&
-            m.warnings.every((w) => w.level !== 'RED'),
-        )
+        .filter((m) => m.collateral.address.toLowerCase() === C.token.address.toLowerCase() && m.loan.address.toLowerCase() === D.token.address.toLowerCase())
         .sort((a, b) => b.liquidityUsd - a.liquidityUsd)
         .slice(0, MORPHO_CANDIDATES),
     [morphoList.data, C.token.address, D.token.address],
@@ -177,7 +173,8 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
       }
     }
     if (o.kind === 'aave') return { supply: aaveSupplyNet(o.pair.collateral), borrow: aaveBorrowNet(o.pair.debt) }
-    return { supply: 0, borrow: (o.state.borrowApy ?? o.market.borrowApy) - o.market.borrowRewardsApr }
+    const merkl = morphoMerkl(morphoCampaigns.data, { id: o.market.id, collateral: o.market.collateral.address, loan: o.market.loan.address })
+    return { supply: 0, borrow: (o.state.borrowApy ?? o.market.borrowApy) - merkl.borrowApr }
   }
 
   // amounts and both ends of the move

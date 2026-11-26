@@ -6,13 +6,12 @@
  * - depeg: the largest fall of the collateral / debt price ratio over 90 days (DefiLlama), from its running peak;
  * - exit: what selling the collateral back to repay the whole debt loses today, at the oracle price (quote at the
  *   position's size, exitCheck.ts);
- * - concentration (Morpho): share of the market's debt held by its largest borrower, whose exit moves the rate.
  */
 import { fmtPct } from '../ui/format'
 import type { Tone } from '../ui/tone'
 
 export type PricePoint = { timestamp: number; price: number }
-export type RiskSignalKey = 'gap' | 'depeg' | 'exit' | 'concentration'
+export type RiskSignalKey = 'gap' | 'depeg' | 'exit'
 export type RiskSignal = { key: RiskSignalKey; label: string; value: string; tone: Tone; detail: string }
 
 /** thresholds, as fractions: [amber from, red from]. An uncorrelated pair's oracle lags the market by its deviation threshold (0.5 % to 1 % for Chainlink) */
@@ -20,7 +19,6 @@ export const GAP_LIMITS = { correlated: [0.005, 0.02], uncorrelated: [0.01, 0.03
 /** a correlated pair is meant not to move: a fall of 1 % is already a fact worth seeing */
 export const DEPEG_LIMITS = { correlated: [0.01, 0.05], uncorrelated: [0.2, 0.4] } as const
 export const EXIT_LIMITS = [0.005, 0.02] as const
-export const CONCENTRATION_LIMITS = [0.3, 0.6] as const
 
 const toneOf = (x: number, [warn, bad]: readonly [number, number]): Tone => (x >= bad ? 'bad' : x >= warn ? 'warn' : 'good')
 
@@ -82,8 +80,6 @@ export type RiskInputs = {
   /** exit swap loss at the oracle price, fraction; noRoute when nothing quotes it */
   exitLoss?: number
   exitNoRoute?: boolean
-  /** largest borrower's share of the market's debt; mine when it is the connected address */
-  topBorrower?: { share: number; mine: boolean }
 }
 
 /** The signals that could be read, in a fixed order. */
@@ -121,17 +117,6 @@ export function riskSignals(r: RiskInputs): RiskSignal[] {
       detail: r.exitNoRoute
         ? `Aucun agrégateur ne revend ${r.collateral} contre ${r.debt} à la taille de la dette.`
         : `Revendre ${r.collateral} pour rembourser toute la dette perd ${fmtPct(Math.max(0, r.exitLoss!))} au prix de l’oracle, à la taille de la position.`,
-    })
-  }
-  if (r.topBorrower) {
-    out.push({
-      key: 'concentration',
-      label: 'Concentration',
-      value: fmtPct(r.topBorrower.share, 0),
-      tone: r.topBorrower.mine ? 'good' : toneOf(r.topBorrower.share, CONCENTRATION_LIMITS),
-      detail: r.topBorrower.mine
-        ? 'Part de la dette du marché tenue par le plus gros emprunteur, qui est l’adresse connectée.'
-        : 'Part de la dette du marché tenue par le plus gros emprunteur : son départ ou son arrivée déplace le taux.',
     })
   }
   return out

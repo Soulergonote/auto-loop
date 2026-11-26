@@ -20,6 +20,7 @@ const tokens = new Map([
 const row = (over: Partial<OnchainRow> = {}): OnchainRow => ({
   id: marketId(params),
   params,
+  listed: false,
   totalSupplyAssets: 200_000n * 10n ** 6n,
   totalBorrowAssets: 150_000n * 10n ** 6n,
   price: 3n * 10n ** 23n,
@@ -48,7 +49,7 @@ describe('logRanges', () => {
 
 describe('buildOnchainMarkets', () => {
   it('builds a not-listed market from what Morpho, the oracle and the IRM return', () => {
-    const [m] = buildOnchainMarkets(146, [row()], tokens, new Map([[`146:${USDC.toLowerCase()}`, 1]]))
+    const [m] = buildOnchainMarkets(146, [row()], tokens, new Map([[`146:${USDC.toLowerCase()}`, 1]]), { fromLogs: true })
     expect(m.source).toBe('chain')
     expect(m.listed).toBe(false)
     expect(m.loan.symbol).toBe('USDC')
@@ -60,7 +61,6 @@ describe('buildOnchainMarkets', () => {
     expect(m.borrowUsd).toBeCloseTo(150_000)
     expect(m.utilization).toBeCloseTo(0.75)
     expect(m.borrowApy).toBeCloseTo(0.0513, 3)
-    expect(m.collateralTotalUsd).toBe(0)
     // ranked by the least collateral its debt needs
     expect(marketSizeUsd(m)).toBeCloseTo(150_000 / 0.86)
   })
@@ -79,5 +79,13 @@ describe('buildOnchainMarkets', () => {
     expect(buildOnchainMarkets(146, [row({ price: undefined })], tokens, usd)).toEqual([])
     expect(buildOnchainMarkets(146, [row()], tokens, new Map())).toEqual([])
     expect(buildOnchainMarkets(146, [row({ totalSupplyAssets: 5_000n * 10n ** 6n, totalBorrowAssets: 0n })], tokens, usd)).toEqual([])
+  })
+  it('keeps a small market when it is listed or when no minimum applies (a user’s own market)', () => {
+    const usd = new Map([[`146:${USDC.toLowerCase()}`, 1]])
+    const small = { totalSupplyAssets: 5_000n * 10n ** 6n, totalBorrowAssets: 0n }
+    const [listed] = buildOnchainMarkets(146, [row({ ...small, listed: true })], tokens, usd)
+    expect(listed.listed).toBe(true)
+    expect(listed.source).toBeUndefined()
+    expect(buildOnchainMarkets(146, [row(small)], tokens, usd, { minUnlistedUsd: 0 })).toHaveLength(1)
   })
 })

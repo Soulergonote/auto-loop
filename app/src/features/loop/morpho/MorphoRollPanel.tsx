@@ -20,6 +20,7 @@ import { isCorrelated } from '../../../domain/pairs'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
 import { Banners, Card, Fold, LoopLayout, Metric, NA, QuoteCompare, Summary, TxResult } from '../../../ui/primitives'
 import type { MorphoCtx } from './MorphoView'
+import { morphoCampaignsQuery, morphoMerkl, morphoMerklApy, NO_MORPHO_MERKL } from '../../../services/merkl'
 import { useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
@@ -86,6 +87,8 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
     refetchInterval: 30_000,
   })
   const same = !!target?.sameCollateral
+  const campaigns = useQuery(morphoCampaignsQuery(net.chain.id))
+  const targetMerkl = T ? morphoMerkl(campaigns.data, { id: T.id, collateral: T.collateral.address, loan: T.loan.address }) : NO_MORPHO_MERKL
   const quoteReq =
     T && !same && toState.data
       ? {
@@ -110,7 +113,7 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
   const lev2 = newColl !== undefined && price2 !== undefined ? morphoLeverage(newColl, debt, price2) : undefined
   const apy2Collateral = target?.pt ? (q?.pendle?.fixedApy ?? target.pt.impliedApy ?? 0) : same ? ctx.collateralApy : 0
   const borrow2 = toState.data?.borrowApy ?? T?.borrowApy ?? 0
-  const apy2 = lev2 !== undefined && Number.isFinite(lev2) && T ? morphoNetApy(lev2, apy2Collateral, borrow2 - T.borrowRewardsApr) : undefined
+  const apy2 = lev2 !== undefined && Number.isFinite(lev2) && T ? morphoNetApy(lev2, apy2Collateral, borrow2) + morphoMerklApy(targetMerkl, lev2) : undefined
   const correlated = T ? isCorrelated({ price: sides.collateral.price, token: T.collateral }, { price: sides.loan.price, token: L }) : true
 
   const problems: string[] = []

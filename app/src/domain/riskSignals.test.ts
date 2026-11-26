@@ -42,12 +42,11 @@ describe('riskSignals', () => {
   const base = { collateral: 'USDe', debt: 'USDC', correlated: true }
   it('reads each signal on its own and leaves out what is unknown', () => {
     expect(riskSignals(base)).toEqual([])
-    const s = riskSignals({ ...base, oracleRatio: 1, marketRatio: 0.99, drawdown: 0.004, exitLoss: 0.001, topBorrower: { share: 0.7, mine: false } })
+    const s = riskSignals({ ...base, oracleRatio: 1, marketRatio: 0.99, drawdown: 0.004, exitLoss: 0.001 })
     expect(s.map((x) => [x.key, x.tone])).toEqual([
       ['gap', 'warn'],
       ['depeg', 'good'],
       ['exit', 'good'],
-      ['concentration', 'bad'],
     ])
     expect(s[0].value).toBe('−1.00 %')
   })
@@ -55,8 +54,7 @@ describe('riskSignals', () => {
     expect(riskSignals({ ...base, oracleRatio: 1, marketRatio: 1.01 })[0].tone).toBe('good')
     expect(riskSignals({ ...base, correlated: false, oracleRatio: 1, marketRatio: 0.993 })[0].tone).toBe('good')
   })
-  it('no exit route is red; the largest borrower being the user is not a risk', () => {
+  it('no exit route is red', () => {
     expect(riskSignals({ ...base, exitNoRoute: true })[0]).toMatchObject({ value: 'aucune route', tone: 'bad' })
-    expect(riskSignals({ ...base, topBorrower: { share: 0.9, mine: true } })[0].tone).toBe('good')
   })
 })

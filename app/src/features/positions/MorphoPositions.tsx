@@ -16,6 +16,7 @@ import {
 } from '../../protocols/morpho/markets'
 import { toBase } from '../../domain/math'
 import { withData } from '../../services/queryData'
+import { morphoCampaignsQuery, morphoMerkl, morphoMerklApy, type MorphoMerkl } from '../../services/merkl'
 import { daysToMaturity, isExpired, needsRenewal, ptInfosQuery, type PtInfo } from '../../protocols/pendle/pt'
 import { isCorrelated } from '../../domain/pairs'
 import { apyTone, hfTone } from '../../ui/tone'
@@ -36,7 +37,7 @@ const CHAIN_IDS = MORPHO_NETWORKS.map((n) => n.chain.id)
 /** Collateral under a cent's worth is leftover dust, not a position. */
 const DUST_USD = 1_000_000n
 
-type Row = { market: MorphoMarket; state: MorphoState; pt?: PtInfo }
+type Row = { market: MorphoMarket; state: MorphoState; pt?: PtInfo; /** Merkl campaigns on its collateral and borrow (M7) */ merkl?: MorphoMerkl }
 
 /**
  * Morpho Blue positions of an address: the API says on which markets it has collateral, each one is then read
@@ -103,6 +104,7 @@ export function MorphoPositions({
     ),
     combine: withData,
   })
+  const { data: campaignData } = useQueries({ queries: ptChains.map((id) => morphoCampaignsQuery(id)), combine: withData })
 
   const rows = useMemo(
     () =>
@@ -112,9 +114,11 @@ export function MorphoPositions({
         const sides = morphoSides(market, state.price)
         if (toBase(state.user.collateral, sides.collateral) < DUST_USD && state.user.debt === 0n) return []
         const pt = ptData[ptChains.indexOf(market.chainId)]?.get(market.collateral.address.toLowerCase())
-        return [{ market, state, pt }]
+        const campaigns = campaignData[ptChains.indexOf(market.chainId)]
+        const merkl = morphoMerkl(campaigns, { id: market.id, collateral: market.collateral.address, loan: market.loan.address })
+        return [{ market, state, pt, merkl }]
       }),
-    [markets, stateData, ptData, ptChains],
+    [markets, stateData, ptData, ptChains, campaignData],
   )
   const pending = list.isPending || states.some((s) => s.isPending)
   const totals = useMemo<MorphoTotals>(() => {
@@ -175,7 +179,7 @@ export function MorphoPositions({
 }
 
 /** What a position card shows: USD sides from the market's oracle, health factor and leverage as Morpho computes them. */
-function figures({ market: m, state, pt }: Row) {
+function figures({ market: m, state, pt, merkl }: Row) {
   const u = state.user!
   const sides = morphoSides(m, state.price)
   const collUsd = toBase(u.collateral, sides.collateral)
@@ -191,7 +195,7 @@ function figures({ market: m, state, pt }: Row) {
     leverage,
     collateralApy,
     borrowApy,
-    apy: Number.isFinite(leverage) ? morphoNetApy(leverage, collateralApy, borrowApy - m.borrowRewardsApr) : undefined,
+    apy: Number.isFinite(leverage) ? morphoNetApy(leverage, collateralApy, borrowApy) + (merkl ? morphoMerklApy(merkl, leverage) : 0) : undefined,
     correlated: isCorrelated({ price: sides.collateral.price, token: m.collateral }, { price: sides.loan.price, token: m.loan }),
   }
 }
@@ -342,7 +346,7 @@ function MorphoPosition({
               </td>
               <td className="num" data-label="APY">
                 emprunt {fmtPct(borrowApy)}
-                {m.borrowRewardsApr > 0 && <span className="muted"> − {fmtPct(m.borrowRewardsApr)} rewards</span>}
+                {!!row.merkl?.borrowApr && <span className="muted"> − {fmtPct(row.merkl.borrowApr)} Merkl</span>}
               </td>
             </tr>
           </tbody>

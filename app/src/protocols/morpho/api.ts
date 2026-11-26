@@ -113,6 +113,19 @@ export type Lookback = 'one_day' | 'seven_days' | 'thirty_days' | 'ninety_days' 
 export const marketStateHistory = (chainId: number, marketId: string, lookback: Lookback, signal?: AbortSignal) =>
   morphoGet<{ data: RestStatePoint[] }>(`/v0/blue/markets/${selector(chainId, marketId)}/state/history`, { lookback }, signal).then((b) => b.data)
 
+/** USD price of each token from Morpho's API (its feed is DefiLlama's, so this is for the few DefiLlama does not answer for), by `chainId:address` lowercase; at most 20 tokens, one request each. */
+export async function tokenPrices(chainId: number, addresses: readonly string[], signal?: AbortSignal): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  const res = await Promise.allSettled(
+    addresses.slice(0, 20).map((a) => morphoGet<{ data: { price?: number | null } }>(`/v0/tokens/${selector(chainId, a)}/price`, undefined, signal)),
+  )
+  res.forEach((r, i) => {
+    const price = r.status === 'fulfilled' ? r.value.data.price : undefined
+    if (typeof price === 'number' && price > 0) out.set(`${chainId}:${addresses[i].toLowerCase()}`, price)
+  })
+  return out
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // GraphQL (retired January 2027): only for what is not migrated yet
 // ---------------------------------------------------------------------------------------------------------------------

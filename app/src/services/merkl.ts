@@ -155,25 +155,24 @@ export const merklQuery = (chainId: number) => ({
 })
 
 /**
- * Merkl pages of the bonuses the app reads from Morpho's and Aave v4's own APIs, which do not name the Merkl
- * opportunity: told apart by the protocol page Merkl sends to (`depositUrl`): the Morpho market id, or the Aave v4
- * asset on pro.aave.com with the side in the opportunity type (AAVE_V4_*_SUPPLY / _LENDING or _BORROW / _BORROWING).
+ * Merkl pages of the bonuses the app reads from Aave v4's own API, which does not name the Merkl opportunity: told
+ * apart by the protocol page Merkl sends to (`depositUrl`), the Aave v4 asset on pro.aave.com, with the side in the
+ * opportunity type (AAVE_V4_*_SUPPLY / _LENDING or _BORROW / _BORROWING).
  */
 export type BonusPage = { url: string; depositUrl: string; type: string; identifier: string }
 
 export async function fetchBonusPages(chainId: number, signal: AbortSignal): Promise<BonusPage[]> {
   const out: BonusPage[] = []
-  for (const protocol of ['morpho', 'aave'])
-    for (let page = 0; page < 3; page++) {
-      const q = new URLSearchParams({ chainId: String(chainId), mainProtocolId: protocol, status: 'LIVE', items: String(PAGE), page: String(page) })
-      const res = await fetch(`${MERKL_API}?${q}`, { signal })
-      if (!res.ok) throw new Error(`Merkl : HTTP ${res.status}`)
-      const list = (await res.json()) as Opportunity[]
-      for (const o of list)
-        if (o.id && o.depositUrl && (protocol === 'morpho' || o.type.startsWith('AAVE_V4_')))
-          out.push({ url: merklOpportunityUrl(o.id), depositUrl: o.depositUrl.toLowerCase(), type: o.type, identifier: o.identifier.toLowerCase() })
-      if (list.length < PAGE) break
-    }
+  for (let page = 0; page < 3; page++) {
+    const q = new URLSearchParams({ chainId: String(chainId), mainProtocolId: 'aave', status: 'LIVE', items: String(PAGE), page: String(page) })
+    const res = await fetch(`${MERKL_API}?${q}`, { signal })
+    if (!res.ok) throw new Error(`Merkl : HTTP ${res.status}`)
+    const list = (await res.json()) as Opportunity[]
+    for (const o of list)
+      if (o.id && o.depositUrl && o.type.startsWith('AAVE_V4_'))
+        out.push({ url: merklOpportunityUrl(o.id), depositUrl: o.depositUrl.toLowerCase(), type: o.type, identifier: o.identifier.toLowerCase() })
+    if (list.length < PAGE) break
+  }
   return out
 }
 
@@ -184,14 +183,6 @@ export const bonusPagesQuery = (chainId: number, enabled = true) => ({
   staleTime: 30 * 60_000,
   retry: 1,
 })
-
-/**
- * Merkl page of the bonus on borrowing in a Morpho market: the market's own campaign, else one paying the borrow of
- * the loan token on any market (MORPHOBORROW_SINGLETOKEN, identifier = the token).
- */
-export const morphoBonusPage = (pages: BonusPage[] | undefined, marketId: string, loan?: string) =>
-  pages?.find((p) => p.depositUrl.includes(`/market/${marketId.toLowerCase()}`))?.url ??
-  (loan ? pages?.find((p) => p.type === 'MORPHOBORROW_SINGLETOKEN' && p.identifier === loan.toLowerCase())?.url : undefined)
 
 /** Merkl page of the bonus on supplying (collateral) or borrowing (debt) an asset on Aave v4. */
 export function v4BonusPage(pages: BonusPage[] | undefined, asset: string, side: 'supply' | 'borrow') {
@@ -204,10 +195,9 @@ export function v4BonusPage(pages: BonusPage[] | undefined, asset: string, side:
  * - MORPHOCOLLATERAL: collateral deposited in one market (params.market, full id); MORPHOCOLLATERAL_SINGLETOKEN: the
  *   token as collateral in any market (targetToken);
  * - MORPHOBORROW: the borrow of one market; MORPHOBORROW_SINGLETOKEN: borrowing the token in any market.
- * The Morpho API already counts the borrow campaigns in its rewards (OETH / USDC on Ethereum: 4.86 % on both), never
- * the collateral ones (USDe / RLUSD: 4.75 % on Merkl, none in the API): borrow campaigns are only for markets read
- * on-chain, where the API does not answer. A whitelist restricts the audience: skipped; a hook (boost, referral,
- * health factor rule) is a condition the app does not check: kept, flagged.
+ * Morpho's REST API gives no rewards (its GraphQL API counted the borrow campaigns, never the collateral ones), so
+ * both sides come from here. A whitelist restricts the audience: skipped; a hook (boost, referral, health factor
+ * rule) is a condition the app does not check: kept, flagged.
  */
 export type MorphoCampaign = {
   side: 'collateral' | 'borrow'
@@ -283,7 +273,7 @@ export const morphoCampaignsQuery = (chainId: number, enabled = true) => ({
   retry: 1,
 })
 
-/** What Merkl adds to a Morpho loop, unlevered: APR on the collateral, APR on the borrow (0 where the API counts it). */
+/** What Merkl adds to a Morpho loop, unlevered: APR on the collateral, APR on the borrow. */
 export type MorphoMerkl = {
   collateralApr: number
   borrowApr: number
@@ -296,16 +286,11 @@ export type MorphoMerkl = {
 
 export const NO_MORPHO_MERKL: MorphoMerkl = { collateralApr: 0, borrowApr: 0, conditional: false, urls: [], pages: {} }
 
-/**
- * The campaigns that pay on a Morpho market's collateral (and borrow, when `withBorrow`: a market the Morpho API does
- * not cover). The end is the soonest one among those counted.
- */
-export function morphoMerkl(all: MorphoCampaign[] | undefined, market: { id: string; collateral: string; loan: string }, withBorrow: boolean): MorphoMerkl {
+/** The campaigns that pay on a Morpho market's collateral and borrow. The end is the soonest one among those counted. */
+export function morphoMerkl(all: MorphoCampaign[] | undefined, market: { id: string; collateral: string; loan: string }): MorphoMerkl {
   const id = market.id.toLowerCase()
   const fits = (c: MorphoCampaign) =>
-    (c.side === 'collateral' || withBorrow) &&
-    c.token === (c.side === 'collateral' ? market.collateral : market.loan).toLowerCase() &&
-    (c.market === undefined || c.market === id)
+    c.token === (c.side === 'collateral' ? market.collateral : market.loan).toLowerCase() && (c.market === undefined || c.market === id)
   const counted = (all ?? []).filter(fits)
   if (!counted.length) return NO_MORPHO_MERKL
   const ends = counted.flatMap((c) => (c.endsAt !== undefined ? [c.endsAt] : []))

@@ -1,19 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { domainSeparator, getAddress, hashTypedData } from 'viem'
-import markets from '../../test/fixtures/morpho-markets.json'
+import { MORPHO_MARKETS } from '../../test/morphoMarkets'
 import {
   accruedBorrow,
   authorizationTypedData,
   debtForMorphoLeverage,
   dropToLiquidation,
   leverageAtMorphoHf,
-  marketId,
   maxMorphoLeverage,
   morphoHf,
   morphoLeverage,
   morphoNetApy,
   morphoSides,
-  parseMarkets,
+  restEntries,
   rateToApy,
   repayForMorphoLeverage,
   toAssetsUp,
@@ -24,42 +23,23 @@ import { toBase } from '../../domain/math'
 const MORPHO = getAddress('0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb')
 const RE_USD = '0x1e9d614631a7df0ec07fb05b2c8cb2491575fd1a63a33bf187a6afb295a4fc64'
 
-describe('parseMarkets', () => {
-  const parsed = parseMarkets(1, markets as never)
-
-  it('keeps markets whose parameters hash to their id', () => {
-    expect(parsed).toHaveLength(3)
-    const m = parsed.find((x) => x.id === RE_USD)!
-    expect(m.collateral.symbol).toBe('PT-reUSD-10DEC2026')
-    expect(m.loan.symbol).toBe('USDC')
-    expect(m.loan.decimals).toBe(6)
-    expect(m.lltv).toBeCloseTo(0.915)
-    expect(marketId(m.params)).toBe(RE_USD)
+describe('restEntries', () => {
+  const rest = (over = {}) => ({
+    chain_id: 1,
+    market_id: RE_USD,
+    loan_token: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+    collateral_token: '0x5086bf358635b81d8c47c66d1c8b9e567db70c72',
+    oracle_address: '0x1111111111111111111111111111111111111111',
+    irm_address: '0x870ac11d48b15db9a138cf899d20f13f79ba00bc',
+    lltv_wad: '915000000000000000',
+    ...over,
   })
-
-  it('drops a market whose parameters were changed (an oracle swapped by the API would not hash to the id)', () => {
-    const tampered = (markets as { oracle: { address: string } }[]).map((m, i) =>
-      i === 0 ? { ...m, oracle: { ...m.oracle, address: '0x0000000000000000000000000000000000000001' } } : m,
-    )
-    expect(parseMarkets(1, tampered as never)).toHaveLength(2)
-  })
-
-  it('drops idle markets (no collateral)', () => {
-    const idle = { ...(markets[0] as object), collateralAsset: null }
-    expect(parseMarkets(1, [idle] as never)).toHaveLength(0)
-  })
-
-  it('prices a collateral the API does not price from the oracle and the loan token', () => {
-    const m = markets.find((x) => x.marketId === RE_USD) as { collateralAsset: object; loanAsset: { decimals: number; price: object }; state: object }
-    // 1.03 USDC per PT (both 6 decimals): 1.03 x 1e36; USDC at 0.9998 USD
-    const unpriced = {
-      ...m,
-      collateralAsset: { ...m.collateralAsset, price: null },
-      loanAsset: { ...m.loanAsset, price: { usd: 0.9998 } },
-      state: { ...m.state, price: '1030000000000000000000000000000000000' },
-    }
-    expect(parseMarkets(1, [unpriced] as never)[0].collateralUsd).toBeCloseTo(1.03 * 0.9998, 9)
-    expect(parseMarkets(1, [{ ...unpriced, state: { ...m.state, price: null } }] as never)[0].collateralUsd).toBe(0)
+  it('takes the parameters of the API (checksummed) and its listing, drops idle markets', () => {
+    const [e] = restEntries([rest(), rest({ collateral_token: '0x0000000000000000000000000000000000000000' })], true)
+    expect(e.listed).toBe(true)
+    expect(e.params!.loanToken).toBe('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48')
+    expect(e.params!.lltv).toBe(915000000000000000n)
+    expect(restEntries([rest({ oracle_address: '0x0000000000000000000000000000000000000000' })], false)).toEqual([])
   })
 })
 
@@ -106,7 +86,7 @@ describe('Morpho math', () => {
   })
 
   it('gives USD sides that agree with the oracle', () => {
-    const m = parseMarkets(1, markets as never).find((x) => x.id === RE_USD)!
+    const m = MORPHO_MARKETS.find((x) => x.id === RE_USD)!
     // PT-reUSD has 6 decimals like USDC: 0.98 USDC per PT is 0.98e36
     expect(m.collateral.decimals).toBe(6)
     const price = 98n * 10n ** 34n

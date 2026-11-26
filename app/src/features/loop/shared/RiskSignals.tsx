@@ -5,9 +5,8 @@
  */
 import { Metric } from '../../../ui/primitives'
 import { useQuery } from '@tanstack/react-query'
-import type { Address, Hex } from 'viem'
+import type { Address } from 'viem'
 import { despike, maxDrawdown, ratioSeries, riskSignals, type RiskSignal } from '../../../domain/riskSignals'
-import { fetchTopBorrower } from '../../../protocols/morpho/markets'
 import { priceChartsQuery } from '../../../services/priceHistory'
 import { llamaQuotes, tokenKey } from '../../../services/yield/copies'
 
@@ -21,11 +20,9 @@ type Input = {
   /** collateral price in debt units at the oracle */
   oracleRatio?: number
   exit?: { loss?: number; noRoute: boolean }
-  /** Morpho: the market and its total borrow shares (read on-chain), to weigh the largest borrower */
-  morpho?: { id: Hex; totalBorrowShares: bigint; user?: Address; api: boolean }
 }
 
-export function useRiskSignals({ chainId, collateral, debt, correlated, oracleRatio, exit, morpho }: Input): RiskSignal[] {
+export function useRiskSignals({ chainId, collateral, debt, correlated, oracleRatio, exit }: Input): RiskSignal[] {
   const c = { chainId, address: collateral.address }
   const d = { chainId, address: debt.address }
   const charts = useQuery(priceChartsQuery([c, d], { days: SIGNAL_DAYS, period: '6h' }))
@@ -39,17 +36,9 @@ export function useRiskSignals({ chainId, collateral, debt, correlated, oracleRa
   })
   const spotC = spot.data?.get(tokenKey(c))?.price
   const spotD = spot.data?.get(tokenKey(d))?.price
-  const top = useQuery({
-    queryKey: ['morpho-top-borrower', chainId, morpho?.id],
-    queryFn: ({ signal }) => fetchTopBorrower(chainId, morpho!.id, signal),
-    enabled: !!morpho?.api,
-    staleTime: 10 * 60_000,
-    retry: 1,
-  })
   const a = charts.data?.get(tokenKey(c))
   const b = charts.data?.get(tokenKey(d))
   const series = a && b ? ratioSeries(a, b) : []
-  const topShares = top.data?.borrowShares
   return riskSignals({
     collateral: collateral.symbol,
     debt: debt.symbol,
@@ -61,13 +50,6 @@ export function useRiskSignals({ chainId, collateral, debt, correlated, oracleRa
     days: SIGNAL_DAYS,
     exitLoss: exit?.loss,
     exitNoRoute: exit?.noRoute,
-    topBorrower:
-      morpho && topShares !== undefined && morpho.totalBorrowShares > 0n
-        ? {
-            share: Math.min(1, Number(topShares) / Number(morpho.totalBorrowShares)),
-            mine: !!morpho.user && top.data!.user.toLowerCase() === morpho.user.toLowerCase(),
-          }
-        : undefined,
   })
 }
 
