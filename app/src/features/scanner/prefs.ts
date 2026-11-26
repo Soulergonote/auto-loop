@@ -57,6 +57,9 @@ export function bestPair(rows: ScanRow[]): ScanRow | undefined {
 export const SCAN_HFS = ['1.05', '1.1', '1.2', '1.5'] as const
 export const SCAN_FILTERS = ['correlated', 'stable', 'all'] as const
 export const SCAN_PROTOCOLS = ['all', 'aave', 'morpho'] as const
+/** minimum capacity left to loop (U1), as named in the address; the dollars in SCAN_CAPACITY_USD */
+export const SCAN_CAPACITIES = ['1k', '10k', '100k', '1m'] as const
+export const SCAN_CAPACITY_USD: Record<(typeof SCAN_CAPACITIES)[number], number> = { '1k': 1_000, '10k': 10_000, '100k': 100_000, '1m': 1_000_000 }
 
 export type ScannerPrefs = {
   protocol: (typeof SCAN_PROTOCOLS)[number]
@@ -65,12 +68,14 @@ export type ScannerPrefs = {
   hf: (typeof SCAN_HFS)[number]
   filter: (typeof SCAN_FILTERS)[number]
   negative: boolean
+  /** pairs with less capacity left are hidden */
+  capacity: (typeof SCAN_CAPACITIES)[number]
 }
 
-export const DEFAULT_SCANNER: ScannerPrefs = { protocol: 'all', scope: 'all', hf: '1.1', filter: 'correlated', negative: false }
+export const DEFAULT_SCANNER: ScannerPrefs = { protocol: 'all', scope: 'all', hf: '1.1', filter: 'correlated', negative: false, capacity: '10k' }
 
 const SCANNER_KEY = 'auto-loop.scanner'
-/** French names in the address: #scanner?protocole=aave&reseau=8453&hf=1.2&paires=stables&negatifs=1 */
+/** French names in the address: #scanner?protocole=aave&reseau=8453&hf=1.2&paires=stables&negatifs=1&capacite=100k */
 const FILTER_NAMES: Record<ScannerPrefs['filter'], string> = { correlated: 'correlees', stable: 'stables', all: 'toutes' }
 
 const pick = <T extends string>(list: readonly T[], v: unknown): T | undefined => ((list as readonly unknown[]).includes(v) ? (v as T) : undefined)
@@ -85,6 +90,7 @@ export function cleanScanner(raw: Partial<Record<keyof ScannerPrefs, unknown>> |
     hf: pick(SCAN_HFS, r.hf) ?? DEFAULT_SCANNER.hf,
     filter: pick(SCAN_FILTERS, r.filter) ?? DEFAULT_SCANNER.filter,
     negative: r.negative === true,
+    capacity: pick(SCAN_CAPACITIES, r.capacity) ?? DEFAULT_SCANNER.capacity,
   }
 }
 
@@ -101,6 +107,7 @@ export function scannerFromQuery(query: string): ScannerPrefs | undefined {
     hf: q.get('hf') ?? undefined,
     filter: (Object.keys(FILTER_NAMES) as ScannerPrefs['filter'][]).find((k) => FILTER_NAMES[k] === filterName),
     negative: q.get('negatifs') === '1',
+    capacity: q.get('capacite') ?? undefined,
   })
 }
 
@@ -112,6 +119,7 @@ export function scannerQuery(p: ScannerPrefs): string {
   if (p.hf !== DEFAULT_SCANNER.hf) q.set('hf', p.hf)
   if (p.filter !== DEFAULT_SCANNER.filter) q.set('paires', FILTER_NAMES[p.filter])
   if (p.negative) q.set('negatifs', '1')
+  if (p.capacity !== DEFAULT_SCANNER.capacity) q.set('capacite', p.capacity)
   return q.toString()
 }
 

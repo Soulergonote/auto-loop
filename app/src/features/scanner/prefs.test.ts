@@ -14,14 +14,14 @@ describe('scanner filters in the address', () => {
   })
 
   it('round-trips every filter', () => {
-    const p = { protocol: 'aave', scope: 9745, hf: '1.2', filter: 'stable', negative: true } as const
+    const p = { protocol: 'aave', scope: 9745, hf: '1.2', filter: 'stable', negative: true, capacity: '100k' } as const
     const q = scannerQuery(p)
-    expect(q).toBe('protocole=aave&reseau=9745&hf=1.2&paires=stables&negatifs=1')
+    expect(q).toBe('protocole=aave&reseau=9745&hf=1.2&paires=stables&negatifs=1&capacite=100k')
     expect(scannerFromQuery(q)).toEqual(p)
   })
 
   it('drops what it does not know', () => {
-    expect(scannerFromQuery('protocole=euler&reseau=abc&hf=9&paires=x')).toEqual(DEFAULT_SCANNER)
+    expect(scannerFromQuery('protocole=euler&reseau=abc&hf=9&paires=x&capacite=5k')).toEqual(DEFAULT_SCANNER)
     expect(cleanScanner({ scope: -1, negative: 'yes' })).toEqual(DEFAULT_SCANNER)
   })
 })

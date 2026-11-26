@@ -12,7 +12,7 @@ import { groupLines, spreadOf } from './scanGroups'
 import { estimatedRoundTripUsd, gainPerYearUsd, parseAmountUsd, paybackDays } from './sizing'
 import type { PairKind } from '../../domain/slippage'
 import { useDebounced } from '../../ui/useDebounced'
-import { SCAN_HFS, loadScanner, saveScanner, scannerQuery, type ScannerPrefs } from './prefs'
+import { SCAN_CAPACITIES, SCAN_CAPACITY_USD, SCAN_HFS, loadScanner, saveScanner, scannerQuery, type ScannerPrefs } from './prefs'
 import { morphoMarketsQuery, type MorphoMarket } from '../../protocols/morpho/markets'
 import { scanMorpho, type MorphoScanFlag } from './morphoScan'
 import { ptInfosQuery } from '../../protocols/pendle/pt'
@@ -55,13 +55,12 @@ const tokensFor = (usd: number, price: bigint) => {
 const HFS = SCAN_HFS
 type Filter = ScannerPrefs['filter']
 type Protocol = ScannerPrefs['protocol']
+type Capacity = ScannerPrefs['capacity']
 /** sortable columns; numbers sort high first on the first click, the pair A to Z */
 type SortKey = 'pair' | 'leverage' | 'apy' | 'spread' | 'rewardsApy' | 'capacityUsd' | 'gainUsd'
 const ROWS = 20
 /** window of the « décroché » tag: largest fall of a correlated pair's price ratio */
 const DEPEG_DAYS = 90
-/** Pairs where less than this (USD) can still be looped are hidden (borrow cap or cash used up). */
-const MIN_CAPACITY_USD = 1_000
 /** Flagged as nearly full under this. */
 const LOW_CAPACITY_USD = 50_000
 const LOW_CAPACITY = BigInt(LOW_CAPACITY_USD) * 10n ** 8n
@@ -201,13 +200,15 @@ export function Scanner({
   const [showNegative, setShowNegative] = useState(initial.negative)
   const [all, setAll] = useState(false)
   const [protocol, setProtocol] = useState<Protocol>(initial.protocol)
+  // U1: pairs where less than this (USD) can still be looped are hidden (borrow cap or cash used up)
+  const [capacity, setCapacity] = useState<Capacity>(initial.capacity)
   useEffect(() => {
-    const prefs = { protocol, scope, hf: hfText, filter, negative: showNegative }
+    const prefs = { protocol, scope, hf: hfText, filter, negative: showNegative, capacity }
     saveScanner(prefs)
     const query = scannerQuery(prefs)
     const target = `#scanner${query ? `?${query}` : ''}`
     if (window.location.hash.startsWith('#scanner') && window.location.hash !== target) window.history.replaceState(null, '', target)
-  }, [protocol, scope, hfText, filter, showNegative])
+  }, [protocol, scope, hfText, filter, showNegative, capacity])
   const [search, setSearch] = useState('')
   // capital to loop, USD: rates right after the loop, gain a year, pairs too small greyed
   const [amountText, setAmountText] = useState('')
@@ -481,14 +482,18 @@ export function Scanner({
     .toLowerCase()
     .split(/[\s/]+/)
     .filter(Boolean)
-  const shown = rows.filter(
+  const minCapacity = SCAN_CAPACITY_USD[capacity]
+  const matching = rows.filter(
     (r) =>
       (filter === 'all' || (filter === 'stable' ? r.stable : r.correlated)) &&
       (protocol === 'all' || r.protocol === protocol) &&
       words.every((w) => r.pair.toLowerCase().includes(w)) &&
-      (showNegative || r.apy > 0 || r.nativeUnknown) &&
-      r.capacityUsd >= MIN_CAPACITY_USD,
+      (showNegative || r.apy > 0 || r.nativeUnknown),
   )
+  const shown = matching.filter((r) => r.capacityUsd >= minCapacity)
+  // pairs the other filters keep and the capacity hides, counted once per group (as the table shows them)
+  const tooSmall = new Set(matching.filter((r) => r.capacityUsd < minCapacity && r.capacityUsd >= SCAN_CAPACITY_USD['1k']).map((r) => r.group))
+  shown.forEach((r) => tooSmall.delete(r.group))
 
   const groups = groupLines(shown).sort((x, y) => {
     const a = x.head
@@ -567,6 +572,14 @@ export function Scanner({
           <div className="field">
             <span>Health factor visé</span>
             <Segmented value={hfText} onChange={setHf} options={HFS.map((h) => ({ value: h, label: h }))} />
+          </div>
+          <div className="field">
+            <span>Capacité min.</span>
+            <Segmented
+              value={capacity}
+              onChange={setCapacity}
+              options={SCAN_CAPACITIES.map((c) => ({ value: c, label: c === '1k' ? 'Toutes' : fmtDollars(SCAN_CAPACITY_USD[c], true) }))}
+            />
           </div>
           <div className="field">
             <span>Type de paire</span>
@@ -816,6 +829,14 @@ export function Scanner({
           <p className="muted">Aucune paire ne correspond à ces filtres. Changer de health factor ou de type de paire.</p>
         )}
         {visible.some((g) => !g.head.fits) && <p className="muted small scan-status">Capacité en ambre, ligne grisée : trop petite pour ce montant.</p>}
+        {capacity !== '1k' && tooSmall.size > 0 && loading === 0 && (
+          <p className="muted small scan-status">
+            {tooSmall.size} paire{tooSmall.size > 1 ? 's' : ''} sous {fmtDollars(minCapacity, true)} de capacité masquée{tooSmall.size > 1 ? 's' : ''}.{' '}
+            <button type="button" className="link" onClick={() => setCapacity('1k')}>
+              Tout afficher
+            </button>
+          </p>
+        )}
         {groups.length > ROWS && (
           <div className="actions">
             <span className="muted small">
@@ -849,7 +870,8 @@ export function Scanner({
           </p>
           <p className="muted small">
             Non compté : le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes Merkl à public restreint. La capacité est le capital encore «
-            bouclable » avant que l’actif emprunté manque de liquidité ou atteigne un plafond.
+            bouclable » avant que l’actif emprunté manque de liquidité ou atteigne un plafond ; « Capacité min. » masque les paires qui en ont moins (toujours
+            celles sous 1 000 $).
           </p>
           <p className="muted small">
             Aave v4 : chaque paire collatéral / dette d’un même spoke, d’après l’API publique d’Aave, au levier qui donne ce health factor avec le facteur de
