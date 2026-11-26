@@ -86,3 +86,17 @@ export function sparkSeries(
   const shift = todayApy - points[points.length - 1].v
   return points.map((p) => ({ t: p.t, v: p.v + shift }))
 }
+
+/** under this many daily points a series is too short to rank by (A6) */
+export const MIN_STABILITY_DAYS = 7
+
+/**
+ * Average and standard deviation of a daily APY series (A6): the Scanner ranks by the 30-day average or by the
+ * stability (lowest deviation first). Undefined under MIN_STABILITY_DAYS points.
+ */
+export function stabilityStats(points: RatePoint[]): { average: number; deviation: number; days: number } | undefined {
+  if (points.length < MIN_STABILITY_DAYS) return undefined
+  const average = points.reduce((s, p) => s + p.v, 0) / points.length
+  const variance = points.reduce((s, p) => s + (p.v - average) ** 2, 0) / points.length
+  return { average, deviation: Math.sqrt(variance), days: points.length }
+}

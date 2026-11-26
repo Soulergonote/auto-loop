@@ -32,6 +32,7 @@ import type { V4Seed } from '../loop/aavev4/V4View'
 import { v4ReservesQuery } from '../../protocols/aavev4/reserves'
 import { scanV4 } from './v4Scan'
 import { apyLines, type ApyParts } from '../../domain/apyParts'
+import { stabilityStats } from '../../domain/apyHistory'
 
 /** A pair to show in the Boucle screen; tab opens it on « Réinvestir » (positions' Merkl rewards) or « Renouveler » (a PT near maturity). */
 export type Pick = {
@@ -57,7 +58,10 @@ type Filter = ScannerPrefs['filter']
 type Protocol = ScannerPrefs['protocol']
 type Capacity = ScannerPrefs['capacity']
 /** sortable columns; numbers sort high first on the first click, the pair A to Z */
-type SortKey = 'pair' | 'leverage' | 'apy' | 'spread' | 'rewardsApy' | 'capacityUsd' | 'gainUsd'
+type SortKey = 'pair' | 'leverage' | 'apy' | 'spread' | 'rewardsApy' | 'capacityUsd' | 'gainUsd' | HistoryKey
+/** A6: sorted on the line's 30-day series (average, or deviation with the steadiest first); lines without one last */
+type HistoryKey = 'apy30' | 'stability'
+const isHistoryKey = (k: SortKey): k is HistoryKey => k === 'apy30' || k === 'stability'
 const ROWS = 20
 /** window of the « décroché » tag: largest fall of a correlated pair's price ratio */
 const DEPEG_DAYS = 90
@@ -495,14 +499,25 @@ export function Scanner({
   const tooSmall = new Set(matching.filter((r) => r.capacityUsd < minCapacity && r.capacityUsd >= SCAN_CAPACITY_USD['1k']).map((r) => r.group))
   shown.forEach((r) => tooSmall.delete(r.group))
 
-  const groups = groupLines(shown).sort((x, y) => {
-    const a = x.head
-    const b = y.head
-    // with an amount, pairs it does not fit in go last whatever the sort
-    if (a.fits !== b.fits) return a.fits ? -1 : 1
-    const d = sort.key === 'pair' ? a.pair.localeCompare(b.pair) : a[sort.key] - b[sort.key]
-    return sort.desc ? -d : d
-  })
+  const historySort = isHistoryKey(sort.key)
+  const unsorted = groupLines(shown)
+  /** the groups in the chosen order; a history sort uses `history` (line key → its value), lines without one last */
+  const order = (history?: Map<string, number>) =>
+    [...unsorted].sort((x, y) => {
+      const a = x.head
+      const b = y.head
+      // with an amount, pairs it does not fit in go last whatever the sort
+      if (a.fits !== b.fits) return a.fits ? -1 : 1
+      if (isHistoryKey(sort.key)) {
+        const ha = history?.get(a.key)
+        const hb = history?.get(b.key)
+        if (ha === undefined || hb === undefined) return ha !== undefined ? -1 : hb !== undefined ? 1 : b.apy - a.apy
+        return sort.desc ? hb - ha : ha - hb
+      }
+      const d = sort.key === 'pair' ? a.pair.localeCompare(b.pair) : a[sort.key] - b[sort.key]
+      return sort.desc ? -d : d
+    })
+  const byToday = historySort ? unsorted : order()
   const sortBy = (key: SortKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== 'pair' }))
   const head = (key: SortKey, text: string, num = true, detail = false) => (
     <th
@@ -523,10 +538,24 @@ export function Scanner({
   ]
   const merklFailed = chainIds.filter((_, i) => merkl[i].isError)
   const retry = () => [...snapshots, ...morphoLists].forEach((q) => (q.isError || q.isPending) && void q.refetch())
-  const visible = all ? groups : groups.slice(0, ROWS)
   const [opened, setOpened] = useState<string>()
-  // J3: 30-day mini-curve of each shown line; per-network progress while reading. I7: what was read, what did not answer
-  const sparks = useSparklines(visible.map((g) => g.head))
+  // J3: 30-day mini-curve of each shown line (A6: of every filtered line, to sort on them); per-network progress
+  // while reading. I7: what was read, what did not answer
+  const sparks = useSparklines(
+    (historySort || all ? byToday : byToday.slice(0, ROWS)).map((g) => g.head),
+    !historySort || loading === 0,
+  )
+  const stats = new Map(
+    unsorted.flatMap((g) => {
+      const st = sparks.points.has(g.head.key) ? stabilityStats(sparks.points.get(g.head.key)!) : undefined
+      return st ? [[g.head.key, st] as const] : []
+    }),
+  )
+  // the steadiest first on the first click (« desc »): the deviation sorts negated; a line losing money on average
+  // is steady for nothing, it ranks after those that earn
+  const historyValue = (st: { average: number; deviation: number }) => (sort.key === 'apy30' ? st.average : st.average > 0 ? -st.deviation : -1 - st.deviation)
+  const groups = historySort ? order(new Map([...stats].map(([k, st]) => [k, historyValue(st)]))) : byToday
+  const visible = all ? groups : groups.slice(0, ROWS)
   const progress = networkProgress([
     ...markets.map((m, i) => ({ label: networkName(m.label), pending: snapshots[i].isPending, failed: snapshots[i].isError })),
     ...morphoNets.map((n, i) => ({ label: n.label, pending: morphoLists[i].isPending, failed: morphoLists[i].isError })),
@@ -665,6 +694,8 @@ export function Scanner({
                 {head('apy', 'APY net')}
                 {head('spread', 'Écart', true, true)}
                 {head('rewardsApy', 'Bonus Merkl', true, true)}
+                {head('apy30', 'Moy. 30 j', true, true)}
+                {head('stability', 'Stabilité', true, true)}
                 {amountUsd !== undefined && head('gainUsd', 'Gain / an')}
                 {head('capacityUsd', 'Capacité')}
                 <th></th>
@@ -727,6 +758,19 @@ export function Scanner({
                         {r.rewardsApy > 0 && bonusUrls(r).map((u) => <ExtLink key={u} href={u} title="Bonus sur Merkl" />)}
                         {r.rewardsEnd !== undefined && <div className="muted small">jusqu’au {fmtDate(r.rewardsEnd)}</div>}
                       </td>
+                      {(() => {
+                        const st = stats.get(r.key)
+                        return (
+                          <>
+                            <td data-label="Moy. 30 j" className={`num detail ${st && st.average < 0 ? 'bad' : ''}`}>
+                              {st ? fmtPct(st.average) : <span className="na">—</span>}
+                            </td>
+                            <td data-label="Stabilité" className="num detail" title={st ? `écart-type de l’APY net sur ${st.days} jours` : undefined}>
+                              {st ? `±\u00a0${fmtPct(st.deviation)}` : <span className="na">—</span>}
+                            </td>
+                          </>
+                        )
+                      })()}
                       {amountUsd !== undefined && (
                         <td data-label="Gain / an" className={`num ${r.gainUsd < 0 ? 'bad' : ''}`}>
                           {r.fits ? fmtDollars(r.gainUsd, true) : <span className="na">—</span>}
@@ -754,7 +798,7 @@ export function Scanner({
                     </tr>
                     {open && (
                       <tr className="scan-detail">
-                        <td colSpan={amountUsd !== undefined ? 8 : 7}>
+                        <td colSpan={amountUsd !== undefined ? 10 : 9}>
                           <ApyBreakdown line={r} bonusUrls={bonusUrls(r)} />
                           {variants.length > 0 && (
                             <table className="reserves variants">
@@ -818,7 +862,7 @@ export function Scanner({
                 visible.length < 5 &&
                 Array.from({ length: 5 - visible.length }, (_, i) => (
                   <tr key={`skel-${i}`}>
-                    <td className="lead" colSpan={amountUsd !== undefined ? 8 : 7}>
+                    <td className="lead" colSpan={amountUsd !== undefined ? 10 : 9}>
                       <Skel w={16} />
                     </td>
                   </tr>
@@ -827,6 +871,9 @@ export function Scanner({
           </table>
         ) : (
           <p className="muted">Aucune paire ne correspond à ces filtres. Changer de health factor ou de type de paire.</p>
+        )}
+        {historySort && sparks.pending && (
+          <p className="muted small scan-status">Historique sur 30 jours en lecture pour toutes les paires : tri provisoire.</p>
         )}
         {visible.some((g) => !g.head.fits) && <p className="muted small scan-status">Capacité en ambre, ligne grisée : trop petite pour ce montant.</p>}
         {capacity !== '1k' && tooSmall.size > 0 && loading === 0 && (
@@ -860,6 +907,11 @@ export function Scanner({
             PT Pendle (étiquette « PT · J−N », jours avant l’échéance), c’est l’APY fixe de son marché Pendle, valable jusqu’à l’échéance. « Détail » montre
             l’APY net, une ligne par contribution ; « + N marchés » regroupe les autres marchés Morpho de la même paire sur le même réseau (autre LLTV ou autre
             oracle).
+          </p>
+          <p className="muted small">
+            « Moy. 30 j » est l’APY net moyen des 30 derniers jours au levier de la ligne, « Stabilité » son écart-type (la plus stable en tête) : la courbe de
+            la colonne APY, taux de l’API Aave ou Morpho, rendement du token et Merkl au niveau du jour. Une paire sans historique (SparkLend, Aave v4, Morpho
+            lu on-chain) passe en fin de liste sur ces deux tris ; sur « Stabilité », une paire à APY moyen négatif passe après celles qui rapportent.
           </p>
           <p className="muted small">
             Avec un montant : l’APY est celui juste après cette boucle, la dette ajoutée faisant monter le taux d’emprunt (courbe de taux de la réserve Aave,

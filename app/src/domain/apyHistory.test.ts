@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DAY_MS, apyRegime, lastDays, loopApyHistory, seriesStats, sparkSeries } from './apyHistory'
+import { DAY_MS, apyRegime, lastDays, loopApyHistory, seriesStats, sparkSeries, stabilityStats } from './apyHistory'
 
 const d = (n: number, v: number) => ({ t: n * DAY_MS + 3_600_000, v })
 
@@ -61,5 +61,19 @@ describe('sparkSeries', () => {
   it('is empty without enough history', () => {
     expect(sparkSeries([at(40, 0.04)], undefined, 3, 0.1, 30, now)).toEqual([])
     expect(sparkSeries([at(39, 0.04), at(40, 0.04)], undefined, Infinity, 0.1, 30, now)).toEqual([])
+  })
+})
+
+describe('stabilityStats (A6)', () => {
+  const pts = (vs: number[]) => vs.map((v, i) => ({ t: i * DAY_MS, v }))
+  it('gives the average and the population deviation', () => {
+    const st = stabilityStats(pts([0.1, 0.1, 0.1, 0.1, 0.12, 0.08, 0.1]))!
+    expect(st.average).toBeCloseTo(0.1, 10)
+    expect(st.deviation).toBeCloseTo(Math.sqrt((0.02 ** 2 * 2) / 7), 10)
+    expect(st.days).toBe(7)
+  })
+  it('is zero for a flat series and undefined when too short', () => {
+    expect(stabilityStats(pts(Array(10).fill(0.05)))!.deviation).toBeCloseTo(0, 12)
+    expect(stabilityStats(pts([0.1, 0.2, 0.3]))).toBeUndefined()
   })
 })
