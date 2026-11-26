@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { wagmiConfig } from './wagmi'
 import { executorAbi, executorAbiV1, morphoExecutorAbi, v4ExecutorAbi } from './abi'
 import { EXECUTOR_BYTECODE_AAVE_V4, EXECUTOR_BYTECODE_MORPHO, EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../generated/executorBytecode'
-import { EXECUTOR_BYTECODE_MORPHO_0, EXECUTOR_BYTECODE_V2_0, EXECUTOR_BYTECODE_V2_1 } from '../generated/executorBytecodeLegacy'
+import { EXECUTOR_BYTECODE_MORPHO_0, EXECUTOR_BYTECODE_MORPHO_1, EXECUTOR_BYTECODE_V2_0, EXECUTOR_BYTECODE_V2_1 } from '../generated/executorBytecodeLegacy'
 import { AGGREGATORS, MARKETS, executorLenders, executorRouters, type Market, type MorphoNet, type V4Net } from '../config'
 
 /** The chain's client and the code at `address`, refused when there is none. */
@@ -208,7 +208,8 @@ export type MorphoExecutorCheck = { refinance: boolean }
  */
 export async function verifyMorphoExecutor(net: MorphoNet, address: Address): Promise<MorphoExecutorCheck> {
   const { client, isBuild } = await codeAt(net.chain, address)
-  const refinance = (await isBuild(morphoInitCode(net))) ? true : (await isBuild(morphoInitCodeLegacy(net))) ? false : undefined
+  const refinance =
+    (await isBuild(morphoInitCode(net))) || (await isBuild(morphoInitCodeR1(net))) ? true : (await isBuild(morphoInitCodeLegacy(net))) ? false : undefined
   if (refinance === undefined) throw new Error('le code de ce contrat n’est pas celui d’Auto-loop pour Morpho')
   await requireRouters(client, net.chain.id, address)
   return { refinance }
@@ -217,6 +218,9 @@ export async function verifyMorphoExecutor(net: MorphoNet, address: Address): Pr
 export const useMorphoExecutorCheck = (net: MorphoNet) => useCheck('morpho-executor-check', net, verifyMorphoExecutor)
 
 const morphoInitCode = (net: MorphoNet) => encodeDeployData({ abi: morphoExecutorAbi, bytecode: EXECUTOR_BYTECODE_MORPHO, args: morphoArgs(net) })
+
+/** The Morpho executor with refinance as deployed before the internal audit R1 fix (2026-11-25): still fully usable. */
+const morphoInitCodeR1 = (net: MorphoNet) => encodeDeployData({ abi: morphoExecutorAbi, bytecode: EXECUTOR_BYTECODE_MORPHO_1 as Hex, args: morphoArgs(net) })
 
 /** the network's shared Morpho executor address (CREATE2 through the deterministic proxy) */
 export const sharedMorphoExecutorAddress = (net: MorphoNet) => create2Address(morphoInitCode(net))
