@@ -763,6 +763,14 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
             extra={nativeApy + rewardsApy}
             pending={series.isPending && series.fetchStatus !== 'idle'}
             source="API Aave"
+            replay={{
+              chainId: market.chain.id,
+              collateral: C.token,
+              debt: D.token,
+              liquidationThreshold: C.config.liquidationThresholdBps / 10_000,
+              correlated,
+              capitalUsd: Number(capitalBase) / 1e8,
+            }}
           />
         )}
 

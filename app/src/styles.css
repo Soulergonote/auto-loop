@@ -558,6 +558,8 @@ tr.dim > td { color: var(--muted); }
 .scan tr.scan-detail > td { border-top: 0; padding: 0 var(--s2) var(--s4); }
 .apy-detail { max-width: 460px; display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3); background: var(--white); border: var(--bw) solid var(--ink); border-radius: var(--r); }
 .apy-detail-title { font: 800 var(--t-d4)/1.25 var(--f-display); font-stretch: 87.5%; }
+.backtest { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--rule); }
+.backtest .metrics > * { flex-basis: calc(25% - 6px); }
 .reserves.variants { margin-top: var(--s3); background: var(--white); border: var(--bw) solid var(--ink); border-radius: var(--r); }
 /* Scanner « Détail »: one row per term (label, calculation, amount), the net APY last under a 2 px line */
 .contribs { display: grid; grid-template-columns: minmax(0, 1fr) max-content max-content; gap: var(--s1) 0; font-size: var(--t-ui); margin: 0; text-align: left; font-weight: 400; }

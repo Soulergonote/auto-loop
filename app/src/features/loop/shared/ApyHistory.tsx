@@ -4,6 +4,7 @@ import { LineChart } from '../../../ui/LineChart'
 import { Fold, Segmented, Skel } from '../../../ui/primitives'
 import { fmtDate, fmtPct, fmtX } from '../../../ui/format'
 import { apyTone } from '../../../ui/tone'
+import { Backtest, type ReplayPair } from './Backtest'
 
 type Props = {
   /** daily borrow rate of the debt */
@@ -16,6 +17,8 @@ type Props = {
   pending: boolean
   /** where the rates come from, for the note */
   source: string
+  /** the pair, to replay the loop over 90 days (A1) */
+  replay?: ReplayPair
 }
 
 const fmtDay = (t: number) => fmtDate(t / 1000)
@@ -24,7 +27,7 @@ const fmtDay = (t: number) => fmtDate(t / 1000)
  * 30 or 90-day history of the loop's net APY at today's leverage (I3): tells a two-day spike from a regime. Nothing
  * when the source has no history for the pair (SparkLend, a market the API does not follow).
  */
-export function ApyHistory({ borrow, supply, leverage, extra, pending, source }: Props) {
+export function ApyHistory({ borrow, supply, leverage, extra, pending, source, replay }: Props) {
   const [window, setWindow] = useState<HistoryWindow>(30)
   if (pending)
     return (
@@ -75,6 +78,7 @@ export function ApyHistory({ borrow, supply, leverage, extra, pending, source }:
         Taux de chaque jour ({source}) au levier de la boucle ({fmtX(leverage)}).
         {extra !== 0 && ' Rendement du token et Merkl comptés à leur niveau du jour : leur historique n’est pas lu.'}
       </p>
+      {replay && <Backtest pair={replay} borrow={borrow} supply={supply} leverage={leverage} />}
     </Fold>
   )
 }

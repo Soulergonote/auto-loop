@@ -26,18 +26,21 @@ const toneOf = (x: number, [warn, bad]: readonly [number, number]): Tone => (x >
 
 /**
  * Price of `a` in `b` at each point of `a`, `b` taken at its closest point within `maxGap` seconds (DefiLlama gives
- * both on the same grid, give or take a few minutes).
+ * both on the same grid, give or take a few minutes). `t` in seconds, as the prices.
  */
-export function ratioSeries(a: PricePoint[], b: PricePoint[], maxGap = 3 * 3600): number[] {
-  const out: number[] = []
+export function ratioPoints(a: PricePoint[], b: PricePoint[], maxGap = 3 * 3600): { t: number; v: number }[] {
+  const out: { t: number; v: number }[] = []
   let j = 0
   for (const p of a) {
     while (j + 1 < b.length && Math.abs(b[j + 1].timestamp - p.timestamp) <= Math.abs(b[j].timestamp - p.timestamp)) j++
     const q = b[j]
-    if (q && Math.abs(q.timestamp - p.timestamp) <= maxGap && q.price > 0 && p.price > 0) out.push(p.price / q.price)
+    if (q && Math.abs(q.timestamp - p.timestamp) <= maxGap && q.price > 0 && p.price > 0) out.push({ t: p.timestamp, v: p.price / q.price })
   }
   return out
 }
+
+/** The same ratios, values only. */
+export const ratioSeries = (a: PricePoint[], b: PricePoint[], maxGap = 3 * 3600): number[] => ratioPoints(a, b, maxGap).map((p) => p.v)
 
 /**
  * Rolling median over `half` samples on each side: removes a price aggregator's isolated outliers (DefiLlama prices
