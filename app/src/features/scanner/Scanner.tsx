@@ -786,7 +786,6 @@ export function Scanner({
                       </td>
                       <td data-label="Bonus Merkl" className="num detail">
                         {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : <span className="na">—</span>}
-                        {r.rewardsApy > 0 && bonusUrls(r).map((u) => <ExtLink key={u} href={u} title="Bonus sur Merkl" />)}
                         {r.rewardsEnd !== undefined && <div className="muted small">jusqu’au {fmtDate(r.rewardsEnd)}</div>}
                       </td>
                       {(() => {
