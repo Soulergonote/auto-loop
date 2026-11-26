@@ -4,6 +4,7 @@ import markets from '../../test/fixtures/morpho-markets.json'
 import { parseMarkets } from '../../protocols/morpho/markets'
 import { scanMorpho } from './morphoScan'
 import type { PtInfo } from '../../protocols/pendle/pt'
+import type { MorphoCampaign } from '../../services/merkl'
 
 const parsed = parseMarkets(1, markets as never)
 const bySymbol = (s: string) => parsed.find((m) => m.collateral.symbol === s)!
@@ -70,5 +71,22 @@ describe('scanMorpho', () => {
     )
     expect(rows.every((r) => r.flags.includes('lowCapacity'))).toBe(true)
     expect(rows.find((r) => r.market.collateral.symbol === 'wstETH')!.flags).toContain('unlisted')
+  })
+
+  it('adds the Merkl campaigns on the collateral at L, and on the borrow only for a network read on-chain (M7)', () => {
+    const base = scanMorpho(parsed, { targetHf: 1.1, nowSec: NOW }).find((r) => r.market.collateral.symbol === 'wstETH')!
+    const m = base.market
+    const campaigns: MorphoCampaign[] = [
+      { side: 'collateral', market: m.id.toLowerCase(), token: m.collateral.address.toLowerCase(), apr: 0.02, conditional: false, endsAt: 1_800_000_000 },
+      { side: 'borrow', market: m.id.toLowerCase(), token: m.loan.address.toLowerCase(), apr: 0.01, conditional: true },
+    ]
+    const withApi = scanMorpho(parsed, { targetHf: 1.1, nowSec: NOW, merkl: campaigns }).find((r) => r.market.id === m.id)!
+    expect(withApi.merklApy).toBeCloseTo(0.02 * base.leverage, 10)
+    expect(withApi.apy).toBeCloseTo(base.apy + 0.02 * base.leverage, 10)
+    expect(withApi.merkl.endsAt).toBe(1_800_000_000)
+    expect(withApi.flags).not.toContain('conditional')
+    const onchain = scanMorpho(parsed, { targetHf: 1.1, nowSec: NOW, merkl: campaigns, onchain: true }).find((r) => r.market.id === m.id)!
+    expect(onchain.merklApy).toBeCloseTo(0.02 * base.leverage + 0.01 * (base.leverage - 1), 10)
+    expect(onchain.flags).toContain('conditional')
   })
 })

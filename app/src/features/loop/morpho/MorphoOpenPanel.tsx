@@ -1,3 +1,4 @@
+import { morphoMerklApy } from '../../../services/merkl'
 import { useMemo, useState } from 'react'
 import { parseUnits } from 'viem'
 import { QUOTE_MODE } from '../../../config'
@@ -174,7 +175,9 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
   const worstHf = newCollMin !== undefined ? morphoHf(newCollMin, newDebt, state.price, M.params.lltv) : undefined
   const loopLev = newColl !== undefined ? morphoLeverage(newColl, newDebt, state.price) : undefined
   const netBorrow = ctx.borrowApy - ctx.rewardsApr
-  const apy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoNetApy(loopLev, collateralApy, netBorrow) : undefined
+  // the API's borrow rewards are in netBorrow; Merkl campaigns it ignores (M7) are added on equity
+  const merklApy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoMerklApy(ctx.merkl, loopLev) : 0
+  const apy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoNetApy(loopLev, collateralApy, netBorrow) + merklApy : undefined
   const series = useMorphoBorrowSeries(M.chainId, M.id, M.source !== 'chain')
   const correlated = isCorrelated({ price: sides.collateral.price, token: C }, { price: sides.loan.price, token: L })
   const signals = useRiskSignals({
@@ -369,8 +372,8 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
           value: unreal || (q && apy === undefined) ? NA : apy !== undefined ? fmtPct(apy) : undefined,
           sub: pt
             ? `dont ${fmtPct(collateralApy)} fixe sur le collatéral`
-            : ctx.rewardsApr > 0
-              ? `récompenses d’emprunt ${fmtPct(ctx.rewardsApr)} comprises`
+            : ctx.rewardsApr > 0 || merklApy > 0
+              ? `bonus ${fmtPct(ctx.rewardsApr * ((loopLev ?? 1) - 1) + merklApy)} compris`
               : 'taux variables, hors coûts',
           tone: apyTone(apy),
           key: true,
@@ -477,7 +480,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             leverage={loopLev}
             supplyApy={collateralApy}
             borrowApy={ctx.borrowApy}
-            rewardsApy={ctx.rewardsApr * (loopLev - 1)}
+            rewardsApy={ctx.rewardsApr * (loopLev - 1) + merklApy}
             correlated={correlated}
             apy={apy}
             signals={signals}
@@ -489,8 +492,8 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             leverage={loopLev}
             collateralYield={collateralApy}
             collateralLabel={pt ? `${ptShortSymbol(C.symbol)} (taux fixe)` : C.symbol}
-            rewards={ctx.rewardsApr * (loopLev - 1)}
-            rewardsLabel="Récompenses d’emprunt"
+            rewards={ctx.rewardsApr * (loopLev - 1) + merklApy}
+            rewardsLabel={merklApy > 0 ? 'Récompenses et Merkl' : 'Récompenses d’emprunt'}
             borrowCost={ctx.borrowApy}
             debtLabel={L.symbol}
             withCosts={horizonYield}
@@ -502,7 +505,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
           <ApyHistory
             borrow={series.data}
             leverage={loopLev}
-            extra={collateralApy * loopLev + ctx.rewardsApr * (loopLev - 1)}
+            extra={collateralApy * loopLev + ctx.rewardsApr * (loopLev - 1) + merklApy}
             pending={series.isPending && series.fetchStatus !== 'idle'}
             source="API Morpho"
           />

@@ -8,11 +8,12 @@ import { leverageAtMorphoHf, morphoNetApy, type MorphoMarket } from '../../proto
 import { isExpired, type PtInfo } from '../../protocols/pendle/pt'
 import { MAX_SCAN_LEVERAGE, MIN_SCAN_LEVERAGE } from './aaveScan'
 import { isCorrelated, isUsdStable } from '../../domain/pairs'
+import { NO_MORPHO_MERKL, morphoMerkl, morphoMerklApy, type MorphoCampaign, type MorphoMerkl } from '../../services/merkl'
 
 /** Same ceiling as the Morpho open panel's slider: the leverage at a health factor of 1.02, at most 15x. */
 const SLIDER_HF = 1.02
 
-export type MorphoScanFlag = 'nativeUnknown' | 'lowCapacity' | 'unlisted'
+export type MorphoScanFlag = 'nativeUnknown' | 'lowCapacity' | 'unlisted' | 'conditional'
 
 export type MorphoScanRow = {
   market: MorphoMarket
@@ -28,6 +29,9 @@ export type MorphoScanRow = {
   grossBorrowApy: number
   /** unlevered collateral yield (PT implied APY or the token's own) */
   collateralYield: number
+  /** Merkl campaigns the Morpho API does not count (M7), and their yield on equity at this leverage (in `apy`) */
+  merkl: MorphoMerkl
+  merklApy: number
   apy: number
   /** equity that can still be looped before the market runs out of loan token, USD */
   capacityUsd: number
@@ -46,6 +50,10 @@ export type MorphoScanOptions = {
   nowSec?: number
   /** capital to loop, USD: the borrow rate is then the one right after this loop's borrow (AdaptiveCurveIRM, irm.ts) */
   equityUsd?: number
+  /** the network's live Merkl campaigns on Morpho (M7) */
+  merkl?: MorphoCampaign[]
+  /** the network is read on-chain: no API rewards, so Merkl's borrow campaigns count too */
+  onchain?: boolean
 }
 
 const priced = (t: MorphoMarket['collateral'], usd: number) => ({ token: t, price: BigInt(Math.round(usd * 1e8)) })
@@ -66,7 +74,9 @@ export function scanMorpho(markets: MorphoMarket[], opts: MorphoScanOptions): Mo
     const after = E > 0 ? morphoBorrowApyAfter(m.borrowApy, m.borrowUsd + m.liquidityUsd, m.borrowUsd, (leverage - 1) * E) : undefined
     const grossBorrowApy = after ?? m.borrowApy
     const borrowApy = grossBorrowApy - m.borrowRewardsApr
-    const apy = morphoNetApy(leverage, collateralApy, borrowApy)
+    const merkl = opts.merkl ? morphoMerkl(opts.merkl, { id: m.id, collateral: m.collateral.address, loan: m.loan.address }, !!opts.onchain) : NO_MORPHO_MERKL
+    const merklApy = morphoMerklApy(merkl, leverage)
+    const apy = morphoNetApy(leverage, collateralApy, borrowApy) + merklApy
     const C = priced(m.collateral, m.collateralUsd)
     const L = priced(m.loan, m.loanUsd)
     const correlated = isCorrelated(C, L)
@@ -76,15 +86,18 @@ export function scanMorpho(markets: MorphoMarket[], opts: MorphoScanOptions): Mo
     if ((pt && pt.impliedApy === undefined) || (!pt && correlated && !m.collateralYield && m.collateralUsd > m.loanUsd * 1.01)) flags.push('nativeUnknown')
     if (opts.lowCapacityUsd !== undefined && capacityUsd < opts.lowCapacityUsd) flags.push('lowCapacity')
     if (!m.listed) flags.push('unlisted')
+    if (merkl.conditional) flags.push('conditional')
     rows.push({
       market: m,
       leverage,
       healthFactor,
       nativeApy: collateralApy * leverage,
       borrowApy,
-      apyBefore: E > 0 ? morphoNetApy(leverage, collateralApy, m.borrowApy - m.borrowRewardsApr) : undefined,
+      apyBefore: E > 0 ? morphoNetApy(leverage, collateralApy, m.borrowApy - m.borrowRewardsApr) + merklApy : undefined,
       grossBorrowApy,
       collateralYield: collateralApy,
+      merkl,
+      merklApy,
       apy,
       capacityUsd,
       pt,

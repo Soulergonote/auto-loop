@@ -1,0 +1,136 @@
+[
+ {
+  "id": "6480753085017024194",
+  "type": "MORPHOCOLLATERAL",
+  "name": "Deposit USDe as collateral on USDe/RLUSD 91.5%",
+  "identifier": "0xD9D2fc090bDbaB1804EA960dd6669B62357787E5",
+  "apr": 4.75,
+  "depositUrl": "https://app.morpho.org/ethereum/market/0xd9d2fc090bdbab1804ea960dd6669b62357787e5816f575f14ca4e6d999614bf",
+  "latestCampaignEnd": "1795737600",
+  "chainId": 1,
+  "campaigns": [
+   {
+    "params": {
+     "hooks": [],
+     "market": "0xd9d2fc090bdbab1804ea960dd6669b62357787e5816f575f14ca4e6d999614bf",
+     "loanToken": "0x8292Bb45bf1Ee4d140127049757C2E0fF06317eD",
+     "whitelist": [],
+     "targetToken": "0x4c9EDD5852cd905f086C759E8383e09bff1E68B3",
+     "collateralToken": "0x4c9EDD5852cd905f086C759E8383e09bff1E68B3"
+    }
+   }
+  ]
+ },
+ {
+  "id": "3421223714494547515",
+  "type": "MORPHOCOLLATERAL",
+  "name": "Deposit USDe as collateral on USDe/PYUSD 91.5%",
+  "identifier": "0xAF2e077047775D7CAc1F270BBa9Cb4c6286114B5",
+  "apr": 4.75,
+  "depositUrl": "https://app.morpho.org/ethereum/market/0xaf2e077047775d7cac1f270bba9cb4c6286114b5000d4d647a1b577c7e28d41b",
+  "latestCampaignEnd": "1795737600",
+  "chainId": 1,
+  "campaigns": [
+   {
+    "params": {
+     "hooks": [],
+     "market": "0xaf2e077047775d7cac1f270bba9cb4c6286114b5000d4d647a1b577c7e28d41b",
+     "loanToken": "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8",
+     "whitelist": [],
+     "targetToken": "0x4c9EDD5852cd905f086C759E8383e09bff1E68B3",
+     "collateralToken": "0x4c9EDD5852cd905f086C759E8383e09bff1E68B3"
+    }
+   }
+  ]
+ },
+ {
+  "id": "13910696446007033969",
+  "type": "MORPHOBORROW",
+  "name": "Borrow USDC on OETH/USDC 86%",
+  "identifier": "0xb8feF900B383DB2DBBF4458C7F46aCF5B140f26D",
+  "apr": 4.853865133455323,
+  "depositUrl": "https://app.morpho.org/ethereum/market/0xb8fef900b383db2dbbf4458c7f46acf5b140f26d603a6d1829963f241b82510e",
+  "latestCampaignEnd": "1796256000",
+  "chainId": 1,
+  "campaigns": [
+   {
+    "params": {
+     "hooks": [],
+     "market": "0xb8fef900b383db2dbbf4458c7f46acf5b140f26d603a6d1829963f241b82510e",
+     "loanToken": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+     "whitelist": [],
+     "targetToken": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+     "collateralToken": "0x856c4Efb76C1D1AE02e20CEB03A2A6a08b0b8dC3"
+    }
+   }
+  ]
+ },
+ {
+  "id": "6879616332133064886",
+  "type": "MORPHOBORROW",
+  "name": "Borrow AUSD on sUSDat/AUSD 86%",
+  "identifier": "0x582fdc4176da0aB5C65E086603AB9ECD9188e889",
+  "apr": 0,
+  "depositUrl": "https://app.morpho.org/ethereum/market/0x582fdc4176da0ab5c65e086603ab9ecd9188e889e16efef6e35854cf14e15065",
+  "latestCampaignEnd": "1795996799",
+  "chainId": 1,
+  "campaigns": [
+   {
+    "params": {
+     "hooks": [
+      {
+       "hookType": 9,
+       "key": "gravity-saturn"
+      }
+     ],
+     "market": "0x582fdc4176da0ab5c65e086603ab9ecd9188e889e16efef6e35854cf14e15065",
+     "loanToken": "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
+     "whitelist": [],
+     "targetToken": "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
+     "collateralToken": "0xD166337499E176bbC38a1FBd113Ab144e5bd2Df7"
+    }
+   },
+   {
+    "params": {
+     "hooks": [
+      {
+       "hookType": 9,
+       "key": "gravity-saturn"
+      },
+      {
+       "hookType": 32,
+       "key": "saturn-gravity-s1-boosts"
+      }
+     ],
+     "market": "0x582fdc4176da0ab5c65e086603ab9ecd9188e889e16efef6e35854cf14e15065",
+     "loanToken": "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
+     "whitelist": [],
+     "targetToken": "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
+     "collateralToken": "0xD166337499E176bbC38a1FBd113Ab144e5bd2Df7"
+    }
+   }
+  ]
+ },
+ {
+  "id": "7846401335600909233",
+  "type": "MORPHOSUPPLY",
+  "name": "Supply USDC on fxSAVE/USDC 91.5%",
+  "identifier": "0x17f7ae1b52670010976B3fE41324Cbb2b1EB7dd8",
+  "apr": 3.422433593973367,
+  "depositUrl": "https://app.morpho.org/ethereum/market/0x17f7ae1b52670010976b3fe41324cbb2b1eb7dd8f492e51764b2828371b86b84",
+  "latestCampaignEnd": "1796030100",
+  "chainId": 1,
+  "campaigns": [
+   {
+    "params": {
+     "hooks": [],
+     "market": "0x17f7ae1b52670010976b3fe41324cbb2b1eb7dd8f492e51764b2828371b86b84",
+     "loanToken": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+     "whitelist": [],
+     "targetToken": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+     "collateralToken": "0x7743e50F534a7f9F1791DdE7dCD89F7783Eefc39"
+    }
+   }
+  ]
+ }
+]

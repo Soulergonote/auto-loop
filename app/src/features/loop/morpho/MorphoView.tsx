@@ -13,7 +13,7 @@ import { fmtLltv, fmtAddress, fmtAmount, fmtDollars, fmtPct, fmtPrice, ptShortSy
 import { useBalances } from '../../../chain/walletTokens'
 import { Picker } from '../../../ui/Picker'
 import { morphoMarketUrl, pendleMarketUrl } from '../../../services/links'
-import { bonusPagesQuery, morphoBonusPage } from '../../../services/merkl'
+import { NO_MORPHO_MERKL, bonusPagesQuery, morphoBonusPage, morphoCampaignsQuery, morphoMerkl, type MorphoMerkl } from '../../../services/merkl'
 import { ExtLink } from '../../../ui/ExtLink'
 import { Card, Fold, LoopLayout, Notice, Segmented, Skel, Summary, SummaryTitle, TxResult, useSlow } from '../../../ui/primitives'
 import { MorphoOpenPanel } from './MorphoOpenPanel'
@@ -45,6 +45,8 @@ export type MorphoCtx = {
   /** borrow APY now (the IRM's on-chain rate, the API's when unreadable) and the rewards the API counts */
   borrowApy: number
   rewardsApr: number
+  /** Merkl campaigns the Morpho API does not count (M7): on the collateral, and on the borrow for a network read on-chain */
+  merkl: MorphoMerkl
   sides: ReturnType<typeof morphoSides>
   account?: Address
   aggregator: AggregatorChoice
@@ -196,6 +198,10 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
   const ptQuery = useQuery(ptInfosQuery(chainId, market ? [market.collateral.address] : []))
   const pt = market ? ptQuery.data?.get(market.collateral.address.toLowerCase()) : undefined
   const bonusPages = useQuery(bonusPagesQuery(chainId, !!market && market.borrowRewardsApr > 0))
+  const merklQ = useQuery(morphoCampaignsQuery(chainId, !!market))
+  const merkl = market
+    ? morphoMerkl(merklQ.data, { id: market.id, collateral: market.collateral.address, loan: market.loan.address }, onchain)
+    : NO_MORPHO_MERKL
   const batch = useAtomicBatch(chainId, account) === true
   const slow = useSlow(listed.isPending)
   const [revoking, setRevoking] = useState<string>()
@@ -358,7 +364,16 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
                     ) : market.collateralYield ? (
                       <span title={yieldSourceText(market.collateralYield)}>{fmtPct(market.collateralYield.apy)} token</span>
                     ) : (
-                      '—'
+                      !merkl.collateralApr && '—'
+                    )}
+                    {merkl.collateralApr > 0 && (
+                      <span className="reward">
+                        {' '}
+                        +{' '}
+                        <ExtLink href={merkl.pages.collateral} title="Bonus sur Merkl">
+                          {fmtPct(merkl.collateralApr)} Merkl
+                        </ExtLink>
+                      </span>
                     )}
                   </td>
                   <td className="num" data-label="APY emprunt">
@@ -379,6 +394,15 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
                   <td className="num" data-label="APY emprunt">
                     <div>
                       {fmtPct(borrowApy)}
+                      {merkl.borrowApr > 0 && (
+                        <span className="reward">
+                          {' '}
+                          −{' '}
+                          <ExtLink href={merkl.pages.borrow} title="Bonus sur Merkl">
+                            {fmtPct(merkl.borrowApr)} Merkl
+                          </ExtLink>
+                        </span>
+                      )}
                       {market.borrowRewardsApr > 0 && (
                         <span className="reward">
                           {' '}
@@ -468,6 +492,7 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
     collateralApy,
     borrowApy,
     rewardsApr: market.borrowRewardsApr,
+    merkl,
     sides: morphoSides(market, s.price),
     account,
     aggregator,

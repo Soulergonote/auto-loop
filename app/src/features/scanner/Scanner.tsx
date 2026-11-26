@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import { useQueries, useQuery } from '@tanstack/react-query'
 import type { Address } from 'viem'
 import { MARKETS, MORPHO_NETWORKS, aggregatorsFor, getMarket, marketPlace, networkName, type Market } from '../../config'
-import { bonusPagesQuery, merklQuery, morphoBonusPage, v4BonusPage } from '../../services/merkl'
+import { bonusPagesQuery, merklQuery, morphoBonusPage, morphoCampaignsQuery, v4BonusPage } from '../../services/merkl'
 import { aaveMarketUrl, aaveV4SpokeUrl, morphoMarketUrl, pendleMarketUrl } from '../../services/links'
 import { ExtLink } from '../../ui/ExtLink'
 import { withData } from '../../services/queryData'
@@ -107,7 +107,10 @@ type Line = {
   /** ↗ next to a PT's fixed yield in « Détail »: its Pendle market */
   ptUrl?: string
   /** where the Merkl page of the bonus is: known (Aave v3 campaigns) or looked up on Merkl (Morpho, Aave v4) */
-  bonus?: { urls: string[] } | { chainId: number; morpho: string; loan: Address } | { chainId: number; v4: { collateral: Address; debt: Address } }
+  bonus?:
+    | { urls: string[] }
+    | { chainId: number; morpho: string; loan: Address; /** Merkl pages of the campaigns the app reads itself (M7) */ extra: string[] }
+    | { chainId: number; v4: { collateral: Address; debt: Address } }
   place: string
   protocol: 'aave' | 'morpho'
   tags: ReactNode[]
@@ -234,6 +237,11 @@ export function Scanner({
   })
   // a PT's yield is its Pendle implied APY: read for the PT collaterals of each network's listed markets
   const ptTokens = morphoListData.map((list) => [...new Set((list ?? []).filter((m) => /^PT-/i.test(m.collateral.symbol)).map((m) => m.collateral.address))])
+  // M7: Merkl campaigns on Morpho the API does not count (collateral; borrow too where the network is read on-chain)
+  const { queries: morphoMerklQs, data: morphoMerklData } = useQueries({
+    queries: morphoNets.map((n) => morphoCampaignsQuery(n.chain.id)),
+    combine: withData,
+  })
   const { queries: ptQueries, data: morphoPts } = useQueries({ queries: morphoNets.map((n, i) => ptInfosQuery(n.chain.id, ptTokens[i])), combine: withData })
   // Aave v4, read-only (O3): one request for every spoke of the chains the filters leave
   const v4Chains = useMemo(() => (protocol === 'morpho' ? [] : AAVE_V4_CHAINS.filter((id) => chain === 'all' || id === chain)), [protocol, chain])
@@ -331,7 +339,14 @@ export function Scanner({
     morphoNets.forEach((n, i) => {
       const list = morphoListData[i]
       if (!list) return
-      for (const r of scanMorpho(list, { targetHf, pts: morphoPts[i], lowCapacityUsd: LOW_CAPACITY_USD, equityUsd: amountUsd }))
+      for (const r of scanMorpho(list, {
+        targetHf,
+        pts: morphoPts[i],
+        lowCapacityUsd: LOW_CAPACITY_USD,
+        equityUsd: amountUsd,
+        merkl: morphoMerklData[i],
+        onchain: !!n.onchain,
+      }))
         out.push({
           key: `morpho-${n.chain.id}-${r.market.id}`,
           group: `morpho-${n.chain.id}-${r.market.collateral.address}-${r.market.loan.address}`,
@@ -344,19 +359,22 @@ export function Scanner({
             native: r.collateralYield,
             nativeFixed: !!r.pt,
             borrow: r.grossBorrowApy,
-            rewards: r.market.borrowRewardsApr * (r.leverage - 1),
+            rewards: r.market.borrowRewardsApr * (r.leverage - 1) + r.merklApy,
           },
           note: `oracle ${r.market.oracleType ? `${r.market.oracleType} ` : ''}${fmtAddress(r.market.params.oracle)}`,
           pair: `${ptShortSymbol(r.market.collateral.symbol)} / ${r.market.loan.symbol}`,
           links: [{ href: morphoMarketUrl(n.chain.id, r.market.id), title: 'Marché sur Morpho' }],
           ptUrl: pendleMarketUrl(n.chain.id, r.pt?.market),
-          bonus: { chainId: n.chain.id, morpho: r.market.id, loan: r.market.loan.address },
+          bonus:
+            r.market.borrowRewardsApr > 0
+              ? { chainId: n.chain.id, morpho: r.market.id, loan: r.market.loan.address, extra: r.merkl.urls }
+              : { urls: r.merkl.urls },
           place: `Morpho · ${n.label}`,
           protocol: 'morpho',
           tags: [
             <Tag key="lltv">LLTV {fmtLltv(r.market.lltv)}</Tag>,
             r.pt && <span key="pt">{ptTag(r.pt.expiry)}</span>,
-            r.market.borrowRewardsApr > 0 && (
+            r.market.borrowRewardsApr + r.merklApy > 0 && (
               <Tag key="bonus" tone="good">
                 bonus
               </Tag>
@@ -366,8 +384,9 @@ export function Scanner({
           leverage: r.leverage,
           apy: r.apy,
           nativeApy: r.nativeApy,
-          rewardsApy: r.market.borrowRewardsApr * (r.leverage - 1),
+          rewardsApy: r.market.borrowRewardsApr * (r.leverage - 1) + r.merklApy,
           capacityUsd: r.capacityUsd,
+          rewardsEnd: r.merkl.endsAt,
           ...sized(r, r.capacityUsd, r.pt ? 'pt' : r.stable ? 'stable' : r.correlated ? 'correlated' : 'other'),
           stable: r.stable,
           correlated: r.correlated,
@@ -439,7 +458,7 @@ export function Scanner({
       })
     }
     return out.sort((a, b) => b.apy - a.apy)
-  }, [snapshotData, merklData, chainIds, morphoNets, morphoListData, morphoPts, targetHf, amountUsd, v4.data])
+  }, [snapshotData, merklData, chainIds, morphoNets, morphoListData, morphoPts, morphoMerklData, targetHf, amountUsd, v4.data])
 
   // Merkl pages of the Morpho and Aave v4 bonuses, read only on the chains that have one
   const bonusChains = useMemo(
@@ -453,7 +472,9 @@ export function Scanner({
     if ('urls' in b) return b.urls
     const pages = bonusPages[bonusChains.indexOf(b.chainId)]
     const urls =
-      'morpho' in b ? [morphoBonusPage(pages, b.morpho, b.loan)] : [v4BonusPage(pages, b.v4.collateral, 'supply'), v4BonusPage(pages, b.v4.debt, 'borrow')]
+      'morpho' in b
+        ? [morphoBonusPage(pages, b.morpho, b.loan), ...b.extra]
+        : [v4BonusPage(pages, b.v4.collateral, 'supply'), v4BonusPage(pages, b.v4.debt, 'borrow')]
     return [...new Set(urls.filter((u): u is string => !!u))]
   }
 
@@ -536,7 +557,9 @@ export function Scanner({
     ...markets.filter((_, i) => snapshots[i].isError).map((m) => m.label),
     ...morphoNets.filter((_, i) => morphoLists[i].isError).map((n) => `Morpho · ${n.label}`),
   ]
-  const merklFailed = chainIds.filter((_, i) => merkl[i].isError)
+  const merklFailed = [
+    ...new Set([...chainIds.filter((_, i) => merkl[i].isError), ...morphoNets.filter((_, i) => morphoMerklQs[i].isError).map((n) => n.chain.id)]),
+  ]
   const retry = () => [...snapshots, ...morphoLists].forEach((q) => (q.isError || q.isPending) && void q.refetch())
   const [opened, setOpened] = useState<string>()
   // J3: 30-day mini-curve of each shown line (A6: of every filtered line, to sort on them); per-network progress
@@ -667,7 +690,9 @@ export function Scanner({
         )}
         {merklFailed.length > 0 && (
           <Notice>
-            Merkl indisponible pour {merklFailed.map((id) => markets.find((m) => m.chain.id === id)?.chain.name).join(', ')} : APY sans bonus là-bas.
+            Merkl indisponible pour{' '}
+            {merklFailed.map((id) => markets.find((m) => m.chain.id === id)?.chain.name ?? morphoNets.find((n) => n.chain.id === id)?.label).join(', ')} : APY
+            sans bonus là-bas.
           </Notice>
         )}
         {filter === 'all' && targetHf < 1.2 && (
@@ -932,8 +957,10 @@ export function Scanner({
           </p>
           <p className="muted small">
             Morpho Blue : chaque marché listé par Morpho (un collatéral, un actif emprunté, une LLTV), au levier qui donne ce health factor, plafonné au levier
-            d’un health factor de 1,02 comme le curseur. Taux de l’API Morpho, relus on-chain à l’ouverture ; « Bonus Merkl » y est la part des récompenses
-            d’emprunt que l’API compte. Les marchés avec un avertissement rouge de l’API sont écartés.
+            d’un health factor de 1,02 comme le curseur. Taux de l’API Morpho, relus on-chain à l’ouverture ; « Bonus Merkl » y additionne les récompenses
+            d’emprunt que l’API compte et les campagnes Merkl qu’elle ignore, lues sur Merkl : dépôt du collatéral (sur ce marché ou sur tout marché), au levier
+            ; emprunt aussi sur un réseau lu on-chain. Une campagne à public restreint est écartée, une campagne à règles non lues porte « conditions Merkl ».
+            Les marchés avec un avertissement rouge de l’API sont écartés.
           </p>
         </Fold>
       </Card>

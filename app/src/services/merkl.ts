@@ -65,7 +65,7 @@ type Opportunity = {
   depositUrl?: string
   tokens?: { address?: string }[]
   latestCampaignEnd?: string | number
-  campaigns?: { params?: { hooks?: Hook[]; borrowTokens?: string[]; supplyTokens?: string[] } }[]
+  campaigns?: { params?: { hooks?: Hook[]; borrowTokens?: string[]; supplyTokens?: string[]; [k: string]: unknown } }[]
 }
 
 const KINDS: Record<string, CampaignKind> = {
@@ -198,6 +198,130 @@ export function v4BonusPage(pages: BonusPage[] | undefined, asset: string, side:
   const borrow = (t: string) => /BORROW/.test(t)
   return pages?.find((p) => p.depositUrl.endsWith(`/${asset.toLowerCase()}`) && borrow(p.type) === (side === 'borrow'))?.url
 }
+
+/**
+ * Merkl campaigns on Morpho Blue positions (M7), as the API describes them (checked 2026-11-26):
+ * - MORPHOCOLLATERAL: collateral deposited in one market (params.market, full id); MORPHOCOLLATERAL_SINGLETOKEN: the
+ *   token as collateral in any market (targetToken);
+ * - MORPHOBORROW: the borrow of one market; MORPHOBORROW_SINGLETOKEN: borrowing the token in any market.
+ * The Morpho API already counts the borrow campaigns in its rewards (OETH / USDC on Ethereum: 4.86 % on both), never
+ * the collateral ones (USDe / RLUSD: 4.75 % on Merkl, none in the API): borrow campaigns are only for markets read
+ * on-chain, where the API does not answer. A whitelist restricts the audience: skipped; a hook (boost, referral,
+ * health factor rule) is a condition the app does not check: kept, flagged.
+ */
+export type MorphoCampaign = {
+  side: 'collateral' | 'borrow'
+  /** the market's id (lowercase), or undefined for a campaign on the token in any market */
+  market?: string
+  /** collateral (collateral side) or loan token (borrow side), lowercase */
+  token: string
+  /** fraction per year */
+  apr: number
+  conditional: boolean
+  endsAt?: number
+  merklUrl?: string
+}
+
+type MorphoParams = { market?: string; targetToken?: string; hooks?: unknown[]; whitelist?: string[] }
+
+const MORPHO_KINDS: Record<string, { side: MorphoCampaign['side']; single: boolean }> = {
+  MORPHOCOLLATERAL: { side: 'collateral', single: false },
+  MORPHOCOLLATERAL_SINGLETOKEN: { side: 'collateral', single: true },
+  MORPHOBORROW: { side: 'borrow', single: false },
+  MORPHOBORROW_SINGLETOKEN: { side: 'borrow', single: true },
+}
+
+export function toMorphoCampaign(o: Opportunity): MorphoCampaign | undefined {
+  const kind = MORPHO_KINDS[o.type]
+  if (!kind || !o.apr || o.apr <= 0) return undefined
+  const params = (o.campaigns ?? []).map((c) => (c.params ?? {}) as MorphoParams)
+  if (params.some((p) => (p.whitelist?.length ?? 0) > 0)) return undefined
+  const market = params.find((p) => p.market)?.market?.toLowerCase()
+  const token = (params.find((p) => p.targetToken)?.targetToken ?? (kind.single ? o.identifier : undefined))?.toLowerCase()
+  if (!token || !isAddress(token) || (!kind.single && !market)) return undefined
+  const end = Number(o.latestCampaignEnd)
+  return {
+    side: kind.side,
+    market: kind.single ? undefined : market,
+    token,
+    apr: o.apr / 100,
+    conditional: params.some((p) => (p.hooks?.length ?? 0) > 0),
+    endsAt: end > 0 ? end : undefined,
+    merklUrl: o.id ? merklOpportunityUrl(o.id) : undefined,
+  }
+}
+
+export async function fetchMorphoCampaigns(chainId: number, signal: AbortSignal): Promise<MorphoCampaign[]> {
+  const out: MorphoCampaign[] = []
+  for (let page = 0; page < 5; page++) {
+    const q = new URLSearchParams({
+      chainId: String(chainId),
+      mainProtocolId: 'morpho',
+      status: 'LIVE',
+      items: String(PAGE),
+      page: String(page),
+      campaigns: 'true',
+    })
+    const res = await fetch(`${MERKL_API}?${q}`, { signal })
+    if (!res.ok) throw new Error(`Merkl : HTTP ${res.status}`)
+    const list = (await res.json()) as Opportunity[]
+    for (const o of list) {
+      const c = toMorphoCampaign(o)
+      if (c) out.push(c)
+    }
+    if (list.length < PAGE) break
+  }
+  return out
+}
+
+/** Live Morpho campaigns of a chain (M7), cached 5 minutes like the Aave ones. */
+export const morphoCampaignsQuery = (chainId: number, enabled = true) => ({
+  queryKey: ['merkl-morpho', chainId],
+  queryFn: ({ signal }: { signal: AbortSignal }) => fetchMorphoCampaigns(chainId, signal),
+  enabled: enabled && !DEMO,
+  staleTime: 5 * 60_000,
+  retry: 1,
+})
+
+/** What Merkl adds to a Morpho loop, unlevered: APR on the collateral, APR on the borrow (0 where the API counts it). */
+export type MorphoMerkl = {
+  collateralApr: number
+  borrowApr: number
+  conditional: boolean
+  endsAt?: number
+  /** every counted campaign's page, and the biggest one of each side */
+  urls: string[]
+  pages: { collateral?: string; borrow?: string }
+}
+
+export const NO_MORPHO_MERKL: MorphoMerkl = { collateralApr: 0, borrowApr: 0, conditional: false, urls: [], pages: {} }
+
+/**
+ * The campaigns that pay on a Morpho market's collateral (and borrow, when `withBorrow`: a market the Morpho API does
+ * not cover). The end is the soonest one among those counted.
+ */
+export function morphoMerkl(all: MorphoCampaign[] | undefined, market: { id: string; collateral: string; loan: string }, withBorrow: boolean): MorphoMerkl {
+  const id = market.id.toLowerCase()
+  const fits = (c: MorphoCampaign) =>
+    (c.side === 'collateral' || withBorrow) &&
+    c.token === (c.side === 'collateral' ? market.collateral : market.loan).toLowerCase() &&
+    (c.market === undefined || c.market === id)
+  const counted = (all ?? []).filter(fits)
+  if (!counted.length) return NO_MORPHO_MERKL
+  const ends = counted.flatMap((c) => (c.endsAt !== undefined ? [c.endsAt] : []))
+  const page = (side: MorphoCampaign['side']) => counted.filter((c) => c.side === side && c.merklUrl).sort((a, b) => b.apr - a.apr)[0]?.merklUrl
+  return {
+    collateralApr: counted.filter((c) => c.side === 'collateral').reduce((s, c) => s + c.apr, 0),
+    borrowApr: counted.filter((c) => c.side === 'borrow').reduce((s, c) => s + c.apr, 0),
+    conditional: counted.some((c) => c.conditional),
+    endsAt: ends.length ? Math.min(...ends) : undefined,
+    urls: [...new Set(counted.flatMap((c) => (c.merklUrl ? [c.merklUrl] : [])))],
+    pages: { collateral: page('collateral'), borrow: page('borrow') },
+  }
+}
+
+/** The loop's yield from these campaigns, on equity: collateral APR × L, borrow APR × (L − 1). */
+export const morphoMerklApy = (m: MorphoMerkl, leverage: number) => m.collateralApr * leverage + m.borrowApr * (leverage - 1)
 
 export function useCampaigns(market: Market) {
   return useQuery(merklQuery(market.chain.id))

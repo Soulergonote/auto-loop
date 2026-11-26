@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import morphoFixture from '../test/fixtures/merkl-morpho-2026-11-26.json'
 import {
+  NO_MORPHO_MERKL,
+  morphoMerkl,
+  morphoMerklApy,
+  toMorphoCampaign,
   campaignsForPair,
   campaignYields,
   daysLeft,
@@ -141,5 +146,56 @@ describe('Merkl pages of Morpho and Aave v4 bonuses', () => {
     expect(morphoBonusPage(pages, '0xabd', '0x36')).toBe('https://app.merkl.xyz/opportunities/4')
     expect(v4BonusPage(pages, '0xDD', 'supply')).toBe('https://app.merkl.xyz/opportunities/2')
     expect(v4BonusPage(pages, '0xDD', 'borrow')).toBe('https://app.merkl.xyz/opportunities/3')
+  })
+})
+
+describe('Merkl on Morpho (M7)', () => {
+  // real answers of api.merkl.xyz on 2026-11-26 (Ethereum, Base), trimmed to the fields read
+  const list = (morphoFixture as unknown as Parameters<typeof toMorphoCampaign>[0][]).map(toMorphoCampaign)
+  const usdeRlusd = {
+    id: '0xd9d2fc090bdbab1804ea960dd6669b62357787e5816f575f14ca4e6d999614bf',
+    collateral: '0x4c9EDD5852cd905f086C759E8383e09bff1E68B3',
+    loan: '0x8292Bb45bf1Ee4d140127049757C2E0fF06317eD',
+  }
+  const oethUsdc = {
+    id: '0xb8fef900b383db2dbbf4458c7f46acf5b140f26d603a6d1829963f241b82510e',
+    collateral: '0x856c4Efb76C1D1AE02e20CEB03A2A6a08b0b8dC3',
+    loan: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+  }
+
+  it('reads collateral and borrow campaigns, skips supply ones and zero APRs', () => {
+    expect(list.filter(Boolean).map((c) => c!.side)).toEqual(['collateral', 'collateral', 'borrow'])
+    const c = list[0]!
+    expect(c.market).toBe(usdeRlusd.id)
+    expect(c.token).toBe(usdeRlusd.collateral.toLowerCase())
+    expect(c.apr).toBeCloseTo(0.0475, 10)
+    expect(c.endsAt).toBe(1795737600)
+    expect(c.merklUrl).toContain('app.merkl.xyz')
+  })
+
+  it('counts the collateral campaign of the market only, at L on equity', () => {
+    const all = list.filter((c): c is NonNullable<typeof c> => !!c)
+    const m = morphoMerkl(all, usdeRlusd, false)
+    expect(m.collateralApr).toBeCloseTo(0.0475, 10)
+    expect(m.borrowApr).toBe(0)
+    expect(morphoMerklApy(m, 10)).toBeCloseTo(0.475, 10)
+    // another USDe market: the campaign names its market
+    expect(morphoMerkl(all, { ...usdeRlusd, id: '0x01' }, false)).toEqual(NO_MORPHO_MERKL)
+  })
+
+  it('takes borrow campaigns only where the Morpho API does not count them', () => {
+    const all = list.filter((c): c is NonNullable<typeof c> => !!c)
+    expect(morphoMerkl(all, oethUsdc, false).borrowApr).toBe(0)
+    const onchain = morphoMerkl(all, oethUsdc, true)
+    expect(onchain.borrowApr).toBeCloseTo(0.04853865, 6)
+    expect(morphoMerklApy(onchain, 5)).toBeCloseTo(0.04853865 * 4, 6)
+  })
+
+  it('skips a whitelisted audience, flags hooks, reads a single-token campaign', () => {
+    const base = { type: 'MORPHOCOLLATERAL_SINGLETOKEN', action: 'BORROW', name: 'x', identifier: usdeRlusd.collateral, apr: 2 }
+    expect(toMorphoCampaign({ ...base, campaigns: [{ params: { whitelist: ['0x1'] } }] })).toBeUndefined()
+    const c = toMorphoCampaign({ ...base, campaigns: [{ params: { targetToken: usdeRlusd.collateral, hooks: [{}] } }] })!
+    expect(c).toMatchObject({ side: 'collateral', market: undefined, conditional: true, apr: 0.02 })
+    expect(morphoMerkl([c], { ...usdeRlusd, id: '0x02' }, false).collateralApr).toBeCloseTo(0.02, 10)
   })
 })
