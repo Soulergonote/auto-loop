@@ -27,7 +27,7 @@ export const ONCHAIN_RATES: OnchainRate[] = [
  * Checked 12 Nov 2026 (7-day yield then): savUSD 7.8 %, wsrUSD 6.2 %, syrupUSDG 4.9 %, yoUSD 5.1 %.
  * Not listed: wstUSR, whose rate has not moved for 30 days (USR depegged to ~0.03 $ in the meantime).
  */
-export const VAULTS: { chainId: number; token: Address }[] = [
+export const VAULTS: { chainId: number; token: Address; /** the share price read: ERC-4626 convertToAssets(1e18) by default */ fn?: 'getRate' }[] = [
   // Avant savUSD (avUSD staked), native on Avalanche
   { chainId: 43114, token: '0x06d47F3fb376649c3A9Dafe069B3D6E35572219E' },
   // Reservoir wsrUSD (rUSD savings), native on Ethereum
@@ -38,6 +38,17 @@ export const VAULTS: { chainId: number; token: Address }[] = [
   { chainId: 8453, token: '0x0000000f2eB9f69274678c76222B35eEc7588a65' },
   // spUSDG (USDG savings vault), Robinhood Chain only; 3.8 % over 7 and 30 days on 12 Nov 2026
   { chainId: 4663, token: '0xde770c84FE66E063336b31737cFE9790f18c4087' },
+  // Yields the Morpho GraphQL API gave (its REST API has none), read the same way since 26 Nov 2026; 7-day yield then
+  // (Morpho's figure in brackets): syrupUSDC 5.3 % (5.2), syrupUSDT 4.8 % (4.0), sDOLA 5.2 % (5.4), weETH 2.4 % (2.4),
+  // v-wmtUSDC 8.9 % (8.5), v-wmtUSDT 9.2 % (8.8), v-wmtWBTC 3.6 % (3.5)
+  { chainId: 1, token: '0x80ac24aA929eaF5013f6436cdA2a7ba190f5Cc0b' },
+  { chainId: 1, token: '0x356B8d89c1e1239Cbbb9dE4815c39A1474d5BA7D' },
+  { chainId: 1, token: '0xb45ad160634c528Cc3D2926d9807104FA3157305' },
+  // weETH: not a 4626 vault, eETH per weETH from getRate()
+  { chainId: 1, token: '0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee', fn: 'getRate' },
+  { chainId: 1, token: '0xF65460B84c13eeb911303336Ab0f9D63CC79839f' },
+  { chainId: 1, token: '0x82c3C0f95f2b7b6b1F0D2c9bA2334a2aff66d0c1' },
+  { chainId: 1, token: '0x7D7f0fC27E53239e8e50dE461d2a544917AB4366' },
 ]
 
 /**

@@ -5,7 +5,6 @@
  * 1. `rate`: the rate the token's contract publishes (sDAI, sUSDS, stUSDS), read on-chain, see ONCHAIN_RATES.
  * 2. `vault`: growth of an ERC-4626 vault's share price over the last 7 days, read on-chain (savUSD, wsrUSD…), see VAULTS.
  * 3. `pendle`: the underlying yield Pendle's API shows for the token when Pendle has a market on it (recent average).
- * 4. `morpho`: the asset yield of Morpho's API (Ethereum tokens mostly).
  *
  * A token missing from every source is looked up again through its copies on other chains: found automatically (same
  * symbol and price, copies.ts), or listed by hand in SAME_TOKEN for tokens no price feed knows. Callers fall
@@ -15,10 +14,9 @@
  * plus its place in SOURCE_ORDER.
  */
 import { readContracts } from '@wagmi/core'
-import { createPublicClient, fallback, getAddress, http, isAddress, parseAbi, type Address } from 'viem'
-import { ARCHIVE_RPCS, pendleChain } from '../../config'
+import { createPublicClient, fallback, http, isAddress, parseAbi, type Address } from 'viem'
+import { ARCHIVE_RPCS, PENDLE_ROUTER_STATIC, pendleChain } from '../../config'
 import { wagmiConfig } from '../../chain/wagmi'
-import { gql } from '../../protocols/morpho/api'
 import type { NativeYield, YieldSource } from './nativeYield'
 import { ONCHAIN_RATES, SAME_TOKEN, VAULTS } from './yieldTokens'
 import { findCopies, type TokenRef } from './copies'
@@ -33,7 +31,7 @@ export type Found = { apy: number; via?: string }
 export type SourceData = Map<string, Found>
 type Sources = Partial<Record<Exclude<YieldSource, 'aave' | 'pt'>, SourceData>>
 
-export const SOURCE_ORDER = ['rate', 'vault', 'pendle', 'morpho'] as const
+export const SOURCE_ORDER = ['rate', 'vault', 'pendle'] as const
 
 export const tokenKey = (chainId: number, address: string) => `${chainId}:${address.toLowerCase()}`
 
@@ -51,7 +49,7 @@ export function tokenCopies(chainId: number, address: string, found: TokenRef[] 
   return out
 }
 
-/** Tokens the readers know by address, wherever they live: candidates for copies the Morpho API cannot point to. */
+/** Tokens the on-chain readers know by address, wherever they live: candidates for copies (copies.ts). */
 const KNOWN: TokenRef[] = [
   ...VAULTS.map((v) => ({ chainId: v.chainId, address: v.token })),
   ...ONCHAIN_RATES.map((r) => ({ chainId: r.chainId, address: r.token })),
@@ -111,7 +109,7 @@ export function growthToApy(before: bigint, now: bigint, seconds: number): numbe
 }
 
 const VAULT_WINDOW = 7 * 86_400
-const vaultAbi = parseAbi(['function convertToAssets(uint256 shares) view returns (uint256)'])
+const vaultAbi = parseAbi(['function convertToAssets(uint256 shares) view returns (uint256)', 'function getRate() view returns (uint256)'])
 
 /** Share price of each listed vault of this chain now and about 7 days ago, through an archive RPC. */
 function readVaultYields(chainId: number): Promise<SourceData> {
@@ -128,7 +126,11 @@ function readVaultYields(chainId: number): Promise<SourceData> {
     const past = await client.getBlock({ blockNumber: head.number - BigInt(Math.round(VAULT_WINDOW / perBlock)) })
     const read = (blockNumber: bigint) =>
       client.multicall({
-        contracts: vaults.map((v) => ({ address: v.token, abi: vaultAbi, functionName: 'convertToAssets', args: [10n ** 18n] }) as const),
+        contracts: vaults.map((v) =>
+          v.fn === 'getRate'
+            ? ({ address: v.token, abi: vaultAbi, functionName: 'getRate' } as const)
+            : ({ address: v.token, abi: vaultAbi, functionName: 'convertToAssets', args: [10n ** 18n] } as const),
+        ),
         blockNumber,
         allowFailure: true,
       })
@@ -174,42 +176,20 @@ function readPendleYields(chainId: number): Promise<SourceData> {
   })
 }
 
-function readMorphoYields(chainId: number, addresses: string[]): Promise<SourceData> {
-  const list = [...new Set(addresses)].sort()
-  if (list.length === 0) return Promise.resolve(new Map())
-  return cached(`morpho:${chainId}:${list.join(',')}`, async () => {
-    const data = await gql<{ assets: { items: { address: string; yield?: { apr?: number | null } | null }[] } }>(
-      `query($chain: [Int!], $addresses: [String!]) { assets(first: 1000, where: { chainId_in: $chain, address_in: $addresses }) { items { address yield { apr } } } }`,
-      { chain: [chainId], addresses: list.map((a) => getAddress(a)) },
-      AbortSignal.timeout(8_000),
-    )
-    const out: SourceData = new Map()
-    for (const a of data.assets.items) {
-      const apr = a.yield?.apr
-      if (typeof apr === 'number') out.set(tokenKey(chainId, a.address), { apy: aprToApy(apr) })
-    }
-    return out
-  })
-}
-
 /** Current intrinsic yields of these tokens, by lower-cased address; tokens no source knows are left out. */
 export async function readTokenYields(chainId: number, addresses: readonly Address[]): Promise<Map<string, NativeYield>> {
   const out = new Map<string, NativeYield>()
   if (addresses.length === 0) return out
-  const found = await findCopies(chainId, addresses, KNOWN)
+  // candidates for copies: the tokens a source knows, the Pendle underlyings of every chain Pendle covers among them
+  const pendleAll = await Promise.all(Object.keys(PENDLE_ROUTER_STATIC).map((c) => readPendleYields(Number(c))))
+  const pendleKnown = pendleAll.flatMap((m) => [...m.keys()].map((k) => ({ chainId: Number(k.split(':')[0]), address: k.split(':')[1] })))
+  const found = await findCopies(chainId, addresses, [...KNOWN, ...pendleKnown])
   const copiesOf = (a: string) => tokenCopies(chainId, a, found.get(tokenKey(chainId, a)))
-  // every chain where the tokens or their copies live, with the addresses to ask Morpho about there
-  const byChain = new Map<number, string[]>()
-  for (const a of addresses) for (const t of copiesOf(a)) byChain.set(t.chainId, [...(byChain.get(t.chainId) ?? []), t.address])
-  const chains = [...byChain.keys()]
-  const [rate, vault, pendle, morpho] = await Promise.all([
-    readOnchainRates(),
-    Promise.all(chains.map(readVaultYields)),
-    Promise.all(chains.map(readPendleYields)),
-    Promise.all(chains.map((c) => readMorphoYields(c, byChain.get(c)!))),
-  ])
+  // every chain where the tokens or their copies live
+  const chains = [...new Set(addresses.flatMap((a) => copiesOf(a).map((t) => t.chainId)))]
+  const [rate, vault, pendle] = await Promise.all([readOnchainRates(), Promise.all(chains.map(readVaultYields)), Promise.all(chains.map(readPendleYields))])
   const merge = (maps: SourceData[]): SourceData => new Map(maps.flatMap((m) => [...m]))
-  const sources: Sources = { rate, vault: merge(vault), pendle: merge(pendle), morpho: merge(morpho) }
+  const sources: Sources = { rate, vault: merge(vault), pendle: merge(pendle) }
   for (const a of addresses) {
     const y = pickTokenYield(chainId, a, sources, found.get(tokenKey(chainId, a)))
     if (y) out.set(a.toLowerCase(), y)

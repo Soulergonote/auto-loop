@@ -15,7 +15,7 @@ import { fmtDate } from '../../ui/format'
 import { readTokenYields } from './tokenYield'
 
 /** Where a yield comes from, freshest first; `pt` is a Pendle PT's fixed yield. */
-export type YieldSource = 'rate' | 'vault' | 'pendle' | 'morpho' | 'aave' | 'pt'
+export type YieldSource = 'rate' | 'vault' | 'pendle' | 'aave' | 'pt'
 
 export type NativeYield = {
   /** compounded annual yield, fraction */
@@ -42,8 +42,6 @@ export function yieldSourceText(y: NativeYield): string {
       return `prix de part on-chain sur 7 jours${copy}`
     case 'pendle':
       return `Pendle, rendement récent${copy}`
-    case 'morpho':
-      return `API Morpho${copy}`
     case 'aave':
       return y.since ? `moyenne depuis le ${fmtDate(y.since)} (adaptateur Aave)` : 'adaptateur Aave'
     case 'pt':

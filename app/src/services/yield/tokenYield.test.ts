@@ -10,18 +10,18 @@ const copy = (chainId: number, address: string) => [{ chainId, address }]
 const data = (entries: [number, string, number, string?][]): SourceData => new Map(entries.map(([c, a, apy, via]) => [tokenKey(c, a), { apy, via }]))
 
 describe('token yields', () => {
-  it('takes the first source in order: on-chain rate, then Pendle, then Morpho', () => {
-    const sources = { rate: data([[1, SUSDE_ETH, 0.04, 'X']]), pendle: data([[1, SUSDE_ETH, 0.05]]), morpho: data([[1, SUSDE_ETH, 0.06]]) }
+  it('takes the first source in order: on-chain rate, then vault share price, then Pendle', () => {
+    const sources = { rate: data([[1, SUSDE_ETH, 0.04, 'X']]), vault: data([[1, SUSDE_ETH, 0.05]]), pendle: data([[1, SUSDE_ETH, 0.06]]) }
     expect(pickTokenYield(1, SUSDE_ETH, sources)).toEqual({ apy: 0.04, source: 'rate', via: 'X' })
-    expect(pickTokenYield(1, SUSDE_ETH, { pendle: sources.pendle, morpho: sources.morpho })).toMatchObject({ apy: 0.05, source: 'pendle' })
-    expect(pickTokenYield(1, SUSDE_ETH, { morpho: sources.morpho })).toMatchObject({ apy: 0.06, source: 'morpho' })
+    expect(pickTokenYield(1, SUSDE_ETH, { vault: sources.vault, pendle: sources.pendle })).toMatchObject({ apy: 0.05, source: 'vault' })
+    expect(pickTokenYield(1, SUSDE_ETH, { pendle: sources.pendle })).toMatchObject({ apy: 0.06, source: 'pendle' })
     expect(pickTokenYield(1, SUSDE_ETH, {})).toBeUndefined()
   })
 
   it('gives a bridged copy the yield of the same token on another chain, and says which', () => {
-    // syrupUSDC: only Morpho on Ethereum knows it
-    const morpho = data([[1, SYRUP_ETH, 0.0544]])
-    expect(pickTokenYield(8453, SYRUP_BASE, { morpho }, copy(1, SYRUP_ETH))).toEqual({ apy: 0.0544, source: 'morpho', fromChain: 1 })
+    // syrupUSDC: its vault is read on Ethereum only
+    const vault = data([[1, SYRUP_ETH, 0.0544]])
+    expect(pickTokenYield(8453, SYRUP_BASE, { vault }, copy(1, SYRUP_ETH))).toEqual({ apy: 0.0544, source: 'vault', fromChain: 1 })
     // the token's own figure beats its copies' within a source
     const pendle = data([
       [1, SUSDE_ETH, 0.051],
@@ -30,9 +30,9 @@ describe('token yields', () => {
     expect(pickTokenYield(43114, SUSDE_OFT, { pendle }, copy(1, SUSDE_ETH))).toEqual({ apy: 0.03, source: 'pendle' })
     // a better source on a copy beats a worse one on the token itself
     expect(
-      pickTokenYield(43114, SUSDE_OFT, { pendle: data([[1, SUSDE_ETH, 0.051]]), morpho: data([[43114, SUSDE_OFT, 0.04]]) }, copy(1, SUSDE_ETH)),
+      pickTokenYield(43114, SUSDE_OFT, { vault: data([[1, SUSDE_ETH, 0.051]]), pendle: data([[43114, SUSDE_OFT, 0.04]]) }, copy(1, SUSDE_ETH)),
     ).toMatchObject({
-      source: 'pendle',
+      source: 'vault',
       fromChain: 1,
     })
     // a token in no group has no copies
