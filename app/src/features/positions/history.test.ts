@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { encodeAbiParameters, encodeEventTopics, parseAbiItem, zeroAddress, type Address, type Hex } from 'viem'
-import { aaveFlows, aTokenFlows, historyLines, morphoFlows, positionGain, priceKey, txsToInspect, type Flow } from './history'
+import { aaveFlows, aTokenFlows, changedWindows, historyLines, morphoLogFlows, positionGain, priceKey, txsToInspect, type Flow } from './history'
 
 const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' as Address
 const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' as Address
@@ -35,25 +35,82 @@ describe('history flows', () => {
     expect(flows[0].time).toBe(Date.parse('2026-01-01T00:00:00Z') / 1000)
   })
 
-  it('keeps the borrower side of Morpho, not the lender side', () => {
+  it('keeps the account’s borrower side of Morpho’s events, not the lender side nor other accounts', () => {
     const coll = { address: WETH, symbol: 'WETH', decimals: 18 }
     const loan = { address: USDC, symbol: 'USDC', decimals: 6 }
-    const flows = morphoFlows(
-      [
-        { txHash: tx(1), timestamp: 100, type: 'SupplyCollateral', data: { assets: '2000000000000000000' } },
-        { txHash: tx(1), timestamp: 100, type: 'Borrow', data: { assets: '3000000000' } },
-        { txHash: tx(2), timestamp: 200, type: 'MarketSupply', data: { assets: '5' } },
-        { txHash: tx(3), timestamp: 300, type: 'Liquidation', data: { seizedAssets: '100000000000000000', repaidAssets: '200000000' } },
-      ],
-      coll,
-      loan,
-    )
-    expect(flows.map((f) => [f.kind, f.amount])).toEqual([
-      ['supply', 2],
-      ['borrow', 3000],
-      ['seized', 0.1],
-      ['liquidationRepay', 200],
+    const ID = tx(99)
+    const ev = (sig: string, args: Record<string, unknown>, data: [string, bigint | Address][], n: number, block: bigint, logIndex = 0) => {
+      const item = parseAbiItem(sig) as never
+      return {
+        transactionHash: tx(n),
+        blockNumber: block,
+        logIndex,
+        topics: encodeEventTopics({ abi: [item], args } as never) as [Hex, ...Hex[]],
+        data: encodeAbiParameters(
+          data.map(([type]) => ({ type })),
+          data.map(([, v]) => v),
+        ),
+      }
+    }
+    const SUPPLY_C = 'event SupplyCollateral(bytes32 indexed id, address indexed caller, address indexed onBehalf, uint256 assets)'
+    const BORROW = 'event Borrow(bytes32 indexed id, address caller, address indexed onBehalf, address indexed receiver, uint256 assets, uint256 shares)'
+    const SUPPLY = 'event Supply(bytes32 indexed id, address indexed caller, address indexed onBehalf, uint256 assets, uint256 shares)'
+    const LIQ =
+      'event Liquidate(bytes32 indexed id, address indexed caller, address indexed borrower, uint256 repaidAssets, uint256 repaidShares, uint256 seizedAssets, uint256 badDebtAssets, uint256 badDebtShares)'
+    const logs = [
+      ev(
+        BORROW,
+        { id: ID, onBehalf: USER, receiver: EXEC },
+        [
+          ['address', EXEC],
+          ['uint256', 3_000_000_000n],
+          ['uint256', 1n],
+        ],
+        1,
+        10n,
+        1,
+      ),
+      ev(SUPPLY_C, { id: ID, caller: EXEC, onBehalf: USER }, [['uint256', 2n * 10n ** 18n]], 1, 10n, 0),
+      // same log twice (two overlapping windows): counted once
+      ev(SUPPLY_C, { id: ID, caller: EXEC, onBehalf: USER }, [['uint256', 2n * 10n ** 18n]], 1, 10n, 0),
+      ev(SUPPLY_C, { id: ID, caller: EXEC, onBehalf: EXEC }, [['uint256', 7n]], 2, 11n),
+      ev(
+        SUPPLY,
+        { id: ID, caller: USER, onBehalf: USER },
+        [
+          ['uint256', 5n],
+          ['uint256', 5n],
+        ],
+        3,
+        12n,
+      ),
+      ev(
+        LIQ,
+        { id: ID, caller: EXEC, borrower: USER },
+        [200_000_000n, 1n, 10n ** 17n, 0n, 0n].map((v) => ['uint256', v] as [string, bigint]),
+        4,
+        13n,
+      ),
+    ]
+    const flows = morphoLogFlows(logs, USER, coll, loan, (b) => Number(b) * 100)
+    expect(flows.map((f) => [f.kind, f.amount, f.time])).toEqual([
+      ['supply', 2, 1000],
+      ['borrow', 3000, 1000],
+      ['seized', 0.1, 1300],
+      ['liquidationRepay', 200, 1300],
     ])
+  })
+
+  it('searches the days the position moved, the opening and today', () => {
+    const day = 86_400
+    const p = (t: number, b: string, c: string) => ({ timestamp: t * day, borrow_shares: b, collateral_assets: c })
+    const points = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map((d) => (d < 12 ? p(d, '1', '1') : p(d, '2', '3')))
+    // the opening (day 9 to 10) and the change of day 12 are searched together (under 2 days apart), then today
+    expect(changedWindows(points, 20 * day + 100)).toEqual([
+      [9 * day - 3600, 12 * day + 3600],
+      [20 * day - 3600, 20 * day + 100],
+    ])
+    expect(changedWindows([], 0)).toEqual([])
   })
 
   it('finds the aTokens a contract moved, not the mints and burns', () => {

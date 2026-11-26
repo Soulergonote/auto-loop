@@ -6,14 +6,16 @@
  * - Aave v3: Aave's API (api.v3.aave.com, userTransactionHistory of the account on a market). The API leaves out aTokens
  *   moved by a contract (the executor pulls them at close or when the collateral changes): the receipts of the
  *   transactions that repay or deposit without borrowing are read to add them.
- * - Morpho Blue: Morpho's API (marketTransactions of the address on the market).
+ * - Morpho Blue: the days the position moved, from Morpho's REST API (its state day by day), then the market's events
+ *   of those days read on-chain.
  * - prices of the day: DefiLlama (coins.llama.fi/batchHistorical). A token without a price there is valued at today's
  *   oracle price, and the result says so.
  */
 import { getPublicClient } from '@wagmi/core'
 import { decodeEventLog, getAddress, parseAbiItem, zeroAddress, type Address, type Hex } from 'viem'
 import { wagmiConfig } from '../../chain/wagmi'
-import { LLAMA_CHAIN } from '../../config'
+import { LLAMA_CHAIN, MORPHO_NETWORKS } from '../../config'
+import { morphoGet, selector, type RestPositionPoint } from '../../protocols/morpho/api'
 
 export type FlowKind = 'supply' | 'withdraw' | 'borrow' | 'repay' | 'seized' | 'liquidationRepay'
 
@@ -182,35 +184,94 @@ export async function aaveHistory(
 
 /* --------------------------------------------------------------- Morpho --------------------------------------------------------------- */
 
-const MORPHO_API = 'https://blue-api.morpho.org/graphql'
-const MORPHO_QUERY = `query($u: [String!], $m: [String!], $c: [Int!], $skip: Int) {
-  marketTransactions(first: 100, skip: $skip, orderBy: Timestamp, orderDirection: Asc, where: { userAddress_in: $u, marketUniqueKey_in: $m, chainId_in: $c }) {
-    items { txHash timestamp type data { __typename ... on MarketTransactionTransferData { assets } ... on MarketTransactionCollateralTransferData { assets } ... on MarketTransactionLiquidationData { repaidAssets seizedAssets } } }
-    pageInfo { countTotal }
-  } }`
+/**
+ * Morpho keeps no list of a position's transactions in its REST API, only its state day by day
+ * (/position/history). The days where that state moved are searched for the market's events on-chain: one log
+ * request per stretch of blocks (split in two when the RPC refuses it), the borrower side only (the account's
+ * collateral, borrow, repayments and liquidations; lending the loan token is not part of a loop).
+ */
+const MORPHO_EVENTS = [
+  parseAbiItem('event SupplyCollateral(bytes32 indexed id, address indexed caller, address indexed onBehalf, uint256 assets)'),
+  parseAbiItem('event WithdrawCollateral(bytes32 indexed id, address caller, address indexed onBehalf, address indexed receiver, uint256 assets)'),
+  parseAbiItem('event Borrow(bytes32 indexed id, address caller, address indexed onBehalf, address indexed receiver, uint256 assets, uint256 shares)'),
+  parseAbiItem('event Repay(bytes32 indexed id, address indexed caller, address indexed onBehalf, uint256 assets, uint256 shares)'),
+  parseAbiItem(
+    'event Liquidate(bytes32 indexed id, address indexed caller, address indexed borrower, uint256 repaidAssets, uint256 repaidShares, uint256 seizedAssets, uint256 badDebtAssets, uint256 badDebtShares)',
+  ),
+] as const
 
-type MorphoItem = { txHash: Hex; timestamp: number | string; type: string; data: { assets?: string; repaidAssets?: string; seizedAssets?: string } }
 type MorphoToken = { address: Address; symbol: string; decimals: number }
+type PositionPoint = Pick<RestPositionPoint, 'timestamp' | 'borrow_shares' | 'collateral_assets'>
+/** an hour on each side of a window: the points are daily, the block found for a time is close, not exact */
+const PAD = 3_600
+/** windows closer than this are searched as one (fewer requests for an account that acts every day) */
+const MERGE_GAP = 2 * 86_400
 
-/** Morpho API items → flows (pure, tested); lender-side Supply / Withdraw of the loan token are not part of a loop */
-export function morphoFlows(items: MorphoItem[], collateral: MorphoToken, loan: MorphoToken): Flow[] {
+/**
+ * Time windows (unix seconds) where the position moved: between two daily points that differ, before the first point
+ * (the opening) and after the last one (today). Overlapping windows are merged. Pure, tested.
+ */
+export function changedWindows(points: PositionPoint[], nowSec: number): [number, number][] {
+  const p = [...points].sort((a, b) => a.timestamp - b.timestamp)
+  if (p.length === 0) return []
+  const same = (a: PositionPoint, b: PositionPoint) => a.borrow_shares === b.borrow_shares && a.collateral_assets === b.collateral_assets
+  const step = p.length > 1 ? p[1].timestamp - p[0].timestamp : 86_400
+  const raw: [number, number][] = [[p[0].timestamp - step, p[0].timestamp]]
+  for (let i = 1; i < p.length; i++) if (!same(p[i - 1], p[i])) raw.push([p[i - 1].timestamp, p[i].timestamp])
+  if (p[p.length - 1].timestamp < nowSec) raw.push([p[p.length - 1].timestamp, nowSec])
+  const out: [number, number][] = []
+  for (const [from, to] of raw.map(([f, t]) => [f - PAD, Math.min(t + PAD, nowSec)] as [number, number]))
+    if (out.length && from <= out[out.length - 1][1] + MERGE_GAP) out[out.length - 1][1] = Math.max(out[out.length - 1][1], to)
+    else out.push([from, to])
+  return out
+}
+
+type MorphoLog = { transactionHash: Hex; blockNumber: bigint; blockTimestamp?: bigint | null; logIndex: number; topics: [Hex, ...Hex[]] | []; data: Hex }
+
+/** Runs `fn` over the items, `size` at a time (RPC requests of a history). */
+async function inPool<T>(items: T[], fn: (x: T) => Promise<unknown>, size = 6): Promise<void> {
+  let next = 0
+  await Promise.all(
+    Array.from({ length: Math.min(size, items.length) }, async () => {
+      for (let i = next++; i < items.length; i = next++) await fn(items[i])
+    }),
+  )
+}
+
+/** The account's borrower-side flows among a market's logs (pure, tested); `timeOf` gives each block's time. */
+export function morphoLogFlows(logs: MorphoLog[], user: Address, collateral: MorphoToken, loan: MorphoToken, timeOf: (block: bigint) => number): Flow[] {
+  const me = user.toLowerCase()
   const out: Flow[] = []
-  const add = (i: MorphoItem, kind: FlowKind, t: MorphoToken, raw?: string) => {
-    if (raw === undefined) return
-    out.push({ tx: i.txHash, time: Number(i.timestamp), kind, token: t.address, symbol: t.symbol, amount: Number(raw) / 10 ** t.decimals })
-  }
-  for (const i of items) {
-    if (i.type === 'SupplyCollateral') add(i, 'supply', collateral, i.data.assets)
-    else if (i.type === 'WithdrawCollateral') add(i, 'withdraw', collateral, i.data.assets)
-    else if (i.type === 'Borrow') add(i, 'borrow', loan, i.data.assets)
-    else if (i.type === 'Repay') add(i, 'repay', loan, i.data.assets)
-    else if (i.type === 'Liquidation') {
-      add(i, 'seized', collateral, i.data.seizedAssets)
-      add(i, 'liquidationRepay', loan, i.data.repaidAssets)
+  const seen = new Set<string>()
+  for (const log of [...logs].sort((a, b) => (a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber < b.blockNumber ? -1 : 1))) {
+    const key = `${log.transactionHash}:${log.logIndex}`
+    if (seen.has(key) || log.topics.length === 0) continue
+    seen.add(key)
+    let ev
+    try {
+      ev = decodeEventLog({ abi: MORPHO_EVENTS, data: log.data, topics: log.topics })
+    } catch {
+      continue
+    }
+    const time = timeOf(log.blockNumber)
+    const add = (kind: FlowKind, t: MorphoToken, raw: bigint) =>
+      out.push({ tx: log.transactionHash, time, kind, token: t.address, symbol: t.symbol, amount: Number(raw) / 10 ** t.decimals })
+    const args = ev.args as { onBehalf?: Address; borrower?: Address; assets?: bigint; repaidAssets?: bigint; seizedAssets?: bigint }
+    if ((args.onBehalf ?? args.borrower)?.toLowerCase() !== me) continue
+    if (ev.eventName === 'SupplyCollateral') add('supply', collateral, args.assets!)
+    else if (ev.eventName === 'WithdrawCollateral') add('withdraw', collateral, args.assets!)
+    else if (ev.eventName === 'Borrow') add('borrow', loan, args.assets!)
+    else if (ev.eventName === 'Repay') add('repay', loan, args.assets!)
+    else {
+      add('seized', collateral, args.seizedAssets!)
+      add('liquidationRepay', loan, args.repaidAssets!)
     }
   }
   return out
 }
+
+/** log requests a history may make (each refused stretch is split in two) */
+const MAX_LOG_CALLS = 80
 
 export async function morphoHistory(
   chainId: number,
@@ -220,22 +281,70 @@ export async function morphoHistory(
   loan: MorphoToken,
   signal?: AbortSignal,
 ): Promise<{ flows: Flow[]; complete: boolean }> {
-  const items: MorphoItem[] = []
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const r = await fetch(MORPHO_API, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query: MORPHO_QUERY, variables: { u: [user], m: [marketKey], c: [chainId], skip: page * 100 } }),
-      signal,
-    })
-    if (!r.ok) throw new Error(`API Morpho : ${r.status}`)
-    const j = (await r.json()) as { data?: { marketTransactions: { items: MorphoItem[]; pageInfo: { countTotal: number } } }; errors?: { message: string }[] }
-    if (!j.data) throw new Error(`API Morpho : ${j.errors?.[0]?.message ?? 'réponse vide'}`)
-    items.push(...j.data.marketTransactions.items)
-    if (items.length >= j.data.marketTransactions.pageInfo.countTotal || j.data.marketTransactions.items.length === 0)
-      return { flows: morphoFlows(items, collateral, loan), complete: true }
+  const net = MORPHO_NETWORKS.find((n) => n.chain.id === chainId)
+  const client = getPublicClient(wagmiConfig, { chainId })
+  if (!net || !client) throw new Error('réseau non pris en charge')
+  const points = await morphoGet<{ data: RestPositionPoint[] }>(
+    `/v0/blue/markets/${selector(chainId, marketKey)}/users/${user}/position/history`,
+    { lookback: 'inception' },
+    signal,
+  ).then((b) => b.data)
+  const windows = changedWindows(points, Math.floor(Date.now() / 1000))
+
+  const head = await client.getBlock()
+  const earlier = await client.getBlock({ blockNumber: head.number > 10_000n ? head.number - 10_000n : 0n })
+  const perBlock = Math.max(0.01, Number(head.timestamp - earlier.timestamp) / Number(head.number - earlier.number || 1n))
+  const times = new Map<bigint, number>([
+    [head.number, Number(head.timestamp)],
+    [earlier.number, Number(earlier.timestamp)],
+  ])
+  const timeOfBlock = async (n: bigint) => {
+    if (!times.has(n)) times.set(n, Number((await client.getBlock({ blockNumber: n })).timestamp))
+    return times.get(n)!
   }
-  return { flows: morphoFlows(items, collateral, loan), complete: false }
+  /** a block at or a little before `ts`: a few guesses from the mean block time */
+  const blockAt = async (ts: number) => {
+    let n = head.number - BigInt(Math.max(0, Math.round((Number(head.timestamp) - ts) / perBlock)))
+    for (let i = 0; i < 4; i++) {
+      n = n < 0n ? 0n : n > head.number ? head.number : n
+      const gap = (await timeOfBlock(n)) - ts
+      if (gap <= 0 && gap > -PAD) break
+      n -= BigInt(Math.round(gap / perBlock)) + (gap > 0 ? 1n : 0n)
+    }
+    return n < 0n ? 0n : n > head.number ? head.number : n
+  }
+
+  let calls = 0
+  let complete = true
+  const logs: MorphoLog[] = []
+  const read = async (from: bigint, to: bigint, depth = 0): Promise<void> => {
+    if (calls++ >= MAX_LOG_CALLS) return void (complete = false)
+    try {
+      logs.push(
+        ...((await client.getLogs({
+          address: net.morpho,
+          events: MORPHO_EVENTS,
+          args: { id: marketKey },
+          fromBlock: from,
+          toBlock: to,
+        } as never)) as MorphoLog[]),
+      )
+    } catch {
+      if (depth >= 8 || from >= to) return void (complete = false)
+      const mid = (from + to) / 2n
+      await read(from, mid, depth + 1)
+      await read(mid + 1n, to, depth + 1)
+    }
+  }
+  await inPool(windows, async ([from, to]) => {
+    signal?.throwIfAborted()
+    const [a, b] = await Promise.all([blockAt(from), blockAt(to + PAD)])
+    await read(a, b)
+  })
+  // the RPC may give each log its block's time; the others are read
+  for (const l of logs) if (l.blockTimestamp !== undefined && l.blockTimestamp !== null) times.set(l.blockNumber, Number(l.blockTimestamp))
+  await inPool([...new Set(logs.map((l) => l.blockNumber))], timeOfBlock)
+  return { flows: morphoLogFlows(logs, user, collateral, loan, (b) => times.get(b) ?? 0), complete }
 }
 
 /* --------------------------------------------------------------- prices --------------------------------------------------------------- */
