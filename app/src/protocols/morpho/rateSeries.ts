@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
-import { DEMO } from '../../config'
 import { DAY_MS, type RatePoint } from '../../domain/apyHistory'
 import { marketStateHistory, type Lookback, type RestStatePoint } from './api'
+import { morphoStateHistoryQuery } from './marketInfo'
 
 const YEAR = 365 * 86_400
 
@@ -41,13 +41,11 @@ const readSeries = (chainId: number, marketId: string, lookback: Lookback, days:
 export const readMorphoBorrowSeries = (chainId: number, marketId: string, signal?: AbortSignal, now = Date.now()) =>
   readSeries(chainId, marketId, 'ninety_days', 91, signal, now)
 
+/** The same, from the market's 90-day totals shared with its details (marketInfo.ts): one request for both. */
 export function useMorphoBorrowSeries(chainId: number, marketId: string, enabled = true) {
   return useQuery({
-    queryKey: ['morphoBorrowSeries', chainId, marketId],
-    queryFn: ({ signal }) => readMorphoBorrowSeries(chainId, marketId, signal),
-    enabled: enabled && !DEMO,
-    staleTime: 3 * 3_600_000,
-    retry: 1,
+    ...morphoStateHistoryQuery(chainId, marketId, enabled),
+    select: (points: RestStatePoint[]) => realizedBorrowSeries(points).filter((x) => x.t >= Date.now() - 91 * DAY_MS),
   })
 }
 

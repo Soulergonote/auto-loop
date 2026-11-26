@@ -9,7 +9,8 @@ import { verifyMorphoExecutor } from '../../../chain/deploy'
 import { revokeMorphoAuthorization } from '../../../protocols/morpho/execute'
 import { useAtomicBatch } from '../../../chain/batch'
 import { explainError } from '../../../chain/tx'
-import { fmtLltv, fmtAddress, fmtAmount, fmtDollars, fmtPct, fmtPrice, ptShortSymbol } from '../../../ui/format'
+import { fmtLltv, fmtAddress, fmtAmount, fmtDate, fmtDollars, fmtPct, fmtPrice, ptShortSymbol } from '../../../ui/format'
+import { lastCollateral, morphoStateHistoryQuery, ORACLE_KIND_TEXT, supplyLosses, useOracleKind } from '../../../protocols/morpho/marketInfo'
 import { useBalances } from '../../../chain/walletTokens'
 import { Picker } from '../../../ui/Picker'
 import { morphoMarketUrl, pendleMarketUrl } from '../../../services/links'
@@ -197,6 +198,11 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
   const ptQuery = useQuery(ptInfosQuery(chainId, market ? [market.collateral.address] : []))
   const pt = market ? ptQuery.data?.get(market.collateral.address.toLowerCase()) : undefined
   const merklQ = useQuery(morphoCampaignsQuery(chainId, !!market))
+  // what the list no longer gives, for this market only: collateral deposited and lenders' losses (90 days), oracle kind
+  const history = useQuery(morphoStateHistoryQuery(chainId, market?.id ?? '', !!market && !onchain))
+  const oracleKind = useOracleKind(chainId, market?.params.oracle).data
+  const collateralTotal = history.data ? lastCollateral(history.data) : undefined
+  const losses = history.data ? supplyLosses(history.data) : []
   const merkl = market ? morphoMerkl(merklQ.data, { id: market.id, collateral: market.collateral.address, loan: market.loan.address }) : NO_MORPHO_MERKL
   const batch = useAtomicBatch(chainId, account) === true
   const slow = useSlow(listed.isPending)
@@ -410,10 +416,15 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
               <ExtLink href={morphoMarketUrl(net.chain.id, market.id)} title="Marché sur Morpho">
                 {fmtAddress(market.id)}
               </ExtLink>{' '}
-              · liquidité {usd(market.liquidityUsd)} · utilisation {fmtPct(market.utilization, 1)} · emprunté {usd(market.borrowUsd)} · oracle{' '}
+              · liquidité {usd(market.liquidityUsd)} · utilisation {fmtPct(market.utilization, 1)} ·{' '}
+              {collateralTotal !== undefined
+                ? `collatéral déposé ${usd((Number(collateralTotal) / 10 ** market.collateral.decimals) * market.collateralUsd)}`
+                : `emprunté ${usd(market.borrowUsd)}`}{' '}
+              · oracle{' '}
               <a href={`${net.chain.blockExplorers?.default.url}/address/${market.params.oracle}`} target="_blank" rel="noreferrer">
                 <span className="addr">{fmtAddress(market.params.oracle)}</span>
-              </a>
+              </a>{' '}
+              {oracleKind ? ORACLE_KIND_TEXT[oracleKind] : ''}
             </p>
             <p className="muted small">
               Sur Morpho, chaque marché est isolé : un collatéral, une dette, un oracle et un LLTV (seuil de liquidation) fixés à sa création. La liquidation a
@@ -425,6 +436,20 @@ export function MorphoView({ net, networkSelect, account, aggregator, common, no
           <Notice>
             {market.source === 'chain' ? 'Marché lu sur le réseau' : 'Marché non listé par Morpho'} : oracle et paramètres non revus par Morpho. Vérifier
             l’oracle avant d’y déposer.
+          </Notice>
+        )}
+        {market && oracleKind === 'unknown' && (
+          <Notice>
+            Oracle d’un type que l’app ne reconnaît pas (ni factory Morpho, ni format Chainlink de Morpho) : vérifier sa source de prix avant d’y déposer.
+          </Notice>
+        )}
+        {market && losses.length > 0 && (
+          <Notice tone="bad">
+            Perte pour les prêteurs sur 90 jours (créance irrécouvrable) :{' '}
+            {losses
+              .map((l) => `${fmtDate(l.at)}, ${fmtAmount(l.assets, market.loan.decimals)} ${market.loan.symbol} (−${fmtPct(l.share, 2)} sur la part)`)
+              .join(' ; ')}
+            .
           </Notice>
         )}
       </Card>
