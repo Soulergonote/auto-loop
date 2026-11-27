@@ -452,7 +452,7 @@ const LIVE: Record<AggregatorId, (req: QuoteRequest, signal?: AbortSignal) => Pr
         orders: [
           { token_in: req.sell.address, token_out: req.buy.address, amount: req.sellAmount.toString(), side: 'sell', sender: req.taker, receiver: req.taker },
         ],
-        options: { timeout_ms: 4000, encoding_options: { slippage: Number(req.slippageBps) / 10_000 } },
+        options: { timeout_ms: 4000, encoding_options: { slippage: (Number(req.slippageBps) / 10_000).toString() } },
       }),
     })
     const order = body?.orders?.[0]
