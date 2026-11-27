@@ -6,8 +6,8 @@ export type Groupable = { group: string; apy: number }
 
 export type Group<T extends Groupable> = { head: T; variants: T[] }
 
-/** Groups in the order of their first line; the head is the line with the best APY, the others follow by APY. */
-export function groupLines<T extends Groupable>(lines: T[]): Group<T>[] {
+/** Groups in the order of their first line; the head is the line with the best APY (or `apyOf`), the others follow by it. */
+export function groupLines<T extends Groupable>(lines: T[], apyOf: (l: T) => number = (l) => l.apy): Group<T>[] {
   const byKey = new Map<string, T[]>()
   for (const l of lines) {
     const g = byKey.get(l.group)
@@ -15,7 +15,7 @@ export function groupLines<T extends Groupable>(lines: T[]): Group<T>[] {
     else byKey.set(l.group, [l])
   }
   return [...byKey.values()].map((g) => {
-    const sorted = [...g].sort((a, b) => b.apy - a.apy)
+    const sorted = [...g].sort((a, b) => apyOf(b) - apyOf(a))
     return { head: sorted[0], variants: sorted.slice(1) }
   })
 }

@@ -16,6 +16,7 @@ const reserve = (spoke: number, id: number, token: number, over: Partial<V4Reser
   underlyingApy: 0,
   borrowApy: 0.05,
   supplyRewardApy: 0,
+  ending: { supply: { apy: 0 }, borrow: { apy: 0 } },
   borrowRewardApy: 0,
   collateralFactor: 0.8,
   collateralRisk: 0,

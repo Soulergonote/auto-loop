@@ -93,6 +93,8 @@ describe('scanMarket', () => {
     expect(row.rewardsApy).toBeCloseTo(0.05 * row.leverage)
     expect(row.apy).toBeCloseTo(row.ratesApy + row.rewardsApy)
     expect(row.rewardsEnd).toBe(2_000_000_000)
+    // A5: once that dated campaign is over, only the rates and the token's own yield are left
+    expect(row.apyAfterRewards).toBeCloseTo(row.ratesApy + row.nativeApy)
     // at HF 3 the Ethena rule (HF at most 2) is broken: no reward counted
     const [loose] = scanMarket(snapshot([usde, usdc], [emode(1, [0], [1])]), [campaign], { targetHf: 3 })
     expect(loose.rewardsApy).toBe(0)

@@ -23,6 +23,8 @@ export type V4ScanRow = {
   rewardsApy: number
   rewardsEnd?: number
   apy: number
+  /** A5: the APY once the rewards with a known end are over */
+  apyAfterRewards: number
   /** equity that can still be looped before the debt runs out or the collateral reaches its cap, USD */
   capacityUsd: number
   stable: boolean
@@ -53,7 +55,8 @@ export function scanV4(reserves: V4Reserve[], opts: { targetHf: number }): V4Sca
         const collateralYield = C.supplyApy + C.underlyingApy
         const borrowCost = D.borrowApy * (1 + C.collateralRisk)
         const rewardsApy = C.supplyRewardApy * leverage + D.borrowRewardApy * (leverage - 1)
-        const ends = [C.supplyRewardApy > 0 ? C.rewardsEnd : undefined, D.borrowRewardApy > 0 ? D.rewardsEnd : undefined].filter((x) => x !== undefined)
+        const sides = [C.ending.supply, D.ending.borrow].filter((e) => e.apy > 0 && e.endsAt !== undefined)
+        const apy = collateralYield * leverage - borrowCost * (leverage - 1) + rewardsApy
         rows.push({
           collateral: C,
           debt: D,
@@ -62,8 +65,9 @@ export function scanV4(reserves: V4Reserve[], opts: { targetHf: number }): V4Sca
           borrowCost,
           nativeApy: C.underlyingApy * leverage,
           rewardsApy,
-          rewardsEnd: ends.length ? Math.min(...ends) : undefined,
-          apy: collateralYield * leverage - borrowCost * (leverage - 1) + rewardsApy,
+          rewardsEnd: sides.length ? Math.min(...sides.map((e) => e.endsAt!)) : undefined,
+          apy,
+          apyAfterRewards: apy - C.ending.supply.apy * leverage - D.ending.borrow.apy * (leverage - 1),
           capacityUsd: Math.max(0, Math.min(D.borrowableUsd / (leverage - 1), C.suppliableUsd / leverage)),
           stable: isUsdStable(C) && isUsdStable(D),
           correlated: isCorrelated(C, D),

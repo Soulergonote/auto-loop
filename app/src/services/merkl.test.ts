@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import morphoFixture from '../test/fixtures/merkl-morpho-2026-11-26.json'
 import {
+  endingRewards,
   NO_MORPHO_MERKL,
   morphoMerkl,
   morphoMerklApy,
@@ -192,5 +193,16 @@ describe('Merkl on Morpho (M7)', () => {
     const c = toMorphoCampaign({ ...base, campaigns: [{ params: { targetToken: usdeRlusd.collateral, hooks: [{}] } }] })!
     expect(c).toMatchObject({ side: 'collateral', market: undefined, conditional: true, apr: 0.02 })
     expect(morphoMerkl([c], { ...usdeRlusd, id: '0x02' }).collateralApr).toBeCloseTo(0.02, 10)
+  })
+})
+
+describe('endingRewards (A5)', () => {
+  const now = 1_000_000_000_000
+  const y = (apy: number, endsAt?: number) => ({ campaign: { endsAt }, apy })
+  it('sums the rewards with a known end still to come, gives the first end', () => {
+    expect(endingRewards([y(0.1, 1_000_100_000), y(0.05, 1_000_050_000), y(0.02)], now)).toEqual({ apy: 0.15000000000000002, endsAt: 1_000_050_000 })
+  })
+  it('ignores campaigns already over and gives nothing without a dated one', () => {
+    expect(endingRewards([y(0.1, 999_999_000), y(0.02)], now)).toEqual({ apy: 0, endsAt: undefined })
   })
 })

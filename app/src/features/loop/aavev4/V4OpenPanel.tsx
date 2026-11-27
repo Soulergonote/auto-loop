@@ -16,7 +16,7 @@ import { useDebounced } from '../../../ui/useDebounced'
 import { getQuote, quoteLabel } from '../../../services/quotes/quotes'
 import { roundSignificant, toBase } from '../../../domain/math'
 import { GAS_UNITS_PT, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../../../domain/economics'
-import { fmtAmount, fmtDays, fmtHf, fmtLltv, fmtPct, fmtPrice, fmtUsd, fmtX } from '../../../ui/format'
+import { fmtAmount, fmtBonusEnd, fmtDays, fmtHf, fmtLltv, fmtPct, fmtPrice, fmtUsd, fmtX } from '../../../ui/format'
 import { isCorrelated } from '../../../domain/pairs'
 import { exitIssues, exitSellAmount } from '../../../domain/exitCheck'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
@@ -153,6 +153,11 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
   const finite = loopLev !== undefined && Number.isFinite(loopLev)
   const rewards = finite ? ctx.supplyRewardApy * loopLev + ctx.borrowRewardApy * (loopLev - 1) : 0
   const apy = finite ? ctx.collateralApy * loopLev - ctx.borrowApy * (loopLev - 1) + rewards : undefined
+  // A5: what is left once the rewards with a known end are over
+  const ending = [ctx.pair.collateral.ending.supply, ctx.pair.debt.ending.borrow]
+  const endsAt = Math.min(...ending.filter((e) => e.apy > 0 && e.endsAt !== undefined).map((e) => e.endsAt!))
+  const bonusEnd =
+    finite && apy !== undefined && Number.isFinite(endsAt) ? `, ${fmtBonusEnd(endsAt, apy - ending[0].apy * loopLev - ending[1].apy * (loopLev - 1))}` : ''
   const correlated = isCorrelated({ price: sides.collateral.price, token: C }, { price: sides.loan.price, token: L })
   const signals = useRiskSignals({
     chainId: net.chain.id,
@@ -338,7 +343,7 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
         {
           label: 'APY net',
           value: unreal || (q && apy === undefined) ? NA : apy !== undefined ? fmtPct(apy) : undefined,
-          sub: rewards > 0 ? `récompenses ${fmtPct(rewards)} comprises` : 'taux variables, hors coûts',
+          sub: rewards > 0 ? `récompenses ${fmtPct(rewards)} comprises${bonusEnd}` : 'taux variables, hors coûts',
           tone: apyTone(apy),
           key: true,
         },

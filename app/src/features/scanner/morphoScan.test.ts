@@ -85,5 +85,7 @@ describe('scanMorpho', () => {
     const both = scanMorpho(parsed, { targetHf: 1.1, nowSec: NOW, merkl: campaigns }).find((r) => r.market.id === m.id)!
     expect(both.merklApy).toBeCloseTo(0.02 * base.leverage + 0.01 * (base.leverage - 1), 10)
     expect(both.flags).toContain('conditional')
+    // A5: the borrow campaign has no known end, it keeps counting
+    expect(both.apyAfterRewards).toBeCloseTo(both.apy - 0.02 * base.leverage, 10)
   })
 })

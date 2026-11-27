@@ -15,6 +15,7 @@ const reserve = (over: Partial<V4Reserve>): V4Reserve => ({
   borrowApy: 0,
   supplyRewardApy: 0,
   borrowRewardApy: 0,
+  ending: { supply: { apy: 0 }, borrow: { apy: 0 } },
   collateralFactor: 0,
   collateralRisk: 0,
   canCollateral: false,
@@ -35,7 +36,14 @@ describe('v4LeverageAtHf', () => {
 })
 
 describe('scanV4', () => {
-  const usde = reserve({ canCollateral: true, collateralFactor: 0.93, supplyRewardApy: 0.059, collateralRisk: 0.1, suppliableUsd: 10_000_000, rewardsEnd: 500 })
+  const usde = reserve({
+    canCollateral: true,
+    collateralFactor: 0.93,
+    supplyRewardApy: 0.059,
+    collateralRisk: 0.1,
+    suppliableUsd: 10_000_000,
+    ending: { supply: { apy: 0.059, endsAt: 500 }, borrow: { apy: 0 } },
+  })
   const usdt = reserve({
     token: { address: '0x00000000000000000000000000000000000000d1', symbol: 'USDt', name: 'USDt', decimals: 18 },
     canBorrow: true,
@@ -62,6 +70,7 @@ describe('scanV4', () => {
     expect(r.apy).toBeCloseTo(0.059 * L - 0.0528 * (L - 1))
     expect(r.capacityUsd).toBeCloseTo(340_000 / (L - 1))
     expect(r.rewardsEnd).toBe(500)
+    expect(r.apyAfterRewards).toBeCloseTo(-0.0528 * (L - 1))
     expect(r.stable && r.correlated).toBe(true)
   })
   it('flags a PT, whose yield the API does not give', () => {
@@ -113,7 +122,10 @@ describe('parseV4Reserves', () => {
       price: 100_010_000n,
     })
     expect(r.canCollateral).toBe(false)
-    expect(r.rewardsEnd).toBe(Date.parse('2026-11-20T00:00:00Z') / 1000)
+    expect(r.ending).toEqual({
+      supply: { apy: 0.017, endsAt: Date.parse('2026-12-01T00:00:00Z') / 1000 },
+      borrow: { apy: 0.018, endsAt: Date.parse('2026-11-20T00:00:00Z') / 1000 },
+    })
   })
   it('leaves out frozen and paused reserves', () => {
     expect(

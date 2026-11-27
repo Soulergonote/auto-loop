@@ -16,7 +16,7 @@ import { SCAN_CAPACITIES, SCAN_CAPACITY_USD, SCAN_HFS, loadScanner, saveScanner,
 import { morphoMarketsQuery, type MorphoMarket } from '../../protocols/morpho/markets'
 import { scanMorpho, type MorphoScanFlag } from './morphoScan'
 import { ptInfosQuery } from '../../protocols/pendle/pt'
-import { fmtAddress, fmtDays, fmtLltv, fmtDate, fmtDollars, fmtMaturity, fmtPct, fmtX, ptShortSymbol } from '../../ui/format'
+import { fmtAddress, fmtBonusEnd, fmtDays, fmtLltv, fmtDate, fmtDollars, fmtMaturity, fmtPct, fmtX, ptShortSymbol } from '../../ui/format'
 import { Card, Fold, Notice, Segmented, Skel, Tag, useSlow } from '../../ui/primitives'
 import type { MorphoTab } from '../loop/morpho/MorphoView'
 import { priceChartsQuery } from '../../services/priceHistory'
@@ -112,6 +112,8 @@ type Line = {
   tags: ReactNode[]
   leverage: number
   apy: number
+  /** A5: the APY once the Merkl bonuses with a known end (rewardsEnd) are over */
+  apyAfterRewards: number
   nativeApy: number
   rewardsApy: number
   capacityUsd: number
@@ -176,6 +178,15 @@ function ApyBreakdown({ line: l, bonusUrls = [] }: { line: Line; bonusUrls?: str
             {fmtPct(total)}
           </span>
         </div>
+        {l.rewardsEnd !== undefined && (
+          <div role="row">
+            <span role="rowheader">Sans bonus après le {fmtDate(l.rewardsEnd)}</span>
+            <span role="cell" />
+            <span role="cell" className={`num ${l.apyAfterRewards < 0 ? 'bad' : ''}`}>
+              {fmtPct(l.apyAfterRewards)}
+            </span>
+          </div>
+        )}
       </div>
       <p className="muted small">Taux variables du jour, hors coûts d’entrée et de sortie.</p>
     </div>
@@ -201,17 +212,18 @@ export function Scanner({
   const [hfText, setHf] = useState<(typeof HFS)[number]>(initial.hf)
   const [filter, setFilter] = useState<Filter>(initial.filter)
   const [showNegative, setShowNegative] = useState(initial.negative)
+  const [noBonus, setNoBonus] = useState(initial.noBonus)
   const [all, setAll] = useState(false)
   const [protocol, setProtocol] = useState<Protocol>(initial.protocol)
   // U1: pairs where less than this (USD) can still be looped are hidden (borrow cap or cash used up)
   const [capacity, setCapacity] = useState<Capacity>(initial.capacity)
   useEffect(() => {
-    const prefs = { protocol, scope, hf: hfText, filter, negative: showNegative, capacity }
+    const prefs = { protocol, scope, hf: hfText, filter, negative: showNegative, noBonus, capacity }
     saveScanner(prefs)
     const query = scannerQuery(prefs)
     const target = `#scanner${query ? `?${query}` : ''}`
     if (window.location.hash.startsWith('#scanner') && window.location.hash !== target) window.history.replaceState(null, '', target)
-  }, [protocol, scope, hfText, filter, showNegative, capacity])
+  }, [protocol, scope, hfText, filter, showNegative, noBonus, capacity])
   const [search, setSearch] = useState('')
   // capital to loop, USD: rates right after the loop, gain a year, pairs too small greyed
   const [amountText, setAmountText] = useState('')
@@ -303,6 +315,7 @@ export function Scanner({
           ],
           leverage: r.leverage,
           apy: r.apy,
+          apyAfterRewards: r.apyAfterRewards,
           nativeApy: r.nativeApy,
           rewardsApy: r.rewardsApy,
           capacityUsd: Number(r.capacityBase) / 1e8,
@@ -375,6 +388,7 @@ export function Scanner({
           ],
           leverage: r.leverage,
           apy: r.apy,
+          apyAfterRewards: r.apyAfterRewards,
           nativeApy: r.nativeApy,
           rewardsApy: r.merklApy,
           capacityUsd: r.capacityUsd,
@@ -426,6 +440,7 @@ export function Scanner({
         ],
         leverage: r.leverage,
         apy: r.apy,
+        apyAfterRewards: r.apyAfterRewards,
         nativeApy: r.nativeApy,
         rewardsApy: r.rewardsApy,
         capacityUsd: r.capacityUsd,
@@ -510,7 +525,9 @@ export function Scanner({
   shown.forEach((r) => tooSmall.delete(r.group))
 
   const historySort = isHistoryKey(sort.key)
-  const unsorted = groupLines(shown)
+  // A5: « Trier sans le bonus Merkl » ranks, and picks the best market of a group, on the APY after the dated bonuses
+  const apyOf = (l: Line) => (noBonus ? l.apyAfterRewards : l.apy)
+  const unsorted = groupLines(shown, apyOf)
   /** the groups in the chosen order; a history sort uses `history` (line key → its value), lines without one last */
   const order = (history?: Map<string, number>) =>
     [...unsorted].sort((x, y) => {
@@ -521,10 +538,10 @@ export function Scanner({
       if (isHistoryKey(sort.key)) {
         const ha = history?.get(a.key)
         const hb = history?.get(b.key)
-        if (ha === undefined || hb === undefined) return ha !== undefined ? -1 : hb !== undefined ? 1 : b.apy - a.apy
+        if (ha === undefined || hb === undefined) return ha !== undefined ? -1 : hb !== undefined ? 1 : apyOf(b) - apyOf(a)
         return sort.desc ? hb - ha : ha - hb
       }
-      const d = sort.key === 'pair' ? a.pair.localeCompare(b.pair) : a[sort.key] - b[sort.key]
+      const d = sort.key === 'pair' ? a.pair.localeCompare(b.pair) : sort.key === 'apy' ? apyOf(a) - apyOf(b) : a[sort.key] - b[sort.key]
       return sort.desc ? -d : d
     })
   const byToday = historySort ? unsorted : order()
@@ -664,6 +681,9 @@ export function Scanner({
         <label className="check">
           <input type="checkbox" checked={showNegative} onChange={(e) => setShowNegative(e.target.checked)} /> Afficher les APY négatifs
         </label>
+        <label className="check" title="Classe sur l’APY une fois finies les campagnes Merkl dont la date de fin est connue">
+          <input type="checkbox" checked={noBonus} onChange={(e) => setNoBonus(e.target.checked)} /> Trier sans le bonus Merkl
+        </label>
       </Card>
       <Card title={`Meilleures boucles · HF visé ${hf}`} aside={status && <span className="scan-status">{status}</span>}>
         {failed.length > 0 && loading === 0 && (
@@ -776,7 +796,9 @@ export function Scanner({
                       </td>
                       <td data-label="Bonus Merkl" className="num detail">
                         {r.rewardsApy > 0 ? fmtPct(r.rewardsApy) : <span className="na">—</span>}
-                        {r.rewardsEnd !== undefined && <div className="muted small">jusqu’au {fmtDate(r.rewardsEnd)}</div>}
+                        {r.rewardsEnd !== undefined && (
+                          <div className={`small ${r.apyAfterRewards < 0 ? 'bad' : 'muted'}`}>{fmtBonusEnd(r.rewardsEnd, r.apyAfterRewards)}</div>
+                        )}
                       </td>
                       {(() => {
                         const st = stats.get(r.key)

@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { useGasPrice } from 'wagmi'
 import { parseUnits, type Address } from 'viem'
 import { protocolName, wrappedNative, QUOTE_MODE, type AggregatorChoice, type Token } from '../../../config'
-import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, rewardsOverHorizon } from '../../../services/merkl'
+import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, endingRewards, rewardsOverHorizon } from '../../../services/merkl'
 import { CampaignTable } from '../shared/CampaignTable'
 import { RiskPanel } from '../shared/RiskPanel'
 import { PositionBar } from '../../../ui/PositionBar'
@@ -38,7 +38,7 @@ import { executeOpenBatch } from '../../../protocols/aave/batch'
 import { useAtomicBatch } from '../../../chain/batch'
 import { capitalKind, useWalletTokens, walletValue, type WalletToken } from '../../../chain/walletTokens'
 import { outcomeLines, readOutcome } from '../../../chain/outcome'
-import { fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
+import { fmtAmount, fmtBonusEnd, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
 import { isCorrelated } from '../../../domain/pairs'
 import { useQuery } from '@tanstack/react-query'
 import { exitIssues, exitSellAmount, utilization } from '../../../domain/exitCheck'
@@ -358,7 +358,12 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
       return loopLev !== undefined && supply !== undefined && borrow !== undefined ? [[w, netApy(loopLev, supply, borrow) + nativeApy + rewardsApy]] : []
     }),
   )
-  const apyParts = [nativeApy !== 0 && `${fmtPct(nativeApy)} ${pt ? 'fixe' : 'token'}`, rewardsApy !== 0 && `${fmtPct(rewardsApy)} Merkl`].filter(Boolean)
+  // A5: what is left once the campaigns with a known end are over
+  const ending = endingRewards(yields)
+  const bonusEnd = ending.endsAt !== undefined && apy !== undefined ? ` ${fmtBonusEnd(ending.endsAt, apy - ending.apy)}` : ''
+  const apyParts = [nativeApy !== 0 && `${fmtPct(nativeApy)} ${pt ? 'fixe' : 'token'}`, rewardsApy !== 0 && `${fmtPct(rewardsApy)} Merkl${bonusEnd}`].filter(
+    Boolean,
+  )
 
   // one-off costs, and the yield once they are paid, over the planned holding time
   const capitalBase = (debouncedInitial !== undefined ? toBase(debouncedInitial, capSide) : 0n) + position.collateralBase - position.debtBase

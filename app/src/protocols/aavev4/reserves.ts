@@ -26,7 +26,8 @@ export type V4Reserve = {
   /** Merkl: extra APY on the supply, discount on the borrow rate */
   supplyRewardApy: number
   borrowRewardApy: number
-  rewardsEnd?: number
+  /** A5: the reward APYs above that stop at a known date, and the first such date, per side */
+  ending: { supply: EndingReward; borrow: EndingReward }
   /** share of the collateral's value that backs debt (the liquidation line), 0 when it is not a collateral */
   collateralFactor: number
   /** risk premium this collateral adds to the borrow rate, as a fraction of the base rate */
@@ -73,13 +74,22 @@ const num = (n: Num | undefined) => {
   return Number.isFinite(x) ? x : 0
 }
 
+export type EndingReward = { apy: number; endsAt?: number }
+
+const endOf = (x: { endDate?: string }) => (x.endDate && Number.isFinite(Date.parse(x.endDate)) ? Date.parse(x.endDate) / 1000 : undefined)
+
+/** The rewards of one kind that have an end date: their APY summed, the first date. */
+function endingOf(rewards: Raw['summary']['rewards'], kind: string, apy: (x: Raw['summary']['rewards'][number]) => number): EndingReward {
+  const dated = (rewards ?? []).filter((x) => x.__typename === kind && endOf(x) !== undefined)
+  return { apy: dated.reduce((s, x) => s + apy(x), 0), endsAt: dated.length ? Math.min(...dated.map((x) => endOf(x)!)) : undefined }
+}
+
 /** The API's reserves as the scan reads them; frozen, paused and inactive reserves are left out. Pure, tested. */
 export function parseV4Reserves(raw: Raw[]): V4Reserve[] {
   return raw
     .filter((r) => r.status.active && !r.status.frozen && !r.status.paused)
     .map((r) => {
       const rewards = r.summary.rewards ?? []
-      const ends = rewards.flatMap((x) => (x.endDate && Number.isFinite(Date.parse(x.endDate)) ? [Date.parse(x.endDate) / 1000] : []))
       return {
         chainId: r.chain.chainId,
         network: r.chain.name,
@@ -98,7 +108,10 @@ export function parseV4Reserves(raw: Raw[]): V4Reserve[] {
         borrowApy: num(r.summary.borrowApy),
         supplyRewardApy: rewards.reduce((s, x) => s + (x.__typename === 'MerklSupplyReward' ? num(x.extraApy) : 0), 0),
         borrowRewardApy: rewards.reduce((s, x) => s + (x.__typename === 'MerklBorrowReward' ? num(x.discountApy) : 0), 0),
-        rewardsEnd: ends.length ? Math.min(...ends) : undefined,
+        ending: {
+          supply: endingOf(rewards, 'MerklSupplyReward', (x) => num(x.extraApy)),
+          borrow: endingOf(rewards, 'MerklBorrowReward', (x) => num(x.discountApy)),
+        },
         collateralFactor: num(r.settings.collateralFactor),
         collateralRisk: num(r.settings.collateralRisk),
         canCollateral: r.canUseAsCollateral && r.canSupply && num(r.settings.collateralFactor) > 0,
@@ -124,7 +137,11 @@ export async function fetchV4Reserves(chainIds: number[], signal?: AbortSignal):
 }
 
 export const v4ReservesQuery = (chainIds: number[]) => ({
-  queryKey: ['aave-v4-reserves', ...chainIds],
+  queryKey: [
+    // the version changes with the shape of V4Reserve, so that an hourly snapshot (D1) of the previous shape is not used
+    'aave-v4-reserves-2',
+    ...chainIds,
+  ],
   queryFn: ({ signal }: { signal?: AbortSignal }) => fetchV4Reserves(chainIds, signal),
   enabled: !DEMO && chainIds.length > 0,
   staleTime: 120_000,

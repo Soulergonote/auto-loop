@@ -68,14 +68,24 @@ export type ScannerPrefs = {
   hf: (typeof SCAN_HFS)[number]
   filter: (typeof SCAN_FILTERS)[number]
   negative: boolean
+  /** A5: rank on the APY once the dated Merkl bonuses are over */
+  noBonus: boolean
   /** pairs with less capacity left are hidden */
   capacity: (typeof SCAN_CAPACITIES)[number]
 }
 
-export const DEFAULT_SCANNER: ScannerPrefs = { protocol: 'all', scope: 'all', hf: '1.1', filter: 'correlated', negative: false, capacity: '10k' }
+export const DEFAULT_SCANNER: ScannerPrefs = {
+  protocol: 'all',
+  scope: 'all',
+  hf: '1.1',
+  filter: 'correlated',
+  negative: false,
+  noBonus: false,
+  capacity: '10k',
+}
 
 const SCANNER_KEY = 'auto-loop.scanner'
-/** French names in the address: #scanner?protocole=aave&reseau=8453&hf=1.2&paires=stables&negatifs=1&capacite=100k */
+/** French names in the address: #scanner?protocole=aave&reseau=8453&hf=1.2&paires=stables&negatifs=1&sansbonus=1&capacite=100k */
 const FILTER_NAMES: Record<ScannerPrefs['filter'], string> = { correlated: 'correlees', stable: 'stables', all: 'toutes' }
 
 const pick = <T extends string>(list: readonly T[], v: unknown): T | undefined => ((list as readonly unknown[]).includes(v) ? (v as T) : undefined)
@@ -90,6 +100,7 @@ export function cleanScanner(raw: Partial<Record<keyof ScannerPrefs, unknown>> |
     hf: pick(SCAN_HFS, r.hf) ?? DEFAULT_SCANNER.hf,
     filter: pick(SCAN_FILTERS, r.filter) ?? DEFAULT_SCANNER.filter,
     negative: r.negative === true,
+    noBonus: r.noBonus === true,
     capacity: pick(SCAN_CAPACITIES, r.capacity) ?? DEFAULT_SCANNER.capacity,
   }
 }
@@ -107,6 +118,7 @@ export function scannerFromQuery(query: string): ScannerPrefs | undefined {
     hf: q.get('hf') ?? undefined,
     filter: (Object.keys(FILTER_NAMES) as ScannerPrefs['filter'][]).find((k) => FILTER_NAMES[k] === filterName),
     negative: q.get('negatifs') === '1',
+    noBonus: q.get('sansbonus') === '1',
     capacity: q.get('capacite') ?? undefined,
   })
 }
@@ -119,6 +131,7 @@ export function scannerQuery(p: ScannerPrefs): string {
   if (p.hf !== DEFAULT_SCANNER.hf) q.set('hf', p.hf)
   if (p.filter !== DEFAULT_SCANNER.filter) q.set('paires', FILTER_NAMES[p.filter])
   if (p.negative) q.set('negatifs', '1')
+  if (p.noBonus) q.set('sansbonus', '1')
   if (p.capacity !== DEFAULT_SCANNER.capacity) q.set('capacite', p.capacity)
   return q.toString()
 }

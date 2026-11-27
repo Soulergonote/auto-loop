@@ -279,27 +279,31 @@ export type MorphoMerkl = {
   borrowApr: number
   conditional: boolean
   endsAt?: number
+  /** A5: the APRs above that stop at a known date (the rest has no known end) */
+  endingApr: { collateral: number; borrow: number }
   /** every counted campaign's page, and the biggest one of each side */
   urls: string[]
   pages: { collateral?: string; borrow?: string }
 }
 
-export const NO_MORPHO_MERKL: MorphoMerkl = { collateralApr: 0, borrowApr: 0, conditional: false, urls: [], pages: {} }
+export const NO_MORPHO_MERKL: MorphoMerkl = { collateralApr: 0, borrowApr: 0, conditional: false, endingApr: { collateral: 0, borrow: 0 }, urls: [], pages: {} }
 
 /** The campaigns that pay on a Morpho market's collateral and borrow. The end is the soonest one among those counted. */
-export function morphoMerkl(all: MorphoCampaign[] | undefined, market: { id: string; collateral: string; loan: string }): MorphoMerkl {
+export function morphoMerkl(all: MorphoCampaign[] | undefined, market: { id: string; collateral: string; loan: string }, nowMs = Date.now()): MorphoMerkl {
   const id = market.id.toLowerCase()
   const fits = (c: MorphoCampaign) =>
     c.token === (c.side === 'collateral' ? market.collateral : market.loan).toLowerCase() && (c.market === undefined || c.market === id)
   const counted = (all ?? []).filter(fits)
   if (!counted.length) return NO_MORPHO_MERKL
-  const ends = counted.flatMap((c) => (c.endsAt !== undefined ? [c.endsAt] : []))
   const page = (side: MorphoCampaign['side']) => counted.filter((c) => c.side === side && c.merklUrl).sort((a, b) => b.apr - a.apr)[0]?.merklUrl
+  const sum = (side: MorphoCampaign['side'], list = counted) => list.filter((c) => c.side === side).reduce((s, c) => s + c.apr, 0)
+  const ending = counted.filter((c) => c.endsAt !== undefined && c.endsAt * 1000 > nowMs)
   return {
-    collateralApr: counted.filter((c) => c.side === 'collateral').reduce((s, c) => s + c.apr, 0),
-    borrowApr: counted.filter((c) => c.side === 'borrow').reduce((s, c) => s + c.apr, 0),
+    collateralApr: sum('collateral'),
+    borrowApr: sum('borrow'),
     conditional: counted.some((c) => c.conditional),
-    endsAt: ends.length ? Math.min(...ends) : undefined,
+    endsAt: ending.length ? Math.min(...ending.map((c) => c.endsAt!)) : undefined,
+    endingApr: { collateral: sum('collateral', ending), borrow: sum('borrow', ending) },
     urls: [...new Set(counted.flatMap((c) => (c.merklUrl ? [c.merklUrl] : [])))],
     pages: { collateral: page('collateral'), borrow: page('borrow') },
   }
@@ -307,6 +311,9 @@ export function morphoMerkl(all: MorphoCampaign[] | undefined, market: { id: str
 
 /** The loop's yield from these campaigns, on equity: collateral APR × L, borrow APR × (L − 1). */
 export const morphoMerklApy = (m: MorphoMerkl, leverage: number) => m.collateralApr * leverage + m.borrowApr * (leverage - 1)
+
+/** A5: the part of morphoMerklApy that stops at `m.endsAt` or later. */
+export const morphoEndingApy = (m: MorphoMerkl, leverage: number) => m.endingApr.collateral * leverage + m.endingApr.borrow * (leverage - 1)
 
 export function useCampaigns(market: Market) {
   return useQuery(merklQuery(market.chain.id))
@@ -375,6 +382,15 @@ export function daysLeft(c: Campaign, nowMs = Date.now()): number {
 /** Average reward yield over the next `days`, each campaign counted only until its known end. */
 export function rewardsOverHorizon(yields: { campaign: Campaign; apy: number }[], days: number, nowMs = Date.now()): number {
   return yields.reduce((s, y) => s + (y.apy * Math.min(days, daysLeft(y.campaign, nowMs))) / days, 0)
+}
+
+/**
+ * A5: the part of the reward yield that stops at a known date, and the first of those dates. A campaign the API gives
+ * no end for keeps paying; one already over counts for nothing. The APY « puis X % » is the APY minus `apy`.
+ */
+export function endingRewards(yields: { campaign: { endsAt?: number }; apy: number }[], nowMs = Date.now()): { apy: number; endsAt?: number } {
+  const dated = yields.filter((y) => y.campaign.endsAt !== undefined && y.campaign.endsAt * 1000 > nowMs)
+  return { apy: dated.reduce((s, y) => s + y.apy, 0), endsAt: dated.length ? Math.min(...dated.map((y) => y.campaign.endsAt!)) : undefined }
 }
 
 /** Headline reward APRs of one reserve, as Merkl shows them (not pair-specific campaigns). */

@@ -1,4 +1,4 @@
-import { morphoMerklApy } from '../../../services/merkl'
+import { morphoEndingApy, morphoMerklApy } from '../../../services/merkl'
 import { useMemo, useState } from 'react'
 import { parseUnits } from 'viem'
 import { QUOTE_MODE } from '../../../config'
@@ -19,7 +19,7 @@ import { getQuote, quoteLabel } from '../../../services/quotes/quotes'
 import { daysToMaturity, isExpired } from '../../../protocols/pendle/pt'
 import { roundSignificant, toBase } from '../../../domain/math'
 import { GAS_UNITS_PT, breakEvenDays, horizonApy, loopCosts, swapCostBase, swapLoss, swapLossProblem } from '../../../domain/economics'
-import { fmtLltv, fmtAmount, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
+import { fmtLltv, fmtAmount, fmtBonusEnd, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtUsd, fmtX, ptShortSymbol } from '../../../ui/format'
 import { isCorrelated } from '../../../domain/pairs'
 import { exitIssues, exitSellAmount } from '../../../domain/exitCheck'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
@@ -177,6 +177,11 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
   // Merkl campaigns (collateral and borrow, M7) are added on equity
   const merklApy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoMerklApy(ctx.merkl, loopLev) : 0
   const apy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoNetApy(loopLev, collateralApy, ctx.borrowApy) + merklApy : undefined
+  // A5: what is left once the campaigns with a known end are over
+  const bonusEnd =
+    ctx.merkl.endsAt !== undefined && apy !== undefined && loopLev !== undefined
+      ? `, ${fmtBonusEnd(ctx.merkl.endsAt, apy - morphoEndingApy(ctx.merkl, loopLev))}`
+      : ''
   const series = useMorphoBorrowSeries(M.chainId, M.id, M.source !== 'chain')
   const correlated = isCorrelated({ price: sides.collateral.price, token: C }, { price: sides.loan.price, token: L })
   const signals = useRiskSignals({
@@ -368,7 +373,11 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
         {
           label: 'APY net',
           value: unreal || (q && apy === undefined) ? NA : apy !== undefined ? fmtPct(apy) : undefined,
-          sub: pt ? `dont ${fmtPct(collateralApy)} fixe sur le collatéral` : merklApy > 0 ? `bonus ${fmtPct(merklApy)} compris` : 'taux variables, hors coûts',
+          sub: pt
+            ? `dont ${fmtPct(collateralApy)} fixe sur le collatéral`
+            : merklApy > 0
+              ? `bonus ${fmtPct(merklApy)} compris${bonusEnd}`
+              : 'taux variables, hors coûts',
           tone: apyTone(apy),
           key: true,
         },

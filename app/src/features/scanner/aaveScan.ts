@@ -6,7 +6,7 @@
  */
 import { maxLeverage, netApy } from '../../domain/math'
 import { aaveRatesAfter } from '../../domain/irm'
-import { campaignYields, campaignsForPair, daysLeft, eligibleForPosition, type Campaign } from '../../services/merkl'
+import { campaignYields, campaignsForPair, eligibleForPosition, endingRewards, type Campaign } from '../../services/merkl'
 import { loopNativeApy } from '../../services/yield/nativeYield'
 import { canBorrow, eligibleEModes, type EModeCategory } from '../../protocols/aave/useMarket'
 import type { Snapshot, SnapReserve } from '../../protocols/aave/snapshot'
@@ -58,6 +58,8 @@ export type ScanRow = {
   campaigns: Campaign[]
   /** earliest known end among them, unix seconds */
   rewardsEnd?: number
+  /** A5: the APY once the campaigns with a known end are over */
+  apyAfterRewards: number
   /** equity that can still be looped, oracle base units: limited by the debt asset's cash and caps */
   capacityBase: bigint
   stable: boolean
@@ -141,7 +143,7 @@ export function scanMarket(snapshot: Snapshot, campaigns: Campaign[] | undefined
         const { pair } = eligibleForPosition(campaignsForPair(campaigns, C, D), { healthFactor, debtToken: D.variableDebtToken })
         const yields = campaignYields(pair, leverage, C, D).filter((y) => y.apy > 0)
         const rewardsApy = yields.reduce((s, y) => s + y.apy, 0)
-        const ends = yields.filter((y) => y.campaign.endsAt !== undefined && daysLeft(y.campaign, nowMs) > 0).map((y) => y.campaign.endsAt!)
+        const ending = endingRewards(yields, nowMs)
         const capacityBase = loopCapacity(C0, D, leverage)
         const flags: ScanFlag[] = []
         if (yields.some((y) => y.campaign.conditional)) flags.push('conditional')
@@ -164,7 +166,8 @@ export function scanMarket(snapshot: Snapshot, campaigns: Campaign[] | undefined
           // a yield-bearing debt grows by its own yield: it adds to the cost
           borrowCost: borrowApy + (D.native?.apy ?? 0),
           campaigns: yields.map((y) => y.campaign),
-          rewardsEnd: ends.length ? Math.min(...ends) : undefined,
+          rewardsEnd: ending.endsAt,
+          apyAfterRewards: ratesApy + nativeApy + rewardsApy - ending.apy,
           capacityBase,
           stable,
           correlated,

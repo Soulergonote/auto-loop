@@ -14,6 +14,7 @@ const reserve = (over: Partial<V4Reserve>): V4Reserve => ({
   underlyingApy: 0,
   borrowApy: 0,
   supplyRewardApy: 0,
+  ending: { supply: { apy: 0 }, borrow: { apy: 0 } },
   borrowRewardApy: 0,
   collateralFactor: 0.8,
   collateralRisk: 0.1,

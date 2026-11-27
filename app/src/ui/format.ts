@@ -61,6 +61,9 @@ export function fmtDate(seconds: number, now = new Date()): string {
   return new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', ...(d.getFullYear() !== now.getFullYear() && { year: 'numeric' }) }).format(d)
 }
 
+/** A5: a bonus that stops at a known date, and the APY after it: « jusqu’au 20 nov., puis 4,10 % ». */
+export const fmtBonusEnd = (endsAt: number, apyAfter: number) => `jusqu’au ${fmtDate(endsAt)}, puis ${fmtPct(apyAfter)}`
+
 /** Holding time: days under 6 months, months above. */
 export const fmtDays = (days: number) =>
   days < 180 ? `${days}${NBSP}j` : days < 365 ? `${Math.round(days / 30)}${NBSP}mois` : days === 365 ? '1 an' : `${num(days / 365, 1)} ans`

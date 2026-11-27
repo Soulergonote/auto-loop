@@ -8,7 +8,7 @@ import { leverageAtMorphoHf, morphoNetApy, type MorphoMarket } from '../../proto
 import { isExpired, type PtInfo } from '../../protocols/pendle/pt'
 import { MAX_SCAN_LEVERAGE, MIN_SCAN_LEVERAGE } from './aaveScan'
 import { isCorrelated, isUsdStable } from '../../domain/pairs'
-import { NO_MORPHO_MERKL, morphoMerkl, morphoMerklApy, type MorphoCampaign, type MorphoMerkl } from '../../services/merkl'
+import { NO_MORPHO_MERKL, morphoEndingApy, morphoMerkl, morphoMerklApy, type MorphoCampaign, type MorphoMerkl } from '../../services/merkl'
 
 /** Same ceiling as the Morpho open panel's slider: the leverage at a health factor of 1.02, at most 15x. */
 const SLIDER_HF = 1.02
@@ -33,6 +33,8 @@ export type MorphoScanRow = {
   merkl: MorphoMerkl
   merklApy: number
   apy: number
+  /** A5: the APY once the campaigns with a known end (merkl.endsAt) are over */
+  apyAfterRewards: number
   /** equity that can still be looped before the market runs out of loan token, USD */
   capacityUsd: number
   pt?: PtInfo
@@ -71,7 +73,13 @@ export function scanMorpho(markets: MorphoMarket[], opts: MorphoScanOptions): Mo
     const after = E > 0 ? morphoBorrowApyAfter(m.borrowApy, m.borrowUsd + m.liquidityUsd, m.borrowUsd, (leverage - 1) * E) : undefined
     const grossBorrowApy = after ?? m.borrowApy
     const borrowApy = grossBorrowApy
-    const merkl = opts.merkl ? morphoMerkl(opts.merkl, { id: m.id, collateral: m.collateral.address, loan: m.loan.address }) : NO_MORPHO_MERKL
+    const merkl = opts.merkl
+      ? morphoMerkl(
+          opts.merkl,
+          { id: m.id, collateral: m.collateral.address, loan: m.loan.address },
+          opts.nowSec !== undefined ? opts.nowSec * 1000 : undefined,
+        )
+      : NO_MORPHO_MERKL
     const merklApy = morphoMerklApy(merkl, leverage)
     const apy = morphoNetApy(leverage, collateralApy, borrowApy) + merklApy
     const C = priced(m.collateral, m.collateralUsd)
@@ -96,6 +104,7 @@ export function scanMorpho(markets: MorphoMarket[], opts: MorphoScanOptions): Mo
       merkl,
       merklApy,
       apy,
+      apyAfterRewards: apy - morphoEndingApy(merkl, leverage),
       capacityUsd,
       pt,
       stable: isUsdStable(C) && isUsdStable(L),

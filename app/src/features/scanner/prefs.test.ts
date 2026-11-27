@@ -14,9 +14,9 @@ describe('scanner filters in the address', () => {
   })
 
   it('round-trips every filter', () => {
-    const p = { protocol: 'aave', scope: 9745, hf: '1.2', filter: 'stable', negative: true, capacity: '100k' } as const
+    const p = { protocol: 'aave', scope: 9745, hf: '1.2', filter: 'stable', negative: true, noBonus: true, capacity: '100k' } as const
     const q = scannerQuery(p)
-    expect(q).toBe('protocole=aave&reseau=9745&hf=1.2&paires=stables&negatifs=1&capacite=100k')
+    expect(q).toBe('protocole=aave&reseau=9745&hf=1.2&paires=stables&negatifs=1&sansbonus=1&capacite=100k')
     expect(scannerFromQuery(q)).toEqual(p)
   })
 
