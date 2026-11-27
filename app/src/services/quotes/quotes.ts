@@ -344,9 +344,6 @@ function oneinchTurn(): Promise<void> {
   return turn
 }
 
-/** Hosted Fynd API (Tycho's router). Without CORS: in the browser, TYCHO_API_URL points to the key-holding proxy. */
-const TYCHO_API = TYCHO_API_URL || 'https://fynd-api.propellerheads.xyz'
-
 type RawQuote = { to: string; data: string; value?: string; buyAmount: string }
 
 // raw JSON of a third-party API, narrowed by each caller
@@ -440,11 +437,11 @@ const LIVE: Record<AggregatorId, (req: QuoteRequest, signal?: AbortSignal) => Pr
   async tycho(req, signal) {
     const chain = TYCHO_CHAIN_SLUGS[req.chainId]
     if (!chain) throw new QuoteError('Tycho ne couvre pas cette chaîne')
-    if (!TYCHO_ENABLED) throw new QuoteError('Tycho : ni clé ni proxy dans ce build')
+    if (!TYCHO_ENABLED) throw new QuoteError('Tycho : désactivé dans ce build')
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     // the raw key, no Bearer prefix; the proxy adds it itself
     if (TYCHO_API_KEY) headers.Authorization = TYCHO_API_KEY
-    const body = await fetchJson(`${TYCHO_API}/v1/${chain}/quote`, {
+    const body = await fetchJson(`${TYCHO_API_URL}/v1/${chain}/quote`, {
       method: 'POST',
       headers,
       signal,

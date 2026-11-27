@@ -79,13 +79,17 @@ export function routerOf(id: AggregatorId, chainId: number): Address {
 export const ONEINCH_API_KEY = ((import.meta.env.VITE_ONEINCH_API_KEY as string | undefined) ?? '').trim()
 
 /**
- * Tycho (Propeller Heads) quotes through the hosted Fynd API. It sends no CORS header, so a browser can only reach it
- * through a proxy (proxy/tycho-worker.js) that holds the key: VITE_TYCHO_API_URL is that proxy. VITE_TYCHO_API_KEY is
- * only for a direct call (Node scripts, or once the API accepts browsers). Neither set = Tycho is not quoted.
+ * Tycho (Propeller Heads) quotes through the hosted Fynd API. It sends no CORS header and its key must stay secret, so
+ * the site goes through Auto-loop's proxy (proxy/tycho-worker.js on Cloudflare, which holds the key and only answers
+ * the site's origins). VITE_TYCHO_API_URL can point elsewhere; VITE_TYCHO_API_KEY is only for a direct call (Node
+ * scripts, or once the API accepts browsers); VITE_TYCHO_API_URL=off turns Tycho off.
  */
-export const TYCHO_API_URL = ((import.meta.env.VITE_TYCHO_API_URL as string | undefined) ?? '').trim().replace(/\/+$/, '')
+const TYCHO_PROXY = 'https://auto-loop-tycho.soulergonote.workers.dev'
+const tychoUrl = ((import.meta.env.VITE_TYCHO_API_URL as string | undefined) ?? '').trim().replace(/\/+$/, '')
 export const TYCHO_API_KEY = ((import.meta.env.VITE_TYCHO_API_KEY as string | undefined) ?? '').trim()
-export const TYCHO_ENABLED = !!TYCHO_API_URL || !!TYCHO_API_KEY
+export const TYCHO_ENABLED = tychoUrl !== 'off'
+/** Where quotes are asked: the proxy unless another URL or a key for the API itself was built in. */
+export const TYCHO_API_URL = tychoUrl && tychoUrl !== 'off' ? tychoUrl : TYCHO_API_KEY ? 'https://fynd-api.propellerheads.xyz' : TYCHO_PROXY
 
 /** The hosted Fynd API names chains in its paths. */
 export const TYCHO_CHAIN_SLUGS: Record<number, string> = {
@@ -122,7 +126,7 @@ export const KYBER_CHAIN_SLUGS: Record<number, string> = {
 /** Client id sent to KyberSwap (identifies the integrator, no fee attached). */
 export const KYBER_CLIENT_ID = 'auto-loop'
 
-/** Aggregators the app can quote with on a chain (1inch only when a key was built in, Tycho with a key or a proxy). */
+/** Aggregators the app can quote with on a chain (1inch only when a key was built in). */
 export function aggregatorsFor(chainId: number): AggregatorId[] {
   return (Object.keys(AGGREGATORS) as AggregatorId[]).filter(
     (id) => supportsChain(id, chainId) && (id !== 'oneinch' || !!ONEINCH_API_KEY) && (id !== 'tycho' || TYCHO_ENABLED),
