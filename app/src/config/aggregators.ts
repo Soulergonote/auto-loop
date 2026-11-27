@@ -50,15 +50,16 @@ export const AGGREGATORS: Record<AggregatorId, Aggregator> = {
   tycho: {
     label: 'Tycho',
     // TychoRouterV3, from Propeller Heads' deployment registry (2026-11-23, tycho-execution/config/deployment_registry.json);
-    // same code size on all seven chains (checked 2026-11-27). Chains: the hosted Fynd API's (2026-11-27) the app also
-    // covers; Plasma has a router but the API answers unknown_chain, Elysium is not in the app.
+    // same code size on all eight chains (checked 2026-11-27). Chains: the hosted Fynd API's (2026-11-27; Arc is served
+    // though not in its docs) the app also covers; Plasma and Monad answer unknown_chain, Elysium is not in the app.
     router: '0xe41c726421007e133a59365432fE886a73B45126',
-    chains: [1, 56, 130, 137, 4663, 8453, 42161],
+    chains: [1, 56, 130, 137, 4663, 5042, 8453, 42161],
     routerOn: {
       56: '0xEe7eCe626064BDA1c6aFDb8A281afe44Eabd3242',
       130: '0x556dff14e4A42259ebCE4fa087323c1047e9a55A',
       137: '0x4dB0B661dc706f7e09e54273028B22f61f8F94C2',
       4663: '0x6F460540B03651d2Ad0ec28f777e4A0480A756a5',
+      5042: '0x52A1BC20F2B78461D7a03c32f6c7388D4587980f',
       8453: '0xd374c00614f95492D816b5957E3797ce3f0c445C',
       42161: '0x1B82e8C16Ce8E17535C9B6b8AD107f61b0b192B5',
     },
@@ -93,6 +94,7 @@ export const TYCHO_CHAIN_SLUGS: Record<number, string> = {
   130: 'unichain',
   137: 'polygon',
   4663: 'robinhood',
+  5042: 'arc',
   8453: 'base',
   42161: 'arbitrum',
 }
