@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { claimables, MERKL_DISTRIBUTOR, rewardAction, wrapperUnderlyings, type Claimable, type MerklClaimData } from './reinvest'
+import { MERKL_DISTRIBUTOR } from '../../config'
+import { claimables, rewardAction, wrapperUnderlyings, type Claimable, type MerklClaimData } from './reinvest'
 import { addr, reserve } from '../../test/testReserves'
 
 const usde = reserve(0, 'USDe')

@@ -1,12 +1,14 @@
 import { encodeDeployData, getAddress, parseAbi, type Address, type Chain, type Hex } from 'viem'
-import { CREATE2_PROXY, create2Address, create2Calldata } from './create2'
-import { deployContract, getPublicClient, sendTransaction, waitForTransactionReceipt } from '@wagmi/core'
+import { CREATE2_PROXY, create2Address } from './create2'
+import { getPublicClient, waitForTransactionReceipt } from '@wagmi/core'
+import { walletDeploy } from './wallet'
+import { rememberName } from '../services/recap/names'
 import { useQuery } from '@tanstack/react-query'
 import { wagmiConfig } from './wagmi'
 import { executorAbi, executorAbiV1, morphoExecutorAbi, v4ExecutorAbi } from './abi'
 import { EXECUTOR_BYTECODE_AAVE_V4, EXECUTOR_BYTECODE_MORPHO, EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../generated/executorBytecode'
 import { EXECUTOR_BYTECODE_MORPHO_0, EXECUTOR_BYTECODE_MORPHO_1, EXECUTOR_BYTECODE_V2_0, EXECUTOR_BYTECODE_V2_1 } from '../generated/executorBytecodeLegacy'
-import { AGGREGATORS, MARKETS, executorLenders, executorRouters, type Market, type MorphoNet, type V4Net } from '../config'
+import { AGGREGATORS, MARKETS, executorLenders, executorRouters, marketPlace, type Market, type MorphoNet, type V4Net } from '../config'
 
 /** The chain's client and the code at `address`, refused when there is none. */
 async function codeAt(chain: Chain, address: Address) {
@@ -126,6 +128,7 @@ export async function verifyExecutor(market: Market, address: Address): Promise<
       const kind = await client.readContract({ address, abi: executorAbi, functionName: 'flashLenderKind', args: [l.lender] })
       if (kind !== l.kind) throw new Error('le prêteur Morpho n’est pas enregistré dans ce contrat')
     }
+  rememberName(market.chain.id, address, { label: `contrat Auto-loop ${version === 2 ? 'V2' : 'v1'} · ${marketPlace(market)}`, ours: true })
   return { version, pendle, debtSwap }
 }
 
@@ -150,12 +153,12 @@ export const useSharedExecutor = (market: Market, enabled: boolean) =>
  * the proxy gets a plain deployment. Returns the address once the receipt is in (an address someone filled in the
  * meantime is returned as is).
  */
-async function deployShared(chainId: number, initCode: Hex, onStep: (s: string) => void, plain: () => Promise<Hex>): Promise<Address> {
+async function deployShared(chainId: number, contract: string, initCode: Hex, onStep: (s: string) => void): Promise<Address> {
   const target = create2Address(initCode)
   if (await hasCode(chainId, target)) return target
   const viaProxy = await hasCode(chainId, CREATE2_PROXY)
   onStep('Signature du déploiement dans le portefeuille…')
-  const hash = viaProxy ? await sendTransaction(wagmiConfig, { chainId, to: CREATE2_PROXY, data: create2Calldata(initCode) }) : await plain()
+  const hash = await walletDeploy({ chainId, contract, initCode, viaProxy })
   onStep('Déploiement en cours, en attente de confirmation…')
   const receipt = await waitForTransactionReceipt(wagmiConfig, { hash, chainId })
   if (receipt.status !== 'success') throw new Error('le déploiement a échoué')
@@ -169,14 +172,7 @@ async function deployShared(chainId: number, initCode: Hex, onStep: (s: string) 
 
 /** Deploys the market's shared (v2) executor from the connected wallet, waits for it, then verifies it on chain. */
 export async function deployExecutor(market: Market, onStep: (s: string) => void): Promise<Address> {
-  const address = await deployShared(market.chain.id, deployDataV2(market), onStep, () =>
-    deployContract(wagmiConfig, {
-      abi: executorAbi,
-      bytecode: EXECUTOR_BYTECODE_V2,
-      args: [market.pool, executorRouters(market.chain.id).map((r) => r.router), executorLenders(market.chain.id)],
-      chainId: market.chain.id,
-    }),
-  )
+  const address = await deployShared(market.chain.id, `Auto-loop V2 (${market.label})`, deployDataV2(market), onStep)
   onStep('Vérification du contrat déployé…')
   if ((await verifyExecutor(market, address)).version !== 2) throw new Error('le contrat déployé n’est pas la v2')
   return address
@@ -212,6 +208,7 @@ export async function verifyMorphoExecutor(net: MorphoNet, address: Address): Pr
     (await isBuild(morphoInitCode(net))) || (await isBuild(morphoInitCodeR1(net))) ? true : (await isBuild(morphoInitCodeLegacy(net))) ? false : undefined
   if (refinance === undefined) throw new Error('le code de ce contrat n’est pas celui d’Auto-loop pour Morpho')
   await requireRouters(client, net.chain.id, address)
+  rememberName(net.chain.id, address, { label: `contrat Auto-loop Morpho · ${net.label}`, ours: true })
   return { refinance }
 }
 
@@ -230,9 +227,7 @@ export const useSharedMorphoExecutor = (net: MorphoNet, enabled: boolean) =>
 
 /** Deploys the network's shared Morpho executor from the connected wallet, waits for it, then verifies it on chain. */
 export async function deployMorphoExecutor(net: MorphoNet, onStep: (s: string) => void): Promise<Address> {
-  const address = await deployShared(net.chain.id, morphoInitCode(net), onStep, () =>
-    deployContract(wagmiConfig, { abi: morphoExecutorAbi, bytecode: EXECUTOR_BYTECODE_MORPHO, args: morphoArgs(net), chainId: net.chain.id }),
-  )
+  const address = await deployShared(net.chain.id, `Auto-loop Morpho (${net.label})`, morphoInitCode(net), onStep)
   onStep('Vérification du contrat déployé…')
   await verifyMorphoExecutor(net, address)
   return address
@@ -253,6 +248,7 @@ export async function verifyV4Executor(net: V4Net, address: Address): Promise<tr
   const { client, isBuild } = await codeAt(net.chain, address)
   if (!(await isBuild(v4InitCode(net)))) throw new Error('le code de ce contrat n’est pas celui d’Auto-loop pour Aave v4')
   await requireRouters(client, net.chain.id, address)
+  rememberName(net.chain.id, address, { label: `contrat Auto-loop V4 · ${net.label}`, ours: true })
   return true
 }
 
@@ -265,9 +261,7 @@ export const useSharedV4Executor = (net: V4Net, enabled: boolean) => useShared('
 
 /** Deploys the shared v4 executor from the connected wallet, waits for it, then verifies it on chain. */
 export async function deployV4Executor(net: V4Net, onStep: (s: string) => void): Promise<Address> {
-  const address = await deployShared(net.chain.id, v4InitCode(net), onStep, () =>
-    deployContract(wagmiConfig, { abi: v4ExecutorAbi, bytecode: EXECUTOR_BYTECODE_AAVE_V4, args: v4Args(net), chainId: net.chain.id }),
-  )
+  const address = await deployShared(net.chain.id, `Auto-loop V4 (${net.label})`, v4InitCode(net), onStep)
   onStep('Vérification du contrat déployé…')
   await verifyV4Executor(net, address)
   return address

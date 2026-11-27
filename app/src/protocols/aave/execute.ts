@@ -1,5 +1,6 @@
 import { encodeFunctionData, maxUint256, zeroAddress, type Address, type Hash, type Hex } from 'viem'
-import { simulateContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
+import { simulateContract, waitForTransactionReceipt } from '@wagmi/core'
+import { walletWriteContract } from '../../chain/wallet'
 import { wagmiConfig } from '../../chain/wagmi'
 import { erc20Abi, executorAbi, executorAbiV1, poolAbi, wrappedNativeAbi } from '../../chain/abi'
 import { quoteSteps, type Quote } from '../../services/quotes/quotes'
@@ -151,7 +152,7 @@ async function send(chainId: number, user: Address, executor: Address, c: Call, 
   onStep(`Simulation de ${what}…`)
   const { request } = await simulateContract(wagmiConfig, { chainId, account: user, address: executor, ...(c as object) } as never)
   onStep('Confirmation de la transaction dans le portefeuille…')
-  return writeContract(wagmiConfig, request as never)
+  return walletWriteContract(request as never)
 }
 
 async function approve(chainId: number, token: Address, spender: Address, amount: bigint, account: Address, onStep: Progress) {
@@ -164,7 +165,7 @@ async function approve(chainId: number, token: Address, spender: Address, amount
     functionName: 'approve',
     args: [spender, amount],
   })
-  const hash = await writeContract(wagmiConfig, request)
+  const hash = await walletWriteContract(request)
   await waitForTransactionReceipt(wagmiConfig, { chainId, hash })
 }
 
@@ -172,7 +173,7 @@ async function approve(chainId: number, token: Address, spender: Address, amount
 async function wrapNative(chainId: number, wrapped: Address, value: bigint, account: Address, onStep: Progress) {
   onStep('Conversion du token natif en sa version ERC-20 (transaction)…')
   const { request } = await simulateContract(wagmiConfig, { chainId, account, address: wrapped, abi: wrappedNativeAbi, functionName: 'deposit', value })
-  const hash = await writeContract(wagmiConfig, request)
+  const hash = await walletWriteContract(request)
   const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId, hash })
   if (receipt.status !== 'success') throw new Error('La conversion du token natif a échoué')
 }
@@ -188,7 +189,7 @@ async function setEMode(p: OpenPlan, categoryId: number, onStep: Progress) {
     functionName: 'setUserEMode',
     args: [categoryId],
   })
-  const hash = await writeContract(wagmiConfig, request)
+  const hash = await walletWriteContract(request)
   const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: p.chainId, hash })
   if (receipt.status !== 'success') throw new Error('Le changement d’eMode a échoué')
 }

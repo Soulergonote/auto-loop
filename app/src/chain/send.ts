@@ -3,7 +3,8 @@
  * (approval, account setting), the executor call (simulated first), an atomic batch, and the logs of what was mined.
  */
 import type { Address, Hash, Log } from 'viem'
-import { getPublicClient, simulateContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
+import { getPublicClient, simulateContract, waitForTransactionReceipt } from '@wagmi/core'
+import { walletWriteContract } from './wallet'
 import { wagmiConfig } from './wagmi'
 import { sendBatch, type BatchCall } from './batch'
 import type { Progress } from './tx'
@@ -15,7 +16,7 @@ export type ContractCall = { address: Address; abi: unknown; functionName: strin
 export async function userTx(from: Sender, call: ContractCall, what: string, onStep: Progress) {
   onStep(`${what} (transaction)…`)
   const sim = await simulateContract(wagmiConfig, { ...call, chainId: from.chainId, account: from.user } as never)
-  const hash = await writeContract(wagmiConfig, sim.request as never)
+  const hash = await walletWriteContract(sim.request as never)
   const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: from.chainId, hash })
   if (receipt.status !== 'success') throw new Error(`${what} : la transaction a échoué`)
 }
@@ -25,7 +26,7 @@ export async function sendExecutorCall(from: Sender, call: ContractCall, onStep:
   onStep('Simulation…')
   const { request } = await simulateContract(wagmiConfig, { ...call, chainId: from.chainId, account: from.user } as never)
   onStep('Confirmation de la transaction dans le portefeuille…')
-  const hash = await writeContract(wagmiConfig, request as never)
+  const hash = await walletWriteContract(request as never)
   onStep('En attente d’inclusion…')
   const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: from.chainId, hash })
   if (receipt.status !== 'success') throw new Error('La transaction a échoué')

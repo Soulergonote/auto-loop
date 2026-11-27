@@ -5,6 +5,7 @@
  */
 import type { Address } from 'viem'
 import { DEMO } from '../../config'
+import { rememberName, rememberV4Reserve } from '../../services/recap/names'
 
 export const AAVE_V4_API = 'https://api.v4.aave.com/graphql'
 
@@ -133,7 +134,13 @@ export async function fetchV4Reserves(chainIds: number[], signal?: AbortSignal):
   const body = (await res.json()) as { data?: { reserves?: Raw[] }; errors?: { message: string }[] }
   if (body.errors?.length) throw new Error(`API Aave v4 : ${body.errors[0].message}`)
   if (!body.data?.reserves) throw new Error('API Aave v4 : réponse vide')
-  return parseV4Reserves(body.data.reserves)
+  const list = parseV4Reserves(body.data.reserves)
+  // X5: the signing recap names the spokes and the reserves the v4 calls and permits point at by id
+  for (const r of list) {
+    rememberName(r.chainId, r.spoke.address, { label: `spoke Aave v4 ${r.spoke.name}` })
+    rememberV4Reserve(r.chainId, r.spoke.address, r.reserveId, r.token)
+  }
+  return list
 }
 
 export const v4ReservesQuery = (chainIds: number[]) => ({

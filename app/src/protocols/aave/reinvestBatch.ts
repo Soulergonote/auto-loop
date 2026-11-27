@@ -13,15 +13,14 @@
  *   - the contract's `open` checks its own swap's minimum on-chain (and, v2, the health factor and a deadline); the collateral approval and
  *     the credit delegation are for the exact amounts and are put back to their previous values after it.
  */
-import { encodeFunctionData, getAddress, parseAbi, type Address } from 'viem'
-import type { Token } from '../../config'
+import { encodeFunctionData, getAddress, type Address } from 'viem'
+import { MERKL_DISTRIBUTOR, type Token } from '../../config'
 import { getQuote, QuoteError, type Quote, type QuoteRequest } from '../../services/quotes/quotes'
-import { distributorAbi, MERKL_DISTRIBUTOR, type Claimable } from './reinvest'
+import type { Claimable } from './reinvest'
+import { distributorAbi, poolAbi } from '../../chain/abi'
 import { walletSwapProblem, swapTerms } from '../../services/quotes/swapCalldata'
 import { encodeCall, openCall, type OpenPlan } from './execute'
 import { allowanceCalls, type BatchCall } from '../../chain/batch'
-
-const withdrawAbi = parseAbi(['function withdraw(address asset, uint256 amount, address to) returns (uint256)'])
 
 /** A quote for a swap made from the user's wallet, refused unless its calldata does what the quote says. */
 export async function walletQuote(req: QuoteRequest & { taker: Address }, signal?: AbortSignal): Promise<Quote> {
@@ -93,7 +92,7 @@ export function buildReinvestBatch(p: ReinvestBatch): { calls: BatchCall[]; capi
   for (const w of p.withdrawals)
     calls.push({
       to: p.pool,
-      data: encodeFunctionData({ abi: withdrawAbi, functionName: 'withdraw', args: [w.token.address, w.amount, user] }),
+      data: encodeFunctionData({ abi: poolAbi, functionName: 'withdraw', args: [w.token.address, w.amount, user] }),
       label: `Retirer ${w.token.symbol} d’Aave`,
     })
   const capital = p.capitalDirect + swapCapital(p.swaps, p.collateral.address, user)

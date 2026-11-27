@@ -62,6 +62,7 @@ import { scanMarket, type ScanRow } from '../features/scanner/aaveScan'
 import { BEST_MIN_CAPACITY, bestPair, loadScanner, savePair, savedPair } from '../features/scanner/prefs'
 
 import { WalletButton } from './WalletButton'
+import { SigningRecap } from '../ui/SigningRecap'
 import { TokenSelect } from '../features/loop/shared/TokenSelect'
 import { AaveView, type Seed } from '../features/loop/aave/AaveView'
 type View = 'loop' | 'scan' | 'positions'
@@ -634,6 +635,7 @@ export function App() {
             </LoopLayout>
           ))}
       </GateProvider>
+      <SigningRecap />
     </div>
   )
 }

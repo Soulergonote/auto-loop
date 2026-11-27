@@ -8,7 +8,8 @@
  * An account that already authorized the executor for good is served with the plain call.
  */
 import { decodeEventLog, encodeFunctionData, hexToSignature, maxUint256, type Address, type Hash, type Hex, type Log } from 'viem'
-import { signTypedData, simulateContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
+import { simulateContract, waitForTransactionReceipt } from '@wagmi/core'
+import { walletSignTypedData, walletWriteContract } from '../../chain/wallet'
 import { wagmiConfig } from '../../chain/wagmi'
 import { debtTokenAbi, erc20Abi, morphoAbi, morphoExecutorAbi, poolAbi } from '../../chain/abi'
 import type { MorphoNet } from '../../config'
@@ -194,12 +195,14 @@ export async function signAuthorizations(
   const deadline = deadlineFromNow()
   const base = { authorizer: tx.user, authorized: tx.executor, deadline }
   onStep('Signature 1/2 : autoriser le contrat sur Morpho pour cette transaction…')
-  const grant = await signTypedData(wagmiConfig, {
+  const grant = await walletSignTypedData({
+    chainId: tx.net.chain.id,
     account: tx.user,
     ...authorizationTypedData(tx.net.chain.id, tx.net.morpho, { ...base, isAuthorized: true, nonce }),
   })
   onStep('Signature 2/2 : retirer cette autorisation à la fin de la transaction…')
-  const revoke = await signTypedData(wagmiConfig, {
+  const revoke = await walletSignTypedData({
+    chainId: tx.net.chain.id,
     account: tx.user,
     ...authorizationTypedData(tx.net.chain.id, tx.net.morpho, { ...base, isAuthorized: false, nonce: nonce + 1n }),
   })
@@ -325,7 +328,7 @@ export async function revokeMorphoAuthorization(net: MorphoNet, user: Address, e
     functionName: 'setAuthorization',
     args: [executor, false],
   })
-  const hash = await writeContract(wagmiConfig, request)
+  const hash = await walletWriteContract(request)
   await waitForTransactionReceipt(wagmiConfig, { chainId: net.chain.id, hash })
   return hash
 }

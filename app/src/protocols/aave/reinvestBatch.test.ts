@@ -5,7 +5,7 @@ import { debtTokenAbi, erc20Abi, executorAbi } from '../../chain/abi'
 import { AGGREGATORS } from '../../config'
 import { swapTerms, walletSwapProblem } from '../../services/quotes/swapCalldata'
 import { buildReinvestBatch, swapCapital, type ReinvestBatch } from './reinvestBatch'
-import { MERKL_DISTRIBUTOR } from './reinvest'
+import { MERKL_DISTRIBUTOR } from '../../config'
 import type { Quote } from '../../services/quotes/quotes'
 
 // real calldatas built by the Velora and KyberSwap APIs for this wallet, selling 47.107… MORPHO for WETH on Base

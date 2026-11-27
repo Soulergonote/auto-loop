@@ -91,6 +91,7 @@ export const poolAbi = parseAbi([
   // before Aave v3.2 (SparkLend): one call per category, the reserves carry their category in their configuration
   'function getEModeCategoryData(uint8 id) view returns ((uint16 ltv, uint16 liquidationThreshold, uint16 liquidationBonus, address priceSource, string label))',
   'function setUserEMode(uint8 categoryId)',
+  'function withdraw(address asset, uint256 amount, address to) returns (uint256)',
 ])
 
 export const providerAbi = parseAbi(['function getPriceOracle() view returns (address)'])
@@ -291,4 +292,10 @@ export const v4TakerAbi = parseAbi([
   'function borrowAllowance(address spoke, uint256 reserveId, address owner, address spender) view returns (uint256)',
   'function withdrawAllowance(address spoke, uint256 reserveId, address owner, address spender) view returns (uint256)',
   'function nonces(address owner, uint192 key) view returns (uint256)',
+])
+
+/** Merkl's Distributor (MERKL_DISTRIBUTOR): the claim and what was already claimed. */
+export const distributorAbi = parseAbi([
+  'function claim(address[] users, address[] tokens, uint256[] amounts, bytes32[][] proofs)',
+  'function claimed(address user, address token) view returns (uint208 amount, uint48 timestamp, bytes32 merkleRoot)',
 ])

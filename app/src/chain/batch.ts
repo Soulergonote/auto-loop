@@ -1,6 +1,7 @@
 /** Atomic batches of calls (EIP-5792 `wallet_sendCalls` with `forceAtomic`), sent from the user's own account. */
 import { encodeFunctionData, type Address, type Hash, type Hex } from 'viem'
-import { getPublicClient, sendCalls, waitForCallsStatus } from '@wagmi/core'
+import { getPublicClient, waitForCallsStatus } from '@wagmi/core'
+import { walletSendCalls } from './wallet'
 import { useCapabilities } from 'wagmi'
 import { wagmiConfig } from './wagmi'
 import { debtTokenAbi, erc20Abi } from './abi'
@@ -52,12 +53,7 @@ export async function sendBatch(chainId: number, user: Address, calls: BatchCall
   const failure = await simulate(chainId, user, calls)
   if (failure) throw new Error(failure)
   onStep('Confirmation dans le portefeuille…')
-  const { id } = await sendCalls(wagmiConfig, {
-    chainId,
-    account: user,
-    forceAtomic: true,
-    calls: calls.map(({ to, data, value }) => ({ to, data, ...(value ? { value } : {}) })),
-  })
+  const { id } = await walletSendCalls({ chainId, account: user, calls })
   onStep('En attente d’inclusion…')
   const status = await waitForCallsStatus(wagmiConfig, { id, timeout: 10 * 60_000 })
   if (status.status !== 'success')

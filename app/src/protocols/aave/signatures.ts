@@ -1,5 +1,6 @@
 import { domainSeparator, hexToSignature, type Address, type Hex, type TypedDataDomain } from 'viem'
-import { readContract, signTypedData } from '@wagmi/core'
+import { readContract } from '@wagmi/core'
+import { walletSignTypedData } from '../../chain/wallet'
 import { wagmiConfig } from '../../chain/wagmi'
 import { debtTokenAbi } from '../../chain/abi'
 
@@ -37,7 +38,8 @@ export async function signDelegation(chainId: number, owner: Address, debtToken:
   const { domain, nonceOf } = await aaveTokenDomain(chainId, debtToken)
   const nonce = await nonceOf(owner)
   const deadline = deadlineIn(20 * 60)
-  const sig = await signTypedData(wagmiConfig, {
+  const sig = await walletSignTypedData({
+    chainId,
     account: owner,
     domain,
     types: {
@@ -59,7 +61,8 @@ export async function signATokenPermit(chainId: number, owner: Address, aToken: 
   const { domain, nonceOf } = await aaveTokenDomain(chainId, aToken)
   const nonce = await nonceOf(owner)
   const deadline = deadlineIn(20 * 60)
-  const sig = await signTypedData(wagmiConfig, {
+  const sig = await walletSignTypedData({
+    chainId,
     account: owner,
     domain,
     types: {

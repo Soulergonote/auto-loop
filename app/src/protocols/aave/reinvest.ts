@@ -10,22 +10,18 @@
  *   3. "Augmenter la position" with that capital, at the leverage the position had before.
  */
 import { erc20Abi, parseAbi, type Address, type Hash, type Hex } from 'viem'
-import { readContract, sendTransaction, simulateContract, waitForTransactionReceipt, writeContract } from '@wagmi/core'
+import { readContract, simulateContract, waitForTransactionReceipt } from '@wagmi/core'
 import { useQuery } from '@tanstack/react-query'
 import { useReadContracts } from 'wagmi'
 import { wagmiConfig } from '../../chain/wagmi'
-import { DEMO } from '../../config'
+import { distributorAbi, poolAbi } from '../../chain/abi'
+import { walletSendTransaction, walletWriteContract } from '../../chain/wallet'
+import { DEMO, MERKL_DISTRIBUTOR } from '../../config'
 import { userRewardsQuery, type MerklUserRewards } from '../../features/positions/positions'
 import type { Quote } from '../../services/quotes/quotes'
 import type { SnapReserve } from './snapshot'
 import type { Progress } from '../../chain/tx'
 
-/** Merkl's Distributor, same address on every chain Merkl distributes on (checked on Base, 5 Nov 2026). */
-export const MERKL_DISTRIBUTOR: Address = '0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae'
-export const distributorAbi = parseAbi([
-  'function claim(address[] users, address[] tokens, uint256[] amounts, bytes32[][] proofs)',
-  'function claimed(address user, address token) view returns (uint208 amount, uint48 timestamp, bytes32 merkleRoot)',
-])
 /** Merkl's PullTokenWrapper: a reward token the Distributor pays out as `token()`, its underlying. */
 const wrapperAbi = parseAbi(['function token() view returns (address)', 'function distributor() view returns (address)'])
 
@@ -44,7 +40,6 @@ export function wrapperUnderlyings(tokens: Address[], results: ({ result?: unkno
   })
   return out
 }
-const withdrawAbi = parseAbi(['function withdraw(address asset, uint256 amount, address to) returns (uint256)'])
 
 /** A reward the Distributor will pay now: the Merkle tree's cumulative amount minus what was already claimed on-chain. */
 export type Claimable = {
@@ -142,7 +137,7 @@ export async function claimRewards(chainId: number, user: Address, rewards: Clai
     args: [rewards.map(() => user), rewards.map((r) => r.token), rewards.map((r) => r.cumulative), rewards.map((r) => r.proofs)],
   })
   onStep('Confirmation dans le portefeuille…')
-  const hash = await writeContract(wagmiConfig, request)
+  const hash = await walletWriteContract(request)
   return confirmed(chainId, hash, onStep, 'La réclamation a échoué')
 }
 
@@ -153,12 +148,12 @@ export async function withdrawReward(chainId: number, pool: Address, user: Addre
     chainId,
     account: user,
     address: pool,
-    abi: withdrawAbi,
+    abi: poolAbi,
     functionName: 'withdraw',
     args: [asset, amount, user],
   })
   onStep('Confirmation dans le portefeuille…')
-  const hash = await writeContract(wagmiConfig, request)
+  const hash = await walletWriteContract(request)
   return confirmed(chainId, hash, onStep, 'Le retrait a échoué')
 }
 
@@ -187,12 +182,12 @@ export async function swapFromWallet(
       functionName: 'approve',
       args: [quote.router, quote.sellAmount],
     })
-    await confirmed(chainId, await writeContract(wagmiConfig, request), onStep, 'L’approbation a échoué')
+    await confirmed(chainId, await walletWriteContract(request), onStep, 'L’approbation a échoué')
   }
   const before = await readContract(wagmiConfig, { chainId, address: buy, abi: erc20Abi, functionName: 'balanceOf', args: [user] })
   // the wallet estimates gas first: a route that would revert is refused before anything is spent
   onStep('Confirmation de l’échange dans le portefeuille…')
-  const hash = await sendTransaction(wagmiConfig, { chainId, account: user, to: quote.router, data: quote.data })
+  const hash = await walletSendTransaction({ chainId, account: user, to: quote.router, data: quote.data })
   await confirmed(chainId, hash, onStep, 'L’échange a échoué')
   const after = await readContract(wagmiConfig, { chainId, address: buy, abi: erc20Abi, functionName: 'balanceOf', args: [user] })
   const received = after - before

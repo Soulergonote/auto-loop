@@ -12,7 +12,8 @@
  * (`permit: false`), and takes a withdraw allowance back after the close.
  */
 import { decodeEventLog, encodeFunctionData, maxUint256, type Address, type Hash, type Hex, type Log } from 'viem'
-import { sendTransaction, signTypedData, waitForTransactionReceipt } from '@wagmi/core'
+import { waitForTransactionReceipt } from '@wagmi/core'
+import { walletSendTransaction, walletSignTypedData } from '../../chain/wallet'
 import { wagmiConfig } from '../../chain/wagmi'
 import { erc20Abi, v4ExecutorAbi, v4SpokeAbi, v4TakerAbi } from '../../chain/abi'
 import type { V4Net } from '../../config'
@@ -239,7 +240,7 @@ export async function signPermit(
     nonce,
     deadline,
   })
-  const signature = await signTypedData(wagmiConfig, { account: tx.user, ...data } as never)
+  const signature = await walletSignTypedData({ chainId: tx.net.chain.id, account: tx.user, ...data } as never)
   return { amount, nonce, deadline, signature }
 }
 
@@ -364,7 +365,7 @@ export async function sendSetup(tx: Pick<V4Tx, 'net' | 'spoke' | 'user' | 'colla
   const what = 'Activation du spoke'
   if (calls.length === 1) {
     onStep(`${what} (transaction)…`)
-    const hash = await sendTransaction(wagmiConfig, { chainId: tx.net.chain.id, account: tx.user, to: calls[0].to, data: calls[0].data })
+    const hash = await walletSendTransaction({ chainId: tx.net.chain.id, account: tx.user, to: calls[0].to, data: calls[0].data })
     const receipt = await waitForTransactionReceipt(wagmiConfig, { chainId: tx.net.chain.id, hash })
     if (receipt.status !== 'success') throw new Error(`${what} : la transaction a échoué`)
     return
