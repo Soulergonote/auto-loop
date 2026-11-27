@@ -1,8 +1,9 @@
-import { domainSeparator, hexToSignature, type Address, type Hex, type TypedDataDomain } from 'viem'
+import { domainSeparator, type Address, type Hex, type TypedDataDomain } from 'viem'
 import { readContract } from '@wagmi/core'
 import { walletSignTypedData } from '../../chain/wallet'
 import { wagmiConfig } from '../../chain/wagmi'
 import { debtTokenAbi } from '../../chain/abi'
+import { deadlineFromNow, splitSignature } from '../common'
 
 /** Signature struct expected by LeverageExecutor.openWithSig / closeWithSig. */
 export type ExecutorSignature = { value: bigint; deadline: bigint; v: number; r: Hex; s: Hex }
@@ -26,18 +27,13 @@ async function aaveTokenDomain(chainId: number, token: Address): Promise<{ domai
   return { domain, nonceOf }
 }
 
-function split(sig: Hex, value: bigint, deadline: bigint): ExecutorSignature {
-  const { r, s, v, yParity } = hexToSignature(sig)
-  return { value, deadline, v: Number(v ?? BigInt(27 + (yParity ?? 0))), r, s }
-}
-
-const deadlineIn = (seconds: number) => BigInt(Math.floor(Date.now() / 1000) + seconds)
+const split = (sig: Hex, value: bigint, deadline: bigint): ExecutorSignature => ({ value, deadline, ...splitSignature(sig) })
 
 /** Credit delegation on the variable debt token, consumed by openWithSig. */
 export async function signDelegation(chainId: number, owner: Address, debtToken: Address, delegatee: Address, value: bigint) {
   const { domain, nonceOf } = await aaveTokenDomain(chainId, debtToken)
   const nonce = await nonceOf(owner)
-  const deadline = deadlineIn(20 * 60)
+  const deadline = deadlineFromNow()
   const sig = await walletSignTypedData({
     chainId,
     account: owner,
@@ -60,7 +56,7 @@ export async function signDelegation(chainId: number, owner: Address, debtToken:
 export async function signATokenPermit(chainId: number, owner: Address, aToken: Address, spender: Address, value: bigint) {
   const { domain, nonceOf } = await aaveTokenDomain(chainId, aToken)
   const nonce = await nonceOf(owner)
-  const deadline = deadlineIn(20 * 60)
+  const deadline = deadlineFromNow()
   const sig = await walletSignTypedData({
     chainId,
     account: owner,

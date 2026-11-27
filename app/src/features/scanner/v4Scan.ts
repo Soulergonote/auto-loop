@@ -3,7 +3,7 @@
  * gives a target health factor. A v4 position lives in one spoke; its borrow rate is the reserve's base rate plus the
  * user's risk premium, which a single collateral sets (`collateralRisk`, a share of the base rate). Pure, tested.
  */
-import type { V4Reserve } from '../../protocols/aavev4/reserves'
+import { v4EndingRewards, type V4Reserve } from '../../protocols/aavev4/reserves'
 import { isCorrelated, isUsdStable } from '../../domain/pairs'
 import { MAX_SCAN_LEVERAGE, MIN_SCAN_LEVERAGE } from './aaveScan'
 
@@ -55,7 +55,7 @@ export function scanV4(reserves: V4Reserve[], opts: { targetHf: number }): V4Sca
         const collateralYield = C.supplyApy + C.underlyingApy
         const borrowCost = D.borrowApy * (1 + C.collateralRisk)
         const rewardsApy = C.supplyRewardApy * leverage + D.borrowRewardApy * (leverage - 1)
-        const sides = [C.ending.supply, D.ending.borrow].filter((e) => e.apy > 0 && e.endsAt !== undefined)
+        const ending = v4EndingRewards(C, D, leverage)
         const apy = collateralYield * leverage - borrowCost * (leverage - 1) + rewardsApy
         rows.push({
           collateral: C,
@@ -65,9 +65,9 @@ export function scanV4(reserves: V4Reserve[], opts: { targetHf: number }): V4Sca
           borrowCost,
           nativeApy: C.underlyingApy * leverage,
           rewardsApy,
-          rewardsEnd: sides.length ? Math.min(...sides.map((e) => e.endsAt!)) : undefined,
+          rewardsEnd: ending.endsAt,
           apy,
-          apyAfterRewards: apy - C.ending.supply.apy * leverage - D.ending.borrow.apy * (leverage - 1),
+          apyAfterRewards: apy - ending.apy,
           capacityUsd: Math.max(0, Math.min(D.borrowableUsd / (leverage - 1), C.suppliableUsd / leverage)),
           stable: isUsdStable(C) && isUsdStable(D),
           correlated: isCorrelated(C, D),

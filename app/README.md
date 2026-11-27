@@ -59,6 +59,8 @@ Liste dans `src/config/aave.ts` (`MARKETS`), adresses des pools tirées de `@bgd
 
 Les APY ajoutent les campagnes Merkl en cours sur Aave (`api.merkl.xyz/v4/opportunities`, sans clé) : rewards de dépôt sur l'aToken du collatéral, rewards d'emprunt sur le jeton de dette. Une campagne n'est comptée que si elle nomme l'adresse de l'aToken ou du jeton de dette ; sinon elle est ignorée. Les conditions d'éligibilité propres à certaines campagnes ne sont pas vérifiées. Si l'API ne répond pas, l'interface le dit et affiche les APY sans bonus.
 
+**Après la fin du bonus** (A5, 27/11/2026) : une campagne Merkl a souvent une date de fin. Sous le bonus du Scanner, « jusqu’au 3 déc., puis X % » donne l’APY net une fois finies les campagnes datées (une campagne sans date connue reste comptée ; si plusieurs finissent à des dates différentes, la première date et le plancher, toutes finies). La même ligne est dans « Détail » (« Sans bonus après le … ») et sous l’APY net des panneaux Ouvrir (Aave v3, Morpho, Aave v4). La case « Trier sans le bonus Merkl » classe le Scanner sur ce chiffre (`sansbonus=1` dans l’adresse). Code : `endingRewards` et `morphoEndingApy` (`src/services/merkl.ts`), `v4EndingRewards` (`src/protocols/aavev4/reserves.ts`), champ `apyAfterRewards` des lignes du Scanner.
+
 ## Rendement propre des tokens
 
 Les APY comptent aussi le rendement propre des tokens à rendement (wstETH, weETH, sUSDe, syrupUSDC, sUSDS, sDAI…), qu'Aave et Morpho intègrent au prix mais n'affichent pas comme un taux. Il est pris à la source la plus récente qui connaît le token (`src/services/yield/tokenYield.ts`), dans cet ordre :
@@ -180,6 +182,10 @@ Sinon, le mode étape par étape ci-dessus reste disponible.
 
 Testé sur fork de Base le 05/11/2026 avec un compte réel qui avait 47 MORPHO à réclamer (`USER_ADDR=0x… node e2e/run.cjs reinvest r`) : réclamation, approbation, échange MORPHO → 0,0435 WETH, puis Augmenter prérempli. En un clic (portefeuille de test qui exécute le lot avec retour arrière en cas d'échec), sur une position WETH/USDC à 1,98x : réclamation, échange, levier en un lot ; collatéral +210 $, dette +103 USDC, levier inchangé, toutes les autorisations revenues à 0. Le Distributor n'a été vérifié que sur Base (même adresse annoncée par Merkl sur les autres réseaux).
 
+## Ce que le portefeuille va signer
+
+Pendant que le portefeuille demande une signature, une transaction, un lot ou un déploiement, une carte en bas à droite (en bas d’écran sur téléphone) dit en français ce qu’il demande (X5, 27/11/2026) : une phrase, le détail champ par champ (bénéficiaire nommé, montant, validité, swaps avec leur minimum, HF minimum) et les données brutes. Elle est décodée depuis les octets exacts envoyés, pas depuis une description à part : délégation de crédit et permit Aave, autorisation Morpho et son retrait, permits Taker Aave v4, approve et approveDelegation, eMode (avec son nom), gestionnaires v4, appels des contrats v1, V2, Morpho et V4, réclamation Merkl, échange depuis le portefeuille, lot atomique appel par appel. Elle alerte quand le bénéficiaire n’est pas un contrat Auto-loop dont l’app a vérifié le code, quand un montant est illimité, quand la validité dépasse une heure ou quand l’appel est inconnu. Elle ne bloque rien : on confirme toujours dans le portefeuille, qui doit montrer les mêmes valeurs. Tout passe par `src/chain/wallet.ts` (un test échoue si un fichier appelle le portefeuille sans lui) ; décodage dans `src/services/recap/describe.ts`, noms dans `src/services/recap/names.ts`, carte `src/ui/SigningRecap.tsx`. Vérifié le 27/11/2026 sur fork de Plasma : ouverture USDe / USDT0 pas à pas (eMode, approve, délégation, appel), puis fermeture en lot de 3 opérations.
+
 ## Ouvrir et fermer en une confirmation
 
 Avec un portefeuille qui envoie des lots atomiques (EIP-5792, `forceAtomic` : MetaMask en compte intelligent, Ambire), « Ouvrir / augmenter » et « Fermer / réduire » partent en une seule confirmation (`openBatchCalls`, `closeBatchCalls` dans `src/protocols/aave/batch.ts`) :
@@ -285,9 +291,9 @@ Chaque dossier de `src/` a un rôle unique ; les dépendances vont de haut en ba
 | `protocols/morpho/` | Marchés (API vérifiée on-chain, `markets.ts`), appels du contrat Morpho (`execute.ts`). |
 | `protocols/common.ts` | Ce que les appels des trois contrats partagent : étapes de swap, garde (health factor minimum, échéance de 20 minutes), devis réel exigé. |
 | `protocols/pendle/` | PT : marchés, devis RouterStatic, calldata du routeur, échéances (`pt.ts`). |
-| `services/` | Données tierces : devis Velora / KyberSwap / 1inch (`quotes/`), Merkl, rendement propre des tokens (`yield/`). |
+| `services/` | Données tierces : devis Velora / KyberSwap / 1inch (`quotes/`), Merkl, rendement propre des tokens (`yield/`) ; récapitulatif de signature (`recap/`). |
 | `domain/` | Calculs purs, sans réseau : levier et health factor (`math.ts`), coûts et seuil de rentabilité (`economics.ts`), courbes de taux (`irm.ts`), slippage, contrôle de sortie, familles d'actifs (`pairs.ts`). |
-| `chain/` | Portefeuille et contrats : ABI, config wagmi, déploiement CREATE2, lots EIP-5792 (`batch.ts`), envoi d'une transaction (`send.ts`), erreurs lisibles (`tx.ts`), soldes du portefeuille, lecture du résultat d'une transaction. |
+| `chain/` | Portefeuille et contrats : ABI, config wagmi, seul accès au portefeuille avec son récapitulatif (`wallet.ts`), déploiement CREATE2, lots EIP-5792 (`batch.ts`), envoi d'une transaction (`send.ts`), erreurs lisibles (`tx.ts`), soldes du portefeuille, lecture du résultat d'une transaction. |
 | `ui/` | Composants de la charte (`primitives.tsx`, `Picker`, bouton de résumé `gate.tsx`), formats (`format.ts`) et couleurs (`tone.ts`). |
 | `config/` | Un fichier par sujet : marchés Aave, réseaux Morpho, Pendle, agrégateurs, RPC, contrats, variables d'environnement. |
 | `generated/` | Bytecode des contrats, écrit par `contracts/script/export-bytecode.cjs`. Ne pas modifier à la main. |

@@ -77,6 +77,15 @@ const num = (n: Num | undefined) => {
 
 export type EndingReward = { apy: number; endsAt?: number }
 
+/** A5: the part of a v4 loop's rewards (supply on the collateral, borrow on the debt) that stops at a known date, levered. */
+export function v4EndingRewards(collateral: V4Reserve, debt: V4Reserve, leverage: number): EndingReward {
+  const sides = [collateral.ending.supply, debt.ending.borrow].filter((e) => e.apy > 0 && e.endsAt !== undefined)
+  return {
+    apy: collateral.ending.supply.apy * leverage + debt.ending.borrow.apy * (leverage - 1),
+    endsAt: sides.length ? Math.min(...sides.map((e) => e.endsAt!)) : undefined,
+  }
+}
+
 const endOf = (x: { endDate?: string }) => (x.endDate && Number.isFinite(Date.parse(x.endDate)) ? Date.parse(x.endDate) / 1000 : undefined)
 
 /** The rewards of one kind that have an end date: their APY summed, the first date. */

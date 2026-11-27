@@ -11,6 +11,7 @@ import {
   morphoLeverage,
 } from '../../../protocols/morpho/markets'
 import { encodeV4Action, executeV4Open, readV4Outcome, v4OpenAction, v4OutcomeLines, type V4OpenPlan } from '../../../protocols/aavev4/execute'
+import { v4EndingRewards } from '../../../protocols/aavev4/reserves'
 import { useQuote } from '../../../services/quotes/useQuote'
 import { useDebounced } from '../../../ui/useDebounced'
 import { getQuote, quoteLabel } from '../../../services/quotes/quotes'
@@ -154,10 +155,8 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
   const rewards = finite ? ctx.supplyRewardApy * loopLev + ctx.borrowRewardApy * (loopLev - 1) : 0
   const apy = finite ? ctx.collateralApy * loopLev - ctx.borrowApy * (loopLev - 1) + rewards : undefined
   // A5: what is left once the rewards with a known end are over
-  const ending = [ctx.pair.collateral.ending.supply, ctx.pair.debt.ending.borrow]
-  const endsAt = Math.min(...ending.filter((e) => e.apy > 0 && e.endsAt !== undefined).map((e) => e.endsAt!))
-  const bonusEnd =
-    finite && apy !== undefined && Number.isFinite(endsAt) ? `, ${fmtBonusEnd(endsAt, apy - ending[0].apy * loopLev - ending[1].apy * (loopLev - 1))}` : ''
+  const ending = finite ? v4EndingRewards(ctx.pair.collateral, ctx.pair.debt, loopLev) : undefined
+  const bonusEnd = ending?.endsAt !== undefined && apy !== undefined ? `, ${fmtBonusEnd(ending.endsAt, apy - ending.apy)}` : ''
   const correlated = isCorrelated({ price: sides.collateral.price, token: C }, { price: sides.loan.price, token: L })
   const signals = useRiskSignals({
     chainId: net.chain.id,

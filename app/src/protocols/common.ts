@@ -1,5 +1,5 @@
 /** What the executor calls of every protocol share: swap steps, the guard (health factor floor, deadline), live quotes. */
-import { maxUint256, type Address, type Hex } from 'viem'
+import { hexToSignature, maxUint256, type Address, type Hex } from 'viem'
 import type { Quote } from '../services/quotes/quotes'
 
 /** How long a call, a signature or a permit stays valid. */
@@ -7,6 +7,12 @@ export const DEADLINE_SECONDS = 20 * 60
 
 export type Step = { router: Address; tokenOut: Address; data: Hex; minOut: bigint }
 export type Guard = { minHealthFactor: bigint; deadline: bigint }
+
+/** v, r, s of a signature, as the contracts take it (v 27 or 28). */
+export function splitSignature(sig: Hex): { v: number; r: Hex; s: Hex } {
+  const { r, s, v, yParity } = hexToSignature(sig)
+  return { v: Number(v ?? BigInt(27 + (yParity ?? 0))), r, s }
+}
 
 export const deadlineFromNow = () => BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
 export const guardOf = (minHealthFactor: bigint): Guard => ({ minHealthFactor, deadline: deadlineFromNow() })

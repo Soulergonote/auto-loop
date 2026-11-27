@@ -7,7 +7,7 @@
  *     contract's `*WithAuth` function, which reverts if the authorization is still there at the end.
  * An account that already authorized the executor for good is served with the plain call.
  */
-import { decodeEventLog, encodeFunctionData, hexToSignature, maxUint256, type Address, type Hash, type Hex, type Log } from 'viem'
+import { decodeEventLog, encodeFunctionData, maxUint256, type Address, type Hash, type Hex, type Log } from 'viem'
 import { simulateContract, waitForTransactionReceipt } from '@wagmi/core'
 import { walletSignTypedData, walletWriteContract } from '../../chain/wallet'
 import { wagmiConfig } from '../../chain/wagmi'
@@ -17,7 +17,7 @@ import { quoteSteps, type Quote } from '../../services/quotes/quotes'
 import { authorizationTypedData, type MarketParams } from './markets'
 import { allowanceCalls, type BatchCall } from '../../chain/batch'
 import { receiptLogs, sendBatchTx, sendExecutorCall, userTx } from '../../chain/send'
-import { deadlineFromNow, guardOf as guard, hfText as hf, liveQuote as live, sameAddress as same, type Step } from '../common'
+import { deadlineFromNow, splitSignature, guardOf as guard, hfText as hf, liveQuote as live, sameAddress as same, type Step } from '../common'
 import type { Progress } from '../../chain/tx'
 import type { TokenInfo } from '../../chain/outcome'
 import { fmtAmount } from '../../ui/format'
@@ -181,11 +181,6 @@ export function encodeAction(a: Action, auth?: AuthSigs, aaveSig?: ExecutorSigna
   return encodeFunctionData({ abi: morphoExecutorAbi, functionName: fn, args: callArgs(a, auth, aaveSig) })
 }
 
-function split(sig: Hex) {
-  const { r, s, v, yParity } = hexToSignature(sig)
-  return { v: Number(v ?? BigInt(27 + (yParity ?? 0))), r, s }
-}
-
 /** Grant (nonce n) and revoke (nonce n + 1) signatures for the executor, valid 20 minutes. */
 export async function signAuthorizations(
   tx: Pick<MorphoTx, 'user' | 'executor'> & { net: Pick<MorphoNet, 'chain' | 'morpho'> },
@@ -206,7 +201,7 @@ export async function signAuthorizations(
     account: tx.user,
     ...authorizationTypedData(tx.net.chain.id, tx.net.morpho, { ...base, isAuthorized: false, nonce: nonce + 1n }),
   })
-  return { nonce, deadline, grant: split(grant), revoke: split(revoke) }
+  return { nonce, deadline, grant: splitSignature(grant), revoke: splitSignature(revoke) }
 }
 
 const LABELS = {
