@@ -24,7 +24,8 @@ import { allowanceCalls, type BatchCall } from '../../chain/batch'
 
 /** A quote for a swap made from the user's wallet, refused unless its calldata does what the quote says. */
 export async function walletQuote(req: QuoteRequest & { taker: Address }, signal?: AbortSignal): Promise<Quote> {
-  const q = await getQuote(req, signal)
+  // Tycho's calldata is not decoded (swapCalldata.ts): it would always be refused here
+  const q = await getQuote({ ...req, exclude: ['tycho'] }, signal)
   if (q.simulated) return q
   const problem = walletSwapProblem(q.aggregator, q.data, {
     sell: req.sell.address,

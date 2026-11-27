@@ -6,6 +6,10 @@ import {
   KYBER_INCLUDED_SOURCES,
   ONEINCH_API_KEY,
   QUOTE_MODE,
+  TYCHO_API_KEY,
+  TYCHO_API_URL,
+  TYCHO_CHAIN_SLUGS,
+  TYCHO_ENABLED,
   VELORA_EXCLUDE_DEXS,
   VELORA_INCLUDE_DEXS,
   VELORA_PARTNER,
@@ -42,6 +46,8 @@ export type QuoteRequest = {
   slippageBps: bigint
   /** oracle prices, only used by the simulated quote */
   oracle: { sell: Side; buy: Side }
+  /** aggregators 'best' must leave out (a wallet swap: those whose calldata the app cannot read back) */
+  exclude?: AggregatorId[]
 }
 
 export type Quote = {
@@ -150,7 +156,7 @@ function takerAllows(chainId: number, taker: Address, id: AggregatorId): Promise
 
 /** The aggregators that can quote this request: they cover the chain and the executor may call their router. */
 async function usableAggregators(req: QuoteRequest): Promise<AggregatorId[]> {
-  const ids = aggregatorsFor(req.chainId)
+  const ids = aggregatorsFor(req.chainId).filter((id) => !req.exclude?.includes(id))
   const ok = await Promise.all(ids.map((id) => takerAllows(req.chainId, req.taker, id)))
   return ids.filter((_, i) => ok[i])
 }
@@ -338,6 +344,9 @@ function oneinchTurn(): Promise<void> {
   return turn
 }
 
+/** Hosted Fynd API (Tycho's router). Without CORS: in the browser, TYCHO_API_URL points to the key-holding proxy. */
+const TYCHO_API = TYCHO_API_URL || 'https://fynd-api.propellerheads.xyz'
+
 type RawQuote = { to: string; data: string; value?: string; buyAmount: string }
 
 // raw JSON of a third-party API, narrowed by each caller
@@ -424,6 +433,37 @@ const LIVE: Record<AggregatorId, (req: QuoteRequest, signal?: AbortSignal) => Pr
     if (!body?.tx?.data) throw new QuoteError('1inch : pas de route')
     if (String(body.tx.data).slice(0, 10).toLowerCase() !== ONEINCH_SWAP) throw new QuoteError('1inch : méthode de swap inattendue')
     return { to: body.tx.to, data: body.tx.data, value: body.tx.value, buyAmount: body.dstAmount }
+  },
+
+  // Tycho, through the hosted Fynd API: one call that solves and encodes for the taker. Any router or client fee is
+  // refused (the docs mention a 0.1 bps router fee on executed swaps; none is accepted).
+  async tycho(req, signal) {
+    const chain = TYCHO_CHAIN_SLUGS[req.chainId]
+    if (!chain) throw new QuoteError('Tycho ne couvre pas cette chaîne')
+    if (!TYCHO_ENABLED) throw new QuoteError('Tycho : ni clé ni proxy dans ce build')
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    // the raw key, no Bearer prefix; the proxy adds it itself
+    if (TYCHO_API_KEY) headers.Authorization = TYCHO_API_KEY
+    const body = await fetchJson(`${TYCHO_API}/v1/${chain}/quote`, {
+      method: 'POST',
+      headers,
+      signal,
+      body: JSON.stringify({
+        orders: [
+          { token_in: req.sell.address, token_out: req.buy.address, amount: req.sellAmount.toString(), side: 'sell', sender: req.taker, receiver: req.taker },
+        ],
+        options: { timeout_ms: 4000, encoding_options: { slippage: Number(req.slippageBps) / 10_000 } },
+      }),
+    })
+    const order = body?.orders?.[0]
+    if (!order || order.status !== 'success') throw new QuoteError(`Tycho : pas de route${order?.status ? ` (${order.status})` : ''}`)
+    const fee = order.fee_breakdown
+    if (!fee) throw new QuoteError('Tycho : frais non détaillés')
+    if (BigInt(fee.router_fee ?? 0) !== 0n || BigInt(fee.client_fee ?? 0) !== 0n) {
+      throw new QuoteError(`Tycho applique des frais (${fee.router_fee} + ${fee.client_fee})`)
+    }
+    if (!order.transaction?.data) throw new QuoteError('Tycho : pas de transaction')
+    return { to: order.transaction.to, data: order.transaction.data, value: order.transaction.value, buyAmount: order.amount_out }
   },
 
   // Velora (ParaSwap) v6.2: price route, then transaction build with ignoreChecks (taker has no balance yet).

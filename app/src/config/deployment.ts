@@ -12,12 +12,18 @@ export function executorLenders(chainId: number): { kind: number; lender: Addres
 /**
  * Routers a new executor whitelists on a chain (fixed for good): every aggregator that quotes there, whether or not
  * this build can quote with it (the list, hence the shared contract's address, must not depend on an API key), and
- * Pendle's where PT loops are offered.
+ * Pendle's where PT loops are offered. `without` gives an earlier list (see SHARED_BEFORE).
  */
-export function executorRouters(chainId: number): { id: AggregatorId | 'pendle'; label: string; router: Address }[] {
+export function executorRouters(chainId: number, without: AggregatorId[] = []): { id: AggregatorId | 'pendle'; label: string; router: Address }[] {
   const seen = new Set<string>()
-  const ids = (Object.keys(AGGREGATORS) as AggregatorId[]).filter((id) => supportsChain(id, chainId))
+  const ids = (Object.keys(AGGREGATORS) as AggregatorId[]).filter((id) => supportsChain(id, chainId) && !without.includes(id))
   const aggregators = ids.map((id) => ({ id, label: AGGREGATORS[id].label, router: routerOf(id, chainId) }))
   const pendle = pendleChain(chainId) ? [{ id: 'pendle' as const, label: 'Pendle', router: getAddress(PENDLE_ROUTER) }] : []
   return [...aggregators, ...pendle].filter((r) => !seen.has(r.router) && !!seen.add(r.router))
 }
+
+/**
+ * Router lists of earlier shared contracts, newest first: adding an aggregator changes the CREATE2 address, so a
+ * shared contract deployed before (same code, fewer routers) is still found at its old address. Before Tycho (2026-11-27).
+ */
+export const SHARED_BEFORE: AggregatorId[][] = [['tycho']]

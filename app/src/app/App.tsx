@@ -40,11 +40,11 @@ import {
   deployExecutor,
   deployMorphoExecutor,
   deployV4Executor,
-  sharedV4ExecutorAddress,
+  sharedV4ExecutorAddresses,
   useSharedV4Executor,
   useV4ExecutorCheck,
-  sharedExecutorAddress,
-  sharedMorphoExecutorAddress,
+  sharedExecutorAddresses,
+  sharedMorphoExecutorAddresses,
   useExecutorCheck,
   useMorphoExecutorCheck,
   useSharedExecutor,
@@ -168,7 +168,7 @@ export function App() {
   const v4Check = useV4ExecutorCheck(v4 ? declaredV4 : { ...declaredV4, executor: undefined })
   const v4Net = useMemo(() => (v4Check.data ? declaredV4 : { ...declaredV4, executor: undefined }), [declaredV4, v4Check.data])
   const sharedV4 = useSharedV4Executor(declaredV4, !DEMO && v4 && !declaredV4.executor)
-  const isSharedV4 = !!v4Net.executor && v4Net.executor === sharedV4ExecutorAddress(v4Net)
+  const isSharedV4 = !!v4Net.executor && sharedV4ExecutorAddresses(v4Net).includes(v4Net.executor)
   /** neither Aave v3 nor its token list: Morpho and Aave v4 bring their own screen */
   const other = morpho || v4
   useEffect(() => {
@@ -189,8 +189,8 @@ export function App() {
     sharedV4.data,
     setLocalExecutor,
   ])
-  const isShared = (m: Market) => !!m.executor && m.executor === sharedExecutorAddress(m)
-  const isSharedMorpho = !!morphoNet.executor && morphoNet.executor === sharedMorphoExecutorAddress(morphoNet)
+  const isShared = (m: Market) => !!m.executor && sharedExecutorAddresses(m).includes(m.executor)
+  const isSharedMorpho = !!morphoNet.executor && sharedMorphoExecutorAddresses(morphoNet).includes(morphoNet.executor)
 
   // what the summary's single button walks through before the screen's own action (charte v2, rule 2)
   const { isPending: checkPending, isError: checkError } = morpho ? morphoCheck : v4 ? v4Check : check

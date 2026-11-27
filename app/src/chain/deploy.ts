@@ -8,7 +8,18 @@ import { wagmiConfig } from './wagmi'
 import { executorAbi, executorAbiV1, morphoExecutorAbi, v4ExecutorAbi } from './abi'
 import { EXECUTOR_BYTECODE_AAVE_V4, EXECUTOR_BYTECODE_MORPHO, EXECUTOR_BYTECODE_V1, EXECUTOR_BYTECODE_V2 } from '../generated/executorBytecode'
 import { EXECUTOR_BYTECODE_MORPHO_0, EXECUTOR_BYTECODE_MORPHO_1, EXECUTOR_BYTECODE_V2_0, EXECUTOR_BYTECODE_V2_1 } from '../generated/executorBytecodeLegacy'
-import { AGGREGATORS, MARKETS, executorLenders, executorRouters, marketPlace, type Market, type MorphoNet, type V4Net } from '../config'
+import {
+  AGGREGATORS,
+  MARKETS,
+  SHARED_BEFORE,
+  executorLenders,
+  executorRouters,
+  marketPlace,
+  type AggregatorId,
+  type Market,
+  type MorphoNet,
+  type V4Net,
+} from '../config'
 
 /** The chain's client and the code at `address`, refused when there is none. */
 async function codeAt(chain: Chain, address: Address) {
@@ -45,13 +56,22 @@ function useCheck<N extends Declared, R>(key: string, net: N, verify: (net: N, a
   })
 }
 
-/** The shared (CREATE2) executor when someone already deployed it and `accept` passes, else null. */
-function useShared<N extends Declared>(key: string, net: N, address: (net: N) => Address, accept: (net: N, a: Address) => Promise<boolean>, enabled: boolean) {
+/**
+ * The shared (CREATE2) executor when someone already deployed it and `accept` passes, else null: the current address
+ * first, then those of the earlier router lists (SHARED_BEFORE).
+ */
+function useShared<N extends Declared>(
+  key: string,
+  net: N,
+  addresses: (net: N) => Address[],
+  accept: (net: N, a: Address) => Promise<boolean>,
+  enabled: boolean,
+) {
   return useQuery({
     queryKey: [key, net.id],
     queryFn: async () => {
-      const a = address(net)
-      return (await hasCode(net.chain.id, a)) && (await accept(net, a)) ? a : null
+      for (const a of addresses(net)) if ((await hasCode(net.chain.id, a)) && (await accept(net, a))) return a
+      return null
     },
     enabled,
     staleTime: 5 * 60_000,
@@ -66,8 +86,8 @@ export type ExecutorVersion = 1 | 2
  */
 export type ExecutorCheck = { version: ExecutorVersion; pendle: boolean; debtSwap: boolean }
 
-export function deployDataV2(market: Market) {
-  const routers = executorRouters(market.chain.id).map((r) => r.router)
+export function deployDataV2(market: Market, without: AggregatorId[] = []) {
+  const routers = executorRouters(market.chain.id, without).map((r) => r.router)
   return encodeDeployData({ abi: executorAbi, bytecode: EXECUTOR_BYTECODE_V2, args: [market.pool, routers, executorLenders(market.chain.id)] })
 }
 
@@ -137,6 +157,12 @@ export const useExecutorCheck = (market: Market) => useCheck('executor-check', m
 /** the market's shared v2 executor address (CREATE2 through the deterministic proxy) */
 export const sharedExecutorAddress = (market: Market) => create2Address(deployDataV2(market))
 
+/** Current shared address, then those of the earlier router lists (same code), without duplicates. */
+const sharedAddresses = (initCode: (without: AggregatorId[]) => Hex): Address[] => [...new Set([[], ...SHARED_BEFORE].map((w) => create2Address(initCode(w))))]
+
+/** every address the market's shared v2 executor may sit at */
+export const sharedExecutorAddresses = (market: Market) => sharedAddresses((w) => deployDataV2(market, w))
+
 const hasCode = async (chainId: number, address: Address) => {
   const client = getPublicClient(wagmiConfig, { chainId })
   if (!client) throw new Error('pas de connexion au réseau')
@@ -146,7 +172,7 @@ const hasCode = async (chainId: number, address: Address) => {
 
 /** the market's shared executor when someone already deployed it (and it passes the code check) */
 export const useSharedExecutor = (market: Market, enabled: boolean) =>
-  useShared('shared-executor', market, sharedExecutorAddress, async (m, a) => (await verifyExecutor(m, a)).version === 2, enabled)
+  useShared('shared-executor', market, sharedExecutorAddresses, async (m, a) => (await verifyExecutor(m, a)).version === 2, enabled)
 
 /**
  * Deploys `initCode` from the connected wallet at its shared address through the deterministic proxy; a chain without
@@ -185,7 +211,8 @@ export async function deployExecutor(market: Market, onStep: (s: string) => void
 /** Aave pools of the chain a Morpho position can be refinanced from or to (fixed in the contract at deployment). */
 export const morphoAavePools = (chainId: number): Address[] => [...new Set(MARKETS.filter((m) => m.chain.id === chainId && !m.soon).map((m) => m.pool))]
 
-const morphoArgs = (net: MorphoNet) => [net.morpho, executorRouters(net.chain.id).map((r) => r.router), morphoAavePools(net.chain.id)] as const
+const morphoArgs = (net: MorphoNet, without: AggregatorId[] = []) =>
+  [net.morpho, executorRouters(net.chain.id, without).map((r) => r.router), morphoAavePools(net.chain.id)] as const
 
 /** The Morpho executor as deployed before `refinance` (no Aave pools): still recognised for everything else. */
 const morphoInitCodeLegacy = (net: MorphoNet) =>
@@ -214,7 +241,8 @@ export async function verifyMorphoExecutor(net: MorphoNet, address: Address): Pr
 
 export const useMorphoExecutorCheck = (net: MorphoNet) => useCheck('morpho-executor-check', net, verifyMorphoExecutor)
 
-const morphoInitCode = (net: MorphoNet) => encodeDeployData({ abi: morphoExecutorAbi, bytecode: EXECUTOR_BYTECODE_MORPHO, args: morphoArgs(net) })
+const morphoInitCode = (net: MorphoNet, without: AggregatorId[] = []) =>
+  encodeDeployData({ abi: morphoExecutorAbi, bytecode: EXECUTOR_BYTECODE_MORPHO, args: morphoArgs(net, without) })
 
 /** The Morpho executor with refinance as deployed before the internal audit R1 fix (2026-11-25): still fully usable. */
 const morphoInitCodeR1 = (net: MorphoNet) => encodeDeployData({ abi: morphoExecutorAbi, bytecode: EXECUTOR_BYTECODE_MORPHO_1 as Hex, args: morphoArgs(net) })
@@ -222,8 +250,11 @@ const morphoInitCodeR1 = (net: MorphoNet) => encodeDeployData({ abi: morphoExecu
 /** the network's shared Morpho executor address (CREATE2 through the deterministic proxy) */
 export const sharedMorphoExecutorAddress = (net: MorphoNet) => create2Address(morphoInitCode(net))
 
+/** every address the network's shared Morpho executor may sit at */
+export const sharedMorphoExecutorAddresses = (net: MorphoNet) => sharedAddresses((w) => morphoInitCode(net, w))
+
 export const useSharedMorphoExecutor = (net: MorphoNet, enabled: boolean) =>
-  useShared('shared-morpho-executor', net, sharedMorphoExecutorAddress, async (n, a) => !!(await verifyMorphoExecutor(n, a)), enabled)
+  useShared('shared-morpho-executor', net, sharedMorphoExecutorAddresses, async (n, a) => !!(await verifyMorphoExecutor(n, a)), enabled)
 
 /** Deploys the network's shared Morpho executor from the connected wallet, waits for it, then verifies it on chain. */
 export async function deployMorphoExecutor(net: MorphoNet, onStep: (s: string) => void): Promise<Address> {
@@ -237,8 +268,10 @@ export async function deployMorphoExecutor(net: MorphoNet, onStep: (s: string) =
 // LeverageExecutorV4 (one per set of Aave v4 position managers, for every spoke they serve)
 // ---------------------------------------------------------------------------------------------------------------------
 
-const v4Args = (net: V4Net) => [net.morpho, net.giver, net.taker, executorRouters(net.chain.id).map((r) => r.router), morphoAavePools(net.chain.id)] as const
-export const v4InitCode = (net: V4Net) => encodeDeployData({ abi: v4ExecutorAbi, bytecode: EXECUTOR_BYTECODE_AAVE_V4, args: v4Args(net) })
+const v4Args = (net: V4Net, without: AggregatorId[] = []) =>
+  [net.morpho, net.giver, net.taker, executorRouters(net.chain.id, without).map((r) => r.router), morphoAavePools(net.chain.id)] as const
+export const v4InitCode = (net: V4Net, without: AggregatorId[] = []) =>
+  encodeDeployData({ abi: v4ExecutorAbi, bytecode: EXECUTOR_BYTECODE_AAVE_V4, args: v4Args(net, without) })
 
 /**
  * Same check as `verifyExecutor` for the v4 executor: code equal to the constructor's output for this entry's Morpho,
@@ -257,7 +290,10 @@ export const useV4ExecutorCheck = (net: V4Net) => useCheck('v4-executor-check', 
 /** the shared v4 executor address of this set of position managers (CREATE2 through the deterministic proxy) */
 export const sharedV4ExecutorAddress = (net: V4Net) => create2Address(v4InitCode(net))
 
-export const useSharedV4Executor = (net: V4Net, enabled: boolean) => useShared('shared-v4-executor', net, sharedV4ExecutorAddress, verifyV4Executor, enabled)
+/** every address the shared v4 executor may sit at */
+export const sharedV4ExecutorAddresses = (net: V4Net) => sharedAddresses((w) => v4InitCode(net, w))
+
+export const useSharedV4Executor = (net: V4Net, enabled: boolean) => useShared('shared-v4-executor', net, sharedV4ExecutorAddresses, verifyV4Executor, enabled)
 
 /** Deploys the shared v4 executor from the connected wallet, waits for it, then verifies it on chain. */
 export async function deployV4Executor(net: V4Net, onStep: (s: string) => void): Promise<Address> {
