@@ -273,7 +273,7 @@ async function bestQuote(req: QuoteRequest, signal?: AbortSignal): Promise<Quote
   )
   const quotes = settled.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
   if (quotes.length) return { ...quotes.reduce((a, b) => (b.buyAmount > a.buyAmount ? b : a)), alternatives }
-  const reason = alternatives.map((a) => `${AGGREGATORS[a.aggregator].label} : ${a.error}`).join(' ; ')
+  const reason = alternatives.map((a) => labelled(a.aggregator, a.error ?? '')).join(' ; ')
   if (QUOTE_MODE === 'live' || signal?.aborted) throw new QuoteError(reason)
   return { ...simulatedQuote({ ...req, aggregator: ids[0] }, reason), alternatives }
 }
@@ -284,8 +284,14 @@ async function singleQuote(req: SingleRequest, signal?: AbortSignal): Promise<Qu
     return await liveQuote(req, signal)
   } catch (e) {
     if (QUOTE_MODE === 'live' || signal?.aborted) throw e
-    return simulatedQuote(req, `${AGGREGATORS[req.aggregator].label} : ${e instanceof Error ? e.message : String(e)}`)
+    return simulatedQuote(req, labelled(req.aggregator, e instanceof Error ? e.message : String(e)))
   }
+}
+
+/** "Label : message", without repeating the label when the message already starts with it. */
+function labelled(id: AggregatorId, message: string): string {
+  const label = AGGREGATORS[id].label
+  return message.startsWith(`${label} `) ? message : `${label} : ${message}`
 }
 
 export function simulatedQuote(req: SingleRequest, fallbackReason?: string): Quote {
