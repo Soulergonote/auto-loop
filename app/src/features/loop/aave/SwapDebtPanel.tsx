@@ -21,7 +21,7 @@ import { Banners, Card, Fold, LoopLayout, Metric, QuoteCompare, Segmented, Summa
 import { pairKind, reserveAsset, useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
-import { RateMetric } from '../shared/RateMetric'
+import { kinkAfter, RateMetric } from '../shared/RateMetric'
 import { adjustedRate, rateOf, type AdjustedRate } from '../../../domain/irm'
 import { aaveRateCurve, snapshotQuery } from '../../../protocols/aave/snapshot'
 import { DeployPanel } from '../shared/DeployPanel'
@@ -350,7 +350,7 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
               value={q ? `${fmtAmount(newDebt, T.token.decimals)} ${T.token.symbol}` : undefined}
               sub={q && `${fmtUsd(newDebtBase)} · sans prime de flash loan`}
             />
-            {tRate && <RateMetric borrow={{ label: T.token.symbol, rate: tRate }} />}
+            {tRate && <RateMetric borrow={{ label: T.token.symbol, rate: tRate }} kink={kinkAfter(curveOf(T), Number(newDebtBase) / 1e8)} />}
             <Metric
               label="Économie par an"
               value={savedPerYear !== undefined ? fmtUsd(BigInt(Math.round(savedPerYear * 1e8))) : undefined}

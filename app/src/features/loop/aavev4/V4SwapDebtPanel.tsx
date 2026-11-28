@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { Address, Hash } from 'viem'
 import { encodeV4Action, executeV4SwapDebt, readV4Outcome, v4OutcomeLines, v4SwapDebtAction, type V4SwapDebtPlan } from '../../../protocols/aavev4/execute'
 import { readV4ReserveUser, usdToUnits, v4BorrowApy, v4AdjustedRates } from '../../../protocols/aavev4/state'
-import { RateMetric } from '../shared/RateMetric'
+import { kinkAfter, RateMetric } from '../shared/RateMetric'
 import { rateOf } from '../../../domain/irm'
 import { v4DebtTargets, v4Hf } from '../../../protocols/aavev4/switch'
 import { fullDebtTarget, quoteDebtSwap } from '../../../protocols/aave/swapDebt'
@@ -315,7 +315,7 @@ export function V4SwapDebtPanel({ ctx }: { ctx: V4Ctx }) {
               value={q ? `${fmtAmount(newDebt, T.token.decimals)} ${T.token.symbol}` : undefined}
               sub={q && `${fmtUsd(newValue)} · flash loan gratuit`}
             />
-            {tRate && <RateMetric borrow={{ label: T.token.symbol, rate: tRate }} />}
+            {tRate && <RateMetric borrow={{ label: T.token.symbol, rate: tRate }} kink={kinkAfter(T.curve, Number(newValue) / 1e8, ctx.riskPremium)} />}
             <Metric
               label="Rendu"
               value={returned > 0n ? `${fmtAmount(returned, D.token.decimals)} ${D.token.symbol}` : '—'}

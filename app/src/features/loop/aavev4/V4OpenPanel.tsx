@@ -25,7 +25,7 @@ import { RiskPanel } from '../shared/RiskPanel'
 import { PositionBar } from '../../../ui/PositionBar'
 import { projectHealthFactor } from '../../../domain/projection'
 import { ApyBreakdown } from '../shared/ApyBreakdown'
-import { RateMetric } from '../shared/RateMetric'
+import { kinkAfter, RateMetric } from '../shared/RateMetric'
 import { rateOf } from '../../../domain/irm'
 import { v4AdjustedRates } from '../../../protocols/aavev4/state'
 import { useRiskSignals } from '../shared/RiskSignals'
@@ -426,7 +426,11 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
             value={q ? `${fmtAmount(capColl + q.buyAmount, C.decimals)} ${C.symbol}` : undefined}
             sub={q && `dont ${fmtAmount(q.buyAmount, C.decimals)} via ${quoteLabel(q)}`}
           />
-          <RateMetric borrow={{ label: L.symbol, rate: rates.borrow }} supply={{ label: C.symbol, rate: rates.supply }} />
+          <RateMetric
+            borrow={{ label: L.symbol, rate: rates.borrow }}
+            supply={{ label: C.symbol, rate: rates.supply }}
+            kink={kinkAfter(ctx.pair.debt.curve, Number(toBase(debtAmount, sides.loan)) / 1e8, ctx.riskPremium)}
+          />
           <YieldMetrics
             ptExpired={false}
             expiredHint=""

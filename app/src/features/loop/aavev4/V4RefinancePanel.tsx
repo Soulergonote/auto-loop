@@ -5,7 +5,8 @@ import type { Market } from '../../../config'
 import { readV4Outcome, v4OutcomeLines } from '../../../protocols/aavev4/execute'
 import { encodeV4Refinance, executeV4Refinance, type V4Place, type V4RefinancePlan } from '../../../protocols/aavev4/refinance'
 import { readV4State, v4AdjustedRates, v4PairKey, type V4Pair, type V4State } from '../../../protocols/aavev4/state'
-import { adjustedRate, rateOf, type RateChange } from '../../../domain/irm'
+import { adjustedRate, rateOf, type RateChange, type RateCurve } from '../../../domain/irm'
+import { kinkAfter, KinkNote } from '../shared/RateMetric'
 import { v4SamePairs } from '../../../protocols/aavev4/switch'
 import { withInterestMargin } from '../../../protocols/morpho/execute'
 import { morphoHf, morphoMarketsQuery, morphoRateCurve, readMorphoState, type MorphoMarket, type MorphoState } from '../../../protocols/morpho/markets'
@@ -201,6 +202,17 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
     return { supply: Number(toBase(m.coll, sides.collateral)) / 1e8, borrow: Number(toBase(m.debt, sides.loan)) / 1e8 }
   }
   const landing: RateChange = { supply: Number(collV) / 1e8, borrow: Number(debtV) / 1e8 }
+  /** A3: the borrow curve where the position lands, with the premium its rate takes there */
+  const landingCurve = (x: Route): { curve?: RateCurve; premium: number } => {
+    if (!x.out) return { curve: ctx.pair.debt.curve, premium: ctx.riskPremium }
+    const o = x.other
+    if (o.kind === 'v4')
+      return { curve: o.pair.debt.curve, premium: o.state.user?.otherPositions ? o.state.user.riskPremium : o.pair.collateral.collateralRisk }
+    if (o.kind === 'aave') return { curve: aaveRateCurve(o.pair.debt), premium: 0 }
+    const base = o.state.borrowApy ?? o.market.borrowApy
+    return { curve: morphoRateCurve(o.market, o.state, base), premium: 0 }
+  }
+  const landingKink = r ? ((l) => kinkAfter(l.curve, landing.borrow ?? 0, l.premium))(landingCurve(r)) : undefined
   const fromRates = r ? (r.out ? hereRates() : ratesOf(r.other)) : undefined
   const toRates = r ? (r.out ? ratesOf(r.other, landing) : hereRates(landing)) : undefined
   const apyOf = (x?: { supply: number; borrow: number }) =>
@@ -495,7 +507,17 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
                 <Metric
                   label="Taux d’emprunt"
                   value={fmtPct(toRates.borrow)}
-                  sub={`avant ${fmtPct(fromRates.borrow)}`}
+                  sub={
+                    <>
+                      avant {fmtPct(fromRates.borrow)}
+                      {landingKink && (
+                        <>
+                          <br />
+                          <KinkNote kink={landingKink} />
+                        </>
+                      )}
+                    </>
+                  }
                   tone={toRates.borrow < fromRates.borrow ? 'good' : toRates.borrow > fromRates.borrow ? 'bad' : undefined}
                 />
               )}

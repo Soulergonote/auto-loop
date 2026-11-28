@@ -29,7 +29,7 @@ import { PositionBar } from '../../../ui/PositionBar'
 import { projectHealthFactor } from '../../../domain/projection'
 import { ApyHistory } from '../shared/ApyHistory'
 import { ApyBreakdown } from '../shared/ApyBreakdown'
-import { RateMetric } from '../shared/RateMetric'
+import { kinkAfter, RateMetric } from '../shared/RateMetric'
 import { adjustedRate, rateOf } from '../../../domain/irm'
 import { useMorphoBorrowSeries } from '../../../protocols/morpho/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
@@ -178,12 +178,9 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
   const worstHf = newCollMin !== undefined ? morphoHf(newCollMin, newDebt, state.price, M.params.lltv) : undefined
   const loopLev = newColl !== undefined ? morphoLeverage(newColl, newDebt, state.price) : undefined
   // the borrow rate right after this transaction: its own borrow raises the market's utilization (AdaptiveCurveIRM, irm.ts)
-  const borrowRate = adjustedRate(
-    ctx.borrowApy,
-    morphoRateCurve(M, state, ctx.borrowApy),
-    { borrow: (Number(debtAmount) / 10 ** L.decimals) * M.loanUsd },
-    'borrow',
-  )
+  const debtCurve = morphoRateCurve(M, state, ctx.borrowApy)
+  const addedDebtUsd = (Number(debtAmount) / 10 ** L.decimals) * M.loanUsd
+  const borrowRate = adjustedRate(ctx.borrowApy, debtCurve, { borrow: addedDebtUsd }, 'borrow')
   const borrowApy = rateOf(borrowRate)
   // Merkl campaigns (collateral and borrow, M7) are added on equity
   const merklApy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoMerklApy(ctx.merkl, loopLev) : 0
@@ -464,7 +461,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             value={q ? `${fmtAmount(capColl + q.buyAmount, C.decimals)} ${ptShortSymbol(C.symbol)}` : undefined}
             sub={q && `dont ${fmtAmount(q.buyAmount, C.decimals)} via ${quoteLabel(q)}`}
           />
-          <RateMetric borrow={{ label: L.symbol, rate: borrowRate }} />
+          <RateMetric borrow={{ label: L.symbol, rate: borrowRate }} kink={kinkAfter(debtCurve, addedDebtUsd)} />
           <YieldMetrics
             pt={pt}
             ptExpired={ptExpired}

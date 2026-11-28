@@ -10,7 +10,7 @@ import { projectHealthFactor } from '../../../domain/projection'
 import { thresholdOf } from '../../../domain/positionBar'
 import { ApyHistory } from '../shared/ApyHistory'
 import { ApyBreakdown } from '../shared/ApyBreakdown'
-import { RateMetric } from '../shared/RateMetric'
+import { kinkAfter, RateMetric } from '../shared/RateMetric'
 import { adjustedRate, rateOf } from '../../../domain/irm'
 import { useAaveRateSeries } from '../../../protocols/aave/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
@@ -345,7 +345,8 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
   // the rates right after this transaction: its borrow raises the debt reserve's utilization, its supply lowers the
   // collateral's (irm.ts); today's when the curve is unknown
   const snapOf = (t: typeof C) => snapshot.data?.reserves.find((r) => r.token.address === t.token.address)
-  const borrowRate = adjustedRate(D.borrowApy, aaveRateCurve(snapOf(D)), { borrow: Number(soldBase) / 1e8 }, 'borrow')
+  const debtCurve = aaveRateCurve(snapOf(D))
+  const borrowRate = adjustedRate(D.borrowApy, debtCurve, { borrow: Number(soldBase) / 1e8 }, 'borrow')
   const supplyRate = adjustedRate(C.supplyApy, aaveRateCurve(snapOf(C)), { supply: Number(addedCollBase) / 1e8 }, 'supply')
   const borrowApy = rateOf(borrowRate)
   const supplyApy = rateOf(supplyRate)
@@ -700,7 +701,11 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
                   : `dont ${fmtAmount(q.buyAmount, C.token.decimals)} via ${quoteLabel(q)}`)
             }
           />
-          <RateMetric borrow={{ label: D.token.symbol, rate: borrowRate }} supply={pt ? undefined : { label: C.token.symbol, rate: supplyRate }} />
+          <RateMetric
+            borrow={{ label: D.token.symbol, rate: borrowRate }}
+            supply={pt ? undefined : { label: C.token.symbol, rate: supplyRate }}
+            kink={kinkAfter(debtCurve, Number(soldBase) / 1e8)}
+          />
           <YieldMetrics
             pt={pt}
             ptExpired={ptExpired}

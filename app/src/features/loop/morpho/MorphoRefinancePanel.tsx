@@ -4,6 +4,7 @@ import type { Address } from 'viem'
 import { MARKETS, getMarket, type Market } from '../../../config'
 import { morphoHf, morphoLeverage, morphoNetApy, morphoRateCurve } from '../../../protocols/morpho/markets'
 import { adjustedRate, rateOf } from '../../../domain/irm'
+import { kinkAfter, KinkNote } from '../shared/RateMetric'
 import {
   REPAY_ALL,
   encodeAction,
@@ -329,6 +330,10 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
     </Summary>
   )
 
+  // A3: the borrow curve where the position lands
+  const landingKink = r
+    ? kinkAfter(r.toMorpho ? morphoRateCurve(M, state, ctx.borrowApy) : aaveRateCurve(r.pair.debt), Number(toBase(debtMoved, sides.loan)) / 1e8)
+    : undefined
   const borrowOf = (aave: boolean) => (aave && aD ? aBorrow : mBorrowNet)
   return (
     <LoopLayout summary={summary}>
@@ -372,7 +377,17 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
               <Metric
                 label="Taux d’emprunt"
                 value={fmtPct(borrowOf(!r.toMorpho))}
-                sub={`avant ${fmtPct(borrowOf(r.toMorpho))}`}
+                sub={
+                  <>
+                    avant {fmtPct(borrowOf(r.toMorpho))}
+                    {landingKink && (
+                      <>
+                        <br />
+                        <KinkNote kink={landingKink} />
+                      </>
+                    )}
+                  </>
+                }
                 tone={borrowOf(!r.toMorpho) < borrowOf(r.toMorpho) ? 'good' : borrowOf(!r.toMorpho) > borrowOf(r.toMorpho) ? 'bad' : undefined}
               />
             </div>
