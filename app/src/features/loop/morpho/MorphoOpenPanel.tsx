@@ -11,6 +11,7 @@ import {
   morphoHf,
   morphoLeverage,
   morphoNetApy,
+  morphoRateCurve,
 } from '../../../protocols/morpho/markets'
 import { encodeAction, executeMorpho, morphoOutcomeLines, openAction, readMorphoOutcome, type MorphoOpenPlan } from '../../../protocols/morpho/execute'
 import { useQuote } from '../../../services/quotes/useQuote'
@@ -28,6 +29,8 @@ import { PositionBar } from '../../../ui/PositionBar'
 import { projectHealthFactor } from '../../../domain/projection'
 import { ApyHistory } from '../shared/ApyHistory'
 import { ApyBreakdown } from '../shared/ApyBreakdown'
+import { RateMetric } from '../shared/RateMetric'
+import { adjustedRate, rateOf } from '../../../domain/irm'
 import { useMorphoBorrowSeries } from '../../../protocols/morpho/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Summary, TxResult } from '../../../ui/primitives'
@@ -174,9 +177,17 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
   const hf = newColl !== undefined ? morphoHf(newColl, newDebt, state.price, M.params.lltv) : undefined
   const worstHf = newCollMin !== undefined ? morphoHf(newCollMin, newDebt, state.price, M.params.lltv) : undefined
   const loopLev = newColl !== undefined ? morphoLeverage(newColl, newDebt, state.price) : undefined
+  // the borrow rate right after this transaction: its own borrow raises the market's utilization (AdaptiveCurveIRM, irm.ts)
+  const borrowRate = adjustedRate(
+    ctx.borrowApy,
+    morphoRateCurve(M, state, ctx.borrowApy),
+    { borrow: (Number(debtAmount) / 10 ** L.decimals) * M.loanUsd },
+    'borrow',
+  )
+  const borrowApy = rateOf(borrowRate)
   // Merkl campaigns (collateral and borrow, M7) are added on equity
   const merklApy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoMerklApy(ctx.merkl, loopLev) : 0
-  const apy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoNetApy(loopLev, collateralApy, ctx.borrowApy) + merklApy : undefined
+  const apy = loopLev !== undefined && Number.isFinite(loopLev) ? morphoNetApy(loopLev, collateralApy, borrowApy) + merklApy : undefined
   // A5: what is left once the campaigns with a known end are over
   const bonusEnd =
     ctx.merkl.endsAt !== undefined && apy !== undefined && loopLev !== undefined
@@ -221,8 +232,8 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
   const unreal = (worstHf !== undefined && worstHf < 1) || debtAmount > state.liquidity || !!lossIssue?.block
   if (pt && ptDays !== undefined && !ptExpired && ptDays < 14)
     warnings.push(`Échéance dans ${Math.floor(ptDays)} j : le rendement fixe ne court plus que jusqu’au ${fmtDate(pt.expiry)}.`)
-  if (fixedApy !== undefined && ctx.borrowApy > fixedApy)
-    warnings.push(`L’emprunt ${L.symbol} (${fmtPct(ctx.borrowApy)}) coûte plus que l’APY fixe du PT (${fmtPct(fixedApy)}) : la boucle perd chaque jour.`)
+  if (fixedApy !== undefined && borrowApy > fixedApy)
+    warnings.push(`L’emprunt ${L.symbol} (${fmtPct(borrowApy)}) coûte plus que l’APY fixe du PT (${fmtPct(fixedApy)}) : la boucle perd chaque jour.`)
   if (!pt && ctx.collateralApy === 0) warnings.push(`Aucun rendement connu pour ${C.symbol} : l’APY ne compte que le coût de l’emprunt.`)
   if (hf !== undefined && !unreal && hf < hfThresholds(correlated).ok)
     warnings.push(
@@ -350,7 +361,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
         projectedHf={projectHealthFactor(
           hf,
           [{ value: 1, apy: collateralApy, pt: pt && ptDays !== undefined ? { daysLeft: ptDays } : undefined }],
-          [{ value: 1, apy: ctx.borrowApy }],
+          [{ value: 1, apy: borrowApy }],
           90,
         )}
         amounts={debtUsd !== undefined ? { collateral: (debtUsd * hf) / M.lltv, debt: debtUsd } : undefined}
@@ -453,6 +464,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             value={q ? `${fmtAmount(capColl + q.buyAmount, C.decimals)} ${ptShortSymbol(C.symbol)}` : undefined}
             sub={q && `dont ${fmtAmount(q.buyAmount, C.decimals)} via ${quoteLabel(q)}`}
           />
+          <RateMetric borrow={{ label: L.symbol, rate: borrowRate }} />
           <YieldMetrics
             pt={pt}
             ptExpired={ptExpired}
@@ -482,7 +494,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             healthFactor={hf}
             leverage={loopLev}
             supplyApy={collateralApy}
-            borrowApy={ctx.borrowApy}
+            borrowApy={borrowApy}
             rewardsApy={merklApy}
             correlated={correlated}
             apy={apy}
@@ -497,7 +509,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             collateralLabel={pt ? `${ptShortSymbol(C.symbol)} (taux fixe)` : C.symbol}
             rewards={merklApy}
             rewardsLabel={merklApy > 0 ? 'Récompenses et Merkl' : 'Récompenses d’emprunt'}
-            borrowCost={ctx.borrowApy}
+            borrowCost={borrowApy}
             debtLabel={L.symbol}
             withCosts={horizonYield}
             horizon={pt ? undefined : horizon}

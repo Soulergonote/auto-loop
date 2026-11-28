@@ -110,3 +110,20 @@ export function kinkOf(curve: RateCurve): { room: number; borrowApy: number; uti
   const atTarget = curve.supplied > 0 ? apyToApr(curve.borrowApy) / morphoCurve(curve.borrowed / curve.supplied) : 0
   return { room: Math.max(0, TARGET_U * curve.supplied - curve.borrowed), borrowApy: aprToApy(atTarget), utilization: TARGET_U }
 }
+
+/** A rate as a screen shows it: today's, and the one right after the trade when its curve is known */
+export type AdjustedRate = { now: number; after?: number }
+
+/** the rate the screen computes with: after the trade when known, else today's */
+export const rateOf = (r: AdjustedRate) => r.after ?? r.now
+
+/**
+ * Today's `now` rate on one side of a venue, and that side's rate once `change` is applied. No curve, no change or a
+ * trade larger than the venue: only `now`.
+ */
+export function adjustedRate(now: number, curve: RateCurve | undefined, change: RateChange, side: 'supply' | 'borrow'): AdjustedRate {
+  if (!curve || (!change.supply && !change.borrow)) return { now }
+  const r = ratesAfter(curve, change)
+  const after = side === 'borrow' ? r?.borrowApy : r?.supplyApy
+  return after === undefined ? { now } : { now, after }
+}

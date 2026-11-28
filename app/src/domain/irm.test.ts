@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  adjustedRate,
   aaveBorrowApr,
   aaveModelMatches,
   aaveRatesAfter,
@@ -8,6 +9,7 @@ import {
   kinkOf,
   morphoBorrowApyAfter,
   morphoCurve,
+  rateOf,
   ratesAfter,
   type RateCurve,
 } from './irm'
@@ -91,5 +93,21 @@ describe('kinkOf (A3)', () => {
     const k = kinkOf({ kind: 'morpho', borrowApy: 0.06, supplied: 100, borrowed: 80 })
     expect(k.room).toBeCloseTo(10, 9)
     expect(k.borrowApy).toBeCloseTo(aprToApy(Math.log1p(0.06) / morphoCurve(0.8)), 9)
+  })
+})
+
+describe('adjustedRate', () => {
+  const aave: RateCurve = { kind: 'aave', irm: usdc, cash: 20, debt: 80 }
+  it('keeps today’s rate alone without a curve, a change or room', () => {
+    expect(adjustedRate(0.05, undefined, { borrow: 5 }, 'borrow')).toEqual({ now: 0.05 })
+    expect(adjustedRate(0.05, aave, {}, 'borrow')).toEqual({ now: 0.05 })
+    expect(adjustedRate(0.05, aave, { borrow: 25 }, 'borrow')).toEqual({ now: 0.05 })
+    expect(rateOf({ now: 0.05 })).toBe(0.05)
+  })
+  it('gives the side asked for after the trade', () => {
+    const r = adjustedRate(0.05, aave, { borrow: 15 }, 'borrow')
+    expect(r.after).toBeCloseTo(aprToApy(0.0475 + 0.1 * 0.5), 9)
+    expect(rateOf(r)).toBe(r.after)
+    expect(adjustedRate(0.03, aave, { supply: 100 }, 'supply').after).toBeLessThan(aaveRatesAfter(usdc, 20, 80, 0, 0)!.supplyApy)
   })
 })

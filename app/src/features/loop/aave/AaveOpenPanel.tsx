@@ -10,6 +10,8 @@ import { projectHealthFactor } from '../../../domain/projection'
 import { thresholdOf } from '../../../domain/positionBar'
 import { ApyHistory } from '../shared/ApyHistory'
 import { ApyBreakdown } from '../shared/ApyBreakdown'
+import { RateMetric } from '../shared/RateMetric'
+import { adjustedRate, rateOf } from '../../../domain/irm'
 import { useAaveRateSeries } from '../../../protocols/aave/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
 import { canBorrow, eligibleEModes, withEMode, type EModeCategory, type Reserves, type UserState } from '../../../protocols/aave/useMarket'
@@ -42,7 +44,7 @@ import { fmtAmount, fmtBonusEnd, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtU
 import { isCorrelated } from '../../../domain/pairs'
 import { useQuery } from '@tanstack/react-query'
 import { exitIssues, exitSellAmount, utilization } from '../../../domain/exitCheck'
-import { snapshotQuery } from '../../../protocols/aave/snapshot'
+import { aaveRateCurve, snapshotQuery } from '../../../protocols/aave/snapshot'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, QuoteCompare, Metric, NA, Summary, TxResult } from '../../../ui/primitives'
 import { pairKind, reserveAsset, useSlippage } from '../../../domain/slippage'
@@ -236,7 +238,8 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
   const plainExit = useQuote(plainExitReq)
   const plainExitPending = !!plainExitReq && !plainExit.data && !plainExit.isError
   // the collateral's Aave reserve almost all lent out: withdrawing it at close may have to wait
-  const snapshot = useQuery({ ...snapshotQuery(market), enabled: !pt })
+  // (and the reserves' rate curves, for the rates right after this transaction)
+  const snapshot = useQuery(snapshotQuery(market))
   const collSnap = snapshot.data?.reserves.find((r) => r.token.address === C.token.address)
   const exitRead =
     plainExitReq && !plainExitPending
@@ -306,8 +309,6 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
   })
   if (pt && ptDays !== undefined && !ptExpired && ptDays < 14)
     warnings.push(`Échéance dans ${Math.floor(ptDays)} j : le rendement fixe ne court plus que jusqu’au ${fmtDate(pt.expiry)}.`)
-  if (fixedApy !== undefined && D.borrowApy + (D.native?.apy ?? 0) > fixedApy)
-    warnings.push(`L’emprunt ${D.token.symbol} (${fmtPct(D.borrowApy)}) coûte plus que l’APY fixe du PT (${fmtPct(fixedApy)}) : la boucle perd chaque jour.`)
   if (proj && !unreal && proj.healthFactor < hfThresholds(correlated).ok)
     warnings.push(
       `Health factor ${fmtHf(proj.healthFactor)} : une baisse de ${fmtPct(proj.dropToLiquidation, 1)} de ${C.token.symbol} face à ${D.token.symbol} suffit à liquider la position.`,
@@ -341,6 +342,16 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
       : proj.leverage
     : undefined
 
+  // the rates right after this transaction: its borrow raises the debt reserve's utilization, its supply lowers the
+  // collateral's (irm.ts); today's when the curve is unknown
+  const snapOf = (t: typeof C) => snapshot.data?.reserves.find((r) => r.token.address === t.token.address)
+  const borrowRate = adjustedRate(D.borrowApy, aaveRateCurve(snapOf(D)), { borrow: Number(soldBase) / 1e8 }, 'borrow')
+  const supplyRate = adjustedRate(C.supplyApy, aaveRateCurve(snapOf(C)), { supply: Number(addedCollBase) / 1e8 }, 'supply')
+  const borrowApy = rateOf(borrowRate)
+  const supplyApy = rateOf(supplyRate)
+  if (fixedApy !== undefined && borrowApy + (D.native?.apy ?? 0) > fixedApy)
+    warnings.push(`L’emprunt ${D.token.symbol} (${fmtPct(borrowApy)}) coûte plus que l’APY fixe du PT (${fmtPct(fixedApy)}) : la boucle perd chaque jour.`)
+
   // Merkl: only the campaigns whose rules the projected position meets count in the APY
   const pairCampaigns = campaignsForPair(reserves.campaigns, C, D)
   const eligibility = proj ? eligibleForPosition(pairCampaigns, { healthFactor: proj.healthFactor, debtToken: D.variableDebtToken }) : undefined
@@ -348,7 +359,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
   const rewardsApy = yields.reduce((sum, y) => sum + y.apy, 0)
   // the intrinsic yield of yield-bearing legs lasts like the Aave rates: it counts with them over the horizon
   const nativeApy = loopLev !== undefined ? loopNativeApy(loopLev, cNative, D.native) : 0
-  const ratesApy = loopLev !== undefined ? netApy(loopLev, C.supplyApy, D.borrowApy) + nativeApy : undefined
+  const ratesApy = loopLev !== undefined ? netApy(loopLev, supplyApy, borrowApy) + nativeApy : undefined
   const apy = ratesApy !== undefined ? ratesApy + rewardsApy : undefined
   // the same loop priced on the 7- and 30-day average Aave rates instead of today's
   const averageApy = Object.fromEntries(
@@ -554,11 +565,11 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
           [
             {
               value: Number(proj.collateralBase),
-              apy: C.supplyApy + (pt ? 0 : (cNative?.apy ?? 0)),
+              apy: supplyApy + (pt ? 0 : (cNative?.apy ?? 0)),
               pt: pt && ptDays !== undefined ? { daysLeft: ptDays, discount: pt.discount } : undefined,
             },
           ],
-          [{ value: Number(proj.debtBase), apy: D.borrowApy + (D.native?.apy ?? 0) }],
+          [{ value: Number(proj.debtBase), apy: borrowApy + (D.native?.apy ?? 0) }],
           90,
         )}
         amounts={{ collateral: Number(proj.collateralBase) / 1e8, debt: Number(proj.debtBase) / 1e8 }}
@@ -689,6 +700,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
                   : `dont ${fmtAmount(q.buyAmount, C.token.decimals)} via ${quoteLabel(q)}`)
             }
           />
+          <RateMetric borrow={{ label: D.token.symbol, rate: borrowRate }} supply={pt ? undefined : { label: C.token.symbol, rate: supplyRate }} />
           <YieldMetrics
             pt={pt}
             ptExpired={ptExpired}
@@ -730,8 +742,8 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
             debt={D.token.symbol}
             healthFactor={proj.healthFactor}
             leverage={loopLev}
-            supplyApy={C.supplyApy + (cNative?.apy ?? 0)}
-            borrowApy={D.borrowApy}
+            supplyApy={supplyApy + (cNative?.apy ?? 0)}
+            borrowApy={borrowApy}
             debtNativeApy={D.native?.apy ?? 0}
             rewardsApy={rewardsApy}
             correlated={correlated}
@@ -740,7 +752,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
             signals={signals}
             maturity={
               pt && pt.discount !== undefined && ptDays !== undefined && !ptExpired
-                ? { days: ptDays, healthFactor: hfAtMaturity(proj.healthFactor, pt.discount, D.borrowApy, ptDays) }
+                ? { days: ptDays, healthFactor: hfAtMaturity(proj.healthFactor, pt.discount, borrowApy, ptDays) }
                 : undefined
             }
           />
@@ -749,11 +761,11 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
         {loopLev !== undefined && !unreal && (
           <ApyBreakdown
             leverage={loopLev}
-            collateralYield={C.supplyApy + (cNative?.apy ?? 0)}
+            collateralYield={supplyApy + (cNative?.apy ?? 0)}
             collateralLabel={pt ? `${ptShortSymbol(C.token.symbol)} (taux fixe)` : C.token.symbol}
             rewards={rewardsApy}
             rewardsLabel="Merkl"
-            borrowCost={D.borrowApy + (D.native?.apy ?? 0)}
+            borrowCost={borrowApy + (D.native?.apy ?? 0)}
             debtLabel={D.token.symbol}
             withCosts={horizonYield}
             horizon={pt ? undefined : horizon}
