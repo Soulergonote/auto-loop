@@ -73,6 +73,19 @@ describe('scanV4', () => {
     expect(r.apyAfterRewards).toBeCloseTo(-0.0528 * (L - 1))
     expect(r.stable && r.correlated).toBe(true)
   })
+  it('with an amount, prices the borrow after the loop on the hub curve, premium on top', () => {
+    // 1 M in the hub, 800 k borrowed, optimal 90 %: 4.8 % APR today is base 0 + 5.4 % × 0.8 / 0.9
+    const irm = { optimal: 0.9, base: 0, slope1: 0.054, slope2: 0.3, reserveFactor: 0.1 }
+    const curved = { ...usdt, borrowApy: Math.expm1(0.048), curve: { kind: 'aave' as const, irm, cash: 200_000, debt: 800_000 } }
+    const [r] = scanV4([usde, curved], { targetHf: 1.1, equityUsd: 20_000 })
+    const L = 1.1 / 0.17
+    const u = (800_000 + (L - 1) * 20_000) / 1_000_000
+    const base = Math.expm1(0.054 + (0.3 * (u - 0.9)) / 0.1)
+    expect(r.borrowCost).toBeCloseTo(base * 1.1, 9)
+    expect(r.apyBefore).toBeCloseTo(0.059 * L - Math.expm1(0.048) * 1.1 * (L - 1), 9)
+    expect(r.apy).toBeLessThan(r.apyBefore!)
+    expect(scanV4([usde, curved], { targetHf: 1.1 })[0].apyBefore).toBeUndefined()
+  })
   it('flags a PT, whose yield the API does not give', () => {
     const pt = reserve({
       token: { address: '0x00000000000000000000000000000000000000c2', symbol: 'PT USDe', name: 'PT USDe', decimals: 18 },

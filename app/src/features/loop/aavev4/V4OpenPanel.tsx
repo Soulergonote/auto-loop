@@ -25,6 +25,9 @@ import { RiskPanel } from '../shared/RiskPanel'
 import { PositionBar } from '../../../ui/PositionBar'
 import { projectHealthFactor } from '../../../domain/projection'
 import { ApyBreakdown } from '../shared/ApyBreakdown'
+import { RateMetric } from '../shared/RateMetric'
+import { rateOf } from '../../../domain/irm'
+import { v4AdjustedRates } from '../../../protocols/aavev4/state'
 import { useRiskSignals } from '../shared/RiskSignals'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Summary, TxResult } from '../../../ui/primitives'
 import type { V4Ctx } from './V4View'
@@ -152,8 +155,15 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
   const worstHf = newCollMin !== undefined ? morphoHf(newCollMin, newDebt, state.price, state.lltv) : undefined
   const loopLev = newColl !== undefined ? morphoLeverage(newColl, newDebt, state.price) : undefined
   const finite = loopLev !== undefined && Number.isFinite(loopLev)
+  // the rates right after this transaction: its supply and borrow move the hub assets' utilization (irm.ts)
+  const rates = v4AdjustedRates(ctx.pair.collateral, ctx.pair.debt, ctx.riskPremium, {
+    supply: supplied !== undefined ? Number(toBase(supplied, sides.collateral)) / 1e8 : 0,
+    borrow: Number(toBase(debtAmount, sides.loan)) / 1e8,
+  })
+  const collateralApy = rateOf(rates.supply) + ctx.pair.collateral.underlyingApy
+  const borrowApy = rateOf(rates.borrow)
   const rewards = finite ? ctx.supplyRewardApy * loopLev + ctx.borrowRewardApy * (loopLev - 1) : 0
-  const apy = finite ? ctx.collateralApy * loopLev - ctx.borrowApy * (loopLev - 1) + rewards : undefined
+  const apy = finite ? collateralApy * loopLev - borrowApy * (loopLev - 1) + rewards : undefined
   // A5: what is left once the rewards with a known end are over
   const ending = finite ? v4EndingRewards(ctx.pair.collateral, ctx.pair.debt, loopLev) : undefined
   const bonusEnd = ending?.endsAt !== undefined && apy !== undefined ? `, ${fmtBonusEnd(ending.endsAt, apy - ending.apy)}` : ''
@@ -321,7 +331,7 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
         healthFactor={hf}
         liquidationThreshold={cf}
         correlated={correlated}
-        projectedHf={projectHealthFactor(hf, [{ value: 1, apy: ctx.collateralApy }], [{ value: 1, apy: ctx.borrowApy }], 90)}
+        projectedHf={projectHealthFactor(hf, [{ value: 1, apy: collateralApy }], [{ value: 1, apy: borrowApy }], 90)}
         amounts={debtUsd > 0 ? { collateral: (debtUsd * hf) / cf, debt: debtUsd } : undefined}
       />
     ) : undefined
@@ -416,6 +426,7 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
             value={q ? `${fmtAmount(capColl + q.buyAmount, C.decimals)} ${C.symbol}` : undefined}
             sub={q && `dont ${fmtAmount(q.buyAmount, C.decimals)} via ${quoteLabel(q)}`}
           />
+          <RateMetric borrow={{ label: L.symbol, rate: rates.borrow }} supply={{ label: C.symbol, rate: rates.supply }} />
           <YieldMetrics
             ptExpired={false}
             expiredHint=""
@@ -441,8 +452,8 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
             debt={L.symbol}
             healthFactor={hf}
             leverage={loopLev}
-            supplyApy={ctx.collateralApy}
-            borrowApy={ctx.borrowApy}
+            supplyApy={collateralApy}
+            borrowApy={borrowApy}
             rewardsApy={rewards}
             correlated={correlated}
             apy={apy}
@@ -453,11 +464,11 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
         {finite && !unreal && (
           <ApyBreakdown
             leverage={loopLev}
-            collateralYield={ctx.collateralApy}
+            collateralYield={collateralApy}
             collateralLabel={C.symbol}
             rewards={rewards}
             rewardsLabel="Récompenses Merkl"
-            borrowCost={ctx.borrowApy}
+            borrowCost={borrowApy}
             debtLabel={ctx.riskPremium > 0 ? `${L.symbol} (prime de risque comprise)` : L.symbol}
             withCosts={horizonYield}
             horizon={horizon}

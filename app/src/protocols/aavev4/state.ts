@@ -14,6 +14,7 @@ import { erc20Abi, v4OracleAbi, v4SpokeAbi, v4TakerAbi } from '../../chain/abi'
 import type { V4NetDef } from '../../config'
 import type { Side } from '../../domain/math'
 import type { V4Reserve } from './reserves'
+import { adjustedRate, type AdjustedRate } from '../../domain/irm'
 
 const WAD = 10n ** 18n
 const ORACLE_SCALE = 10n ** 36n
@@ -84,6 +85,23 @@ export const v4Sides = (p: V4Pair, s: Pick<V4State, 'collateralPrice' | 'debtPri
 
 /** Borrow cost on v4: the reserve's base rate plus the risk premium the collateral adds, a share of that rate. */
 export const v4BorrowApy = (baseApy: number, riskPremium: number) => baseApy * (1 + riskPremium)
+
+/**
+ * Lending rate of a v4 reserve and borrow rate of another (risk premium included), today and right after `change`
+ * (USD) lands on their hub assets: the hub's curve (reserves.ts), the premium applied on top of the base rate after.
+ */
+export function v4AdjustedRates(
+  collateral: V4Reserve,
+  debt: V4Reserve,
+  riskPremium: number,
+  change: { supply?: number; borrow?: number },
+): { supply: AdjustedRate; borrow: AdjustedRate } {
+  const supply = adjustedRate(collateral.supplyApy, collateral.curve, { supply: change.supply }, 'supply')
+  const base = adjustedRate(debt.borrowApy, debt.curve, { borrow: change.borrow }, 'borrow')
+  const borrow: AdjustedRate = { now: v4BorrowApy(base.now, riskPremium) }
+  if (base.after !== undefined) borrow.after = v4BorrowApy(base.after, riskPremium)
+  return { supply, borrow }
+}
 
 const hfNumber = (x: bigint) => (x >= 2n ** 255n ? Infinity : Number(x / 10n ** 9n) / 1e9)
 

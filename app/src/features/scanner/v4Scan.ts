@@ -6,6 +6,8 @@
 import { v4EndingRewards, type V4Reserve } from '../../protocols/aavev4/reserves'
 import { isCorrelated, isUsdStable } from '../../domain/pairs'
 import { MAX_SCAN_LEVERAGE, MIN_SCAN_LEVERAGE } from './aaveScan'
+import { rateOf } from '../../domain/irm'
+import { v4AdjustedRates } from '../../protocols/aavev4/state'
 
 /** Same ceiling as the sliders of the app: the leverage at a health factor of 1.02, at most 15x. */
 const SLIDER_HF = 1.02
@@ -23,6 +25,8 @@ export type V4ScanRow = {
   rewardsApy: number
   rewardsEnd?: number
   apy: number
+  /** with an amount: the APY at today's rates, before this loop's own effect on them */
+  apyBefore?: number
   /** A5: the APY once the rewards with a known end are over */
   apyAfterRewards: number
   /** equity that can still be looped before the debt runs out or the collateral reaches its cap, USD */
@@ -41,7 +45,9 @@ export function v4LeverageAtHf(collateralFactor: number, targetHf: number): numb
 
 const spokeKey = (r: V4Reserve) => `${r.chainId}:${r.spoke.address.toLowerCase()}`
 
-export function scanV4(reserves: V4Reserve[], opts: { targetHf: number }): V4ScanRow[] {
+/** `equityUsd`: capital to loop; the rates are then the ones right after this loop (the hub's curve, irm.ts) */
+export function scanV4(reserves: V4Reserve[], opts: { targetHf: number; equityUsd?: number }): V4ScanRow[] {
+  const E = opts.equityUsd ?? 0
   const spokes = new Map<string, V4Reserve[]>()
   for (const r of reserves) spokes.set(spokeKey(r), [...(spokes.get(spokeKey(r)) ?? []), r])
   const rows: V4ScanRow[] = []
@@ -52,11 +58,13 @@ export function scanV4(reserves: V4Reserve[], opts: { targetHf: number }): V4Sca
       if (!(leverage >= MIN_SCAN_LEVERAGE)) continue
       for (const D of list) {
         if (!D.canBorrow || D.price <= 0n || D.token.address.toLowerCase() === C.token.address.toLowerCase()) continue
-        const collateralYield = C.supplyApy + C.underlyingApy
-        const borrowCost = D.borrowApy * (1 + C.collateralRisk)
+        const rates = v4AdjustedRates(C, D, C.collateralRisk, E > 0 ? { supply: leverage * E, borrow: (leverage - 1) * E } : {})
+        const collateralYield = rateOf(rates.supply) + C.underlyingApy
+        const borrowCost = rateOf(rates.borrow)
         const rewardsApy = C.supplyRewardApy * leverage + D.borrowRewardApy * (leverage - 1)
         const ending = v4EndingRewards(C, D, leverage)
         const apy = collateralYield * leverage - borrowCost * (leverage - 1) + rewardsApy
+        const before = (rates.supply.now + C.underlyingApy) * leverage - rates.borrow.now * (leverage - 1) + rewardsApy
         rows.push({
           collateral: C,
           debt: D,
@@ -67,6 +75,7 @@ export function scanV4(reserves: V4Reserve[], opts: { targetHf: number }): V4Sca
           rewardsApy,
           rewardsEnd: ending.endsAt,
           apy,
+          apyBefore: E > 0 ? before : undefined,
           apyAfterRewards: apy - ending.apy,
           capacityUsd: Math.max(0, Math.min(D.borrowableUsd / (leverage - 1), C.suppliableUsd / leverage)),
           stable: isUsdStable(C) && isUsdStable(D),

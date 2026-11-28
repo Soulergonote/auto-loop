@@ -403,7 +403,7 @@ export function Scanner({
           open: () => picks.current.onPickMorpho(r.market, 'open', r.leverage),
         })
     })
-    for (const r of v4.data ? scanV4(v4.data, { targetHf }) : []) {
+    for (const r of v4.data ? scanV4(v4.data, { targetHf, equityUsd: amountUsd }) : []) {
       const C = r.collateral
       const D = r.debt
       // executable where the spoke has position managers known to the app and an aggregator quotes on the chain
@@ -416,10 +416,11 @@ export function Scanner({
         spread: r.collateralYield - r.borrowCost,
         parts: {
           leverage: r.leverage,
-          deposit: C.supplyApy,
+          // rates after the loop when an amount is set (v4Scan.ts), split back into base rate and premium
+          deposit: r.collateralYield - C.underlyingApy,
           native: C.underlyingApy,
-          borrow: D.borrowApy,
-          riskPremium: D.borrowApy * C.collateralRisk,
+          borrow: r.borrowCost / (1 + C.collateralRisk),
+          riskPremium: r.borrowCost - r.borrowCost / (1 + C.collateralRisk),
           rewards: r.rewardsApy,
         },
         note: `spoke ${C.spoke.name}`,
@@ -957,11 +958,11 @@ export function Scanner({
             lu on-chain) passe en fin de liste sur ces deux tris ; sur « Stabilité », une paire à APY moyen négatif passe après celles qui rapportent.
           </p>
           <p className="muted small">
-            Avec un montant : l’APY est celui juste après cette boucle, la dette ajoutée faisant monter le taux d’emprunt (courbe de taux de la réserve Aave,
-            AdaptiveCurveIRM de Morpho dont le taux cible dérive ensuite avec le temps) et le collatéral ajouté baisser son taux de dépôt ; « avant » rappelle
-            l’APY sans cet effet. « Gain / an » = APY × montant ; « rentable en N j » paie une estimation des deux swaps (entrée et sortie de l’emprunt) au
-            slippage par défaut de la paire, sans devis ; une paire dont la capacité est sous le montant passe en fin de liste, grisée. Les APR Merkl ne sont
-            pas dilués par le montant.
+            Avec un montant : l’APY est celui juste après cette boucle, la dette ajoutée faisant monter le taux d’emprunt (courbe de taux de la réserve Aave v3
+            ou de l’asset du hub v4, AdaptiveCurveIRM de Morpho dont le taux cible dérive ensuite avec le temps) et le collatéral ajouté baisser son taux de
+            dépôt ; « avant » rappelle l’APY sans cet effet. « Gain / an » = APY × montant ; « rentable en N j » paie une estimation des deux swaps (entrée et
+            sortie de l’emprunt) au slippage par défaut de la paire, sans devis ; une paire dont la capacité est sous le montant passe en fin de liste, grisée.
+            Les APR Merkl ne sont pas dilués par le montant.
           </p>
           <p className="muted small">
             Non compté : le coût d’entrée et de sortie (affiché dans la boucle) et les campagnes Merkl à public restreint. La capacité est le capital encore «
