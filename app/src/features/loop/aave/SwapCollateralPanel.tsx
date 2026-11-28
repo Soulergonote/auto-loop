@@ -33,7 +33,7 @@ import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
 import { RateMetric } from '../shared/RateMetric'
 import { adjustedRate, rateOf, type AdjustedRate } from '../../../domain/irm'
-import { aaveRateCurve, snapshotQuery } from '../../../protocols/aave/snapshot'
+import { aaveCurveIn, snapshotQuery } from '../../../protocols/aave/snapshot'
 import { SettingsFold, SlippageField, StepsFold } from '../shared/folds'
 
 const PARTS = ['25', '50', '100'] as const
@@ -145,9 +145,8 @@ export function SwapCollateralPanel({
   const posC = toBase(user.aTokenBalance, C.side)
   const posD = toBase(user.debtBalance, D.side)
   // lending rates right after the swap: withdrawing C raises its reserve's utilization, supplying T lowers T's (irm.ts)
-  const curveOf = (r: Reserve) => aaveRateCurve(snapshot.data?.reserves.find((x) => x.token.address === r.token.address))
-  const cRate = adjustedRate(C.supplyApy, curveOf(C), { supply: -Number(removedBase) / 1e8 }, 'supply')
-  const tRate = T ? adjustedRate(T.supplyApy, curveOf(T), { supply: Number(addedBase) / 1e8 }, 'supply') : undefined
+  const cRate = adjustedRate(C.supplyApy, aaveCurveIn(snapshot.data, C.token.address), { supply: -Number(removedBase) / 1e8 }, 'supply')
+  const tRate = T ? adjustedRate(T.supplyApy, aaveCurveIn(snapshot.data, T.token.address), { supply: Number(addedBase) / 1e8 }, 'supply') : undefined
   const yieldAt = (r: Reserve, rate: AdjustedRate) => rateOf(rate) + (r.native?.apy ?? 0) + r.supplyRewardApr
   const debtCost = D.borrowApy + (D.native?.apy ?? 0) - D.borrowRewardApr
   const apyOf = (parts: [number, bigint][]) => {

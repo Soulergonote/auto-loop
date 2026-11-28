@@ -5,8 +5,8 @@ import type { Market } from '../../../config'
 import { readV4Outcome, v4OutcomeLines } from '../../../protocols/aavev4/execute'
 import { encodeV4Refinance, executeV4Refinance, type V4Place, type V4RefinancePlan } from '../../../protocols/aavev4/refinance'
 import { readV4State, v4AdjustedRates, v4PairKey, type V4Pair, type V4State } from '../../../protocols/aavev4/state'
-import { adjustedRate, rateOf, type RateChange, type RateCurve } from '../../../domain/irm'
-import { kinkAfter, KinkNote } from '../shared/RateMetric'
+import { adjustedRate, rateOf, type RateChange, type RateCurve, kinkOf } from '../../../domain/irm'
+import { KinkNote } from '../shared/RateMetric'
 import { v4SamePairs } from '../../../protocols/aavev4/switch'
 import { withInterestMargin } from '../../../protocols/morpho/execute'
 import { morphoHf, morphoMarketsQuery, morphoRateCurve, readMorphoState, type MorphoMarket, type MorphoState } from '../../../protocols/morpho/markets'
@@ -44,6 +44,11 @@ type Route = { other: Other; out: boolean }
 
 /** Morpho markets of the pair read on chain, the deepest first. */
 const MORPHO_CANDIDATES = 4
+
+/** a v4 position's premium: its own collateral's, or the account's when other positions back the debt too */
+const premiumOf = (o: Extract<Other, { kind: 'v4' }>) => (o.state.user?.otherPositions ? o.state.user.riskPremium : o.pair.collateral.collateralRisk)
+/** a Morpho market's borrow rate now: read on chain, else the list's */
+const morphoBorrowNow = (o: Extract<Other, { kind: 'morpho' }>) => o.state.borrowApy ?? o.market.borrowApy
 
 const otherKey = (o: Other) => (o.kind === 'v4' ? `v4-${v4PairKey(o.pair)}` : o.kind === 'aave' ? `aave-${o.pool.id}` : `morpho-${o.market.id}`)
 const otherName = (o: Other) =>
@@ -175,20 +180,13 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
   /** the same at the other end */
   const ratesOf = (o: Other, change: RateChange = {}): { supply: number; borrow: number } => {
     if (o.kind === 'v4') {
-      const premium = o.state.user?.otherPositions ? o.state.user.riskPremium : o.pair.collateral.collateralRisk
-      const a = v4AdjustedRates(o.pair.collateral, o.pair.debt, premium, change)
+      const a = v4AdjustedRates(o.pair.collateral, o.pair.debt, premiumOf(o), change)
       return { supply: rateOf(a.supply) + o.pair.collateral.supplyRewardApy, borrow: rateOf(a.borrow) - o.pair.debt.borrowRewardApy }
     }
-    if (o.kind === 'aave') {
-      const { collateral: pc, debt: pd } = o.pair
-      return {
-        supply: aaveSupplyNet(pc) - pc.supplyApy + rateOf(adjustedRate(pc.supplyApy, aaveRateCurve(pc), { supply: change.supply }, 'supply')),
-        borrow: aaveBorrowNet(pd) - pd.borrowApy + rateOf(adjustedRate(pd.borrowApy, aaveRateCurve(pd), { borrow: change.borrow }, 'borrow')),
-      }
-    }
+    if (o.kind === 'aave') return { supply: aaveSupplyNet(o.pair.collateral, change.supply), borrow: aaveBorrowNet(o.pair.debt, change.borrow) }
     const merkl = morphoMerkl(morphoCampaigns.data, { id: o.market.id, collateral: o.market.collateral.address, loan: o.market.loan.address })
-    const base = o.state.borrowApy ?? o.market.borrowApy
-    return { supply: 0, borrow: rateOf(adjustedRate(base, morphoRateCurve(o.market, o.state, base), { borrow: change.borrow }, 'borrow')) - merkl.borrowApr }
+    const now = morphoBorrowNow(o)
+    return { supply: 0, borrow: rateOf(adjustedRate(now, morphoRateCurve(o.market, o.state, now), { borrow: change.borrow }, 'borrow')) - merkl.borrowApr }
   }
 
   // amounts and both ends of the move
@@ -201,18 +199,17 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
     const m = x.out ? here : holdings(x.other)
     return { supply: Number(toBase(m.coll, sides.collateral)) / 1e8, borrow: Number(toBase(m.debt, sides.loan)) / 1e8 }
   }
-  const landing: RateChange = { supply: Number(collV) / 1e8, borrow: Number(debtV) / 1e8 }
+  const landing = r ? landingOf(r) : {}
   /** A3: the borrow curve where the position lands, with the premium its rate takes there */
   const landingCurve = (x: Route): { curve?: RateCurve; premium: number } => {
-    if (!x.out) return { curve: ctx.pair.debt.curve, premium: ctx.riskPremium }
     const o = x.other
-    if (o.kind === 'v4')
-      return { curve: o.pair.debt.curve, premium: o.state.user?.otherPositions ? o.state.user.riskPremium : o.pair.collateral.collateralRisk }
+    if (!x.out) return { curve: ctx.pair.debt.curve, premium: ctx.riskPremium }
+    if (o.kind === 'v4') return { curve: o.pair.debt.curve, premium: premiumOf(o) }
     if (o.kind === 'aave') return { curve: aaveRateCurve(o.pair.debt), premium: 0 }
-    const base = o.state.borrowApy ?? o.market.borrowApy
-    return { curve: morphoRateCurve(o.market, o.state, base), premium: 0 }
+    return { curve: morphoRateCurve(o.market, o.state, morphoBorrowNow(o)), premium: 0 }
   }
-  const landingKink = r ? ((l) => kinkAfter(l.curve, landing.borrow ?? 0, l.premium))(landingCurve(r)) : undefined
+  const lc = r && landingCurve(r)
+  const landingKink = lc && kinkOf(lc.curve, landing.borrow, lc.premium)
   const fromRates = r ? (r.out ? hereRates() : ratesOf(r.other)) : undefined
   const toRates = r ? (r.out ? ratesOf(r.other, landing) : hereRates(landing)) : undefined
   const apyOf = (x?: { supply: number; borrow: number }) =>

@@ -71,7 +71,7 @@ export type RateCurve = { kind: 'aave'; irm: AaveIrm; cash: number; debt: number
 /** what the trade adds to the venue, USD: supplied and borrowed (negative = withdrawn, repaid) */
 export type RateChange = { supply?: number; borrow?: number }
 
-export type RatesAfter = {
+type RatesAfter = {
   /** Aave only: the supply APY of the reserve */
   supplyApy?: number
   borrowApy: number
@@ -94,21 +94,23 @@ export function ratesAfter(curve: RateCurve, change: RateChange): RatesAfter | u
   return borrowApy === undefined ? undefined : { borrowApy }
 }
 
+/** A3: what can still be borrowed on a venue, by anyone, before its curve's kink (USD, ≤ 0 past it), and the rate there */
+export type Kink = { room: number; borrowApy: number }
+
 /**
- * A3: how much more can be borrowed on the venue, by anyone, before the curve's kink (Aave's optimal utilization,
- * Morpho's 90 % target), and the borrow APY there. `room` is 0 once past it. USD like the curve.
+ * A3: the kink of a curve (Aave's optimal utilization, Morpho's 90 % target) once the trade's own `addedBorrow` (USD)
+ * is borrowed; `premium` scales its rate like the borrow's (Aave v4's risk premium). No curve, no kink.
  */
-export function kinkOf(curve: RateCurve): { room: number; borrowApy: number; utilization: number } {
-  if (curve.kind === 'aave') {
-    const total = curve.cash + curve.debt
+export function kinkOf(curve: RateCurve | undefined, addedBorrow = 0, premium = 0): Kink | undefined {
+  if (!curve) return undefined
+  const borrowed = Math.max(0, addedBorrow)
+  if (curve.kind === 'aave')
     return {
-      room: Math.max(0, curve.irm.optimal * total - curve.debt),
-      borrowApy: aprToApy(aaveBorrowApr(curve.irm, curve.irm.optimal)),
-      utilization: curve.irm.optimal,
+      room: curve.irm.optimal * (curve.cash + curve.debt) - curve.debt - borrowed,
+      borrowApy: aprToApy(aaveBorrowApr(curve.irm, curve.irm.optimal)) * (1 + premium),
     }
-  }
   const atTarget = curve.supplied > 0 ? apyToApr(curve.borrowApy) / morphoCurve(curve.borrowed / curve.supplied) : 0
-  return { room: Math.max(0, TARGET_U * curve.supplied - curve.borrowed), borrowApy: aprToApy(atTarget), utilization: TARGET_U }
+  return { room: TARGET_U * curve.supplied - curve.borrowed - borrowed, borrowApy: aprToApy(atTarget) * (1 + premium) }
 }
 
 /** A rate as a screen shows it: today's, and the one right after the trade when its curve is known */

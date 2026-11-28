@@ -25,8 +25,8 @@ import { RiskPanel } from '../shared/RiskPanel'
 import { PositionBar } from '../../../ui/PositionBar'
 import { projectHealthFactor } from '../../../domain/projection'
 import { ApyBreakdown } from '../shared/ApyBreakdown'
-import { kinkAfter, RateMetric } from '../shared/RateMetric'
-import { rateOf } from '../../../domain/irm'
+import { RateMetric } from '../shared/RateMetric'
+import { rateOf, kinkOf } from '../../../domain/irm'
 import { v4AdjustedRates } from '../../../protocols/aavev4/state'
 import { useRiskSignals } from '../shared/RiskSignals'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Summary, TxResult } from '../../../ui/primitives'
@@ -156,9 +156,10 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
   const loopLev = newColl !== undefined ? morphoLeverage(newColl, newDebt, state.price) : undefined
   const finite = loopLev !== undefined && Number.isFinite(loopLev)
   // the rates right after this transaction: its supply and borrow move the hub assets' utilization (irm.ts)
+  const addedDebtUsd = Number(toBase(debtAmount, sides.loan)) / 1e8
   const rates = v4AdjustedRates(ctx.pair.collateral, ctx.pair.debt, ctx.riskPremium, {
     supply: supplied !== undefined ? Number(toBase(supplied, sides.collateral)) / 1e8 : 0,
-    borrow: Number(toBase(debtAmount, sides.loan)) / 1e8,
+    borrow: addedDebtUsd,
   })
   const collateralApy = rateOf(rates.supply) + ctx.pair.collateral.underlyingApy
   const borrowApy = rateOf(rates.borrow)
@@ -429,7 +430,7 @@ export function V4OpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: V4Ctx; see
           <RateMetric
             borrow={{ label: L.symbol, rate: rates.borrow }}
             supply={{ label: C.symbol, rate: rates.supply }}
-            kink={kinkAfter(ctx.pair.debt.curve, Number(toBase(debtAmount, sides.loan)) / 1e8, ctx.riskPremium)}
+            kink={kinkOf(ctx.pair.debt.curve, addedDebtUsd, ctx.riskPremium)}
           />
           <YieldMetrics
             ptExpired={false}

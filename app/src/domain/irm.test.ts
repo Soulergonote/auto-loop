@@ -81,16 +81,22 @@ describe('ratesAfter, every venue through one call', () => {
 })
 
 describe('kinkOf (A3)', () => {
-  it('Aave: room to the optimal utilization and the rate there', () => {
+  const aave: RateCurve = { kind: 'aave', irm: usdc, cash: 20, debt: 80 }
+  it('Aave: room to the optimal utilization and the rate there, less the trade’s own borrow', () => {
     // 100 in the reserve, 80 borrowed: 10 more to reach 90 %
-    const k = kinkOf({ kind: 'aave', irm: usdc, cash: 20, debt: 80 })
-    expect(k.room).toBeCloseTo(10, 9)
-    expect(k.borrowApy).toBeCloseTo(aprToApy(0.0475), 9)
-    expect(kinkOf({ kind: 'aave', irm: usdc, cash: 5, debt: 95 }).room).toBe(0)
+    expect(kinkOf(aave)!.room).toBeCloseTo(10, 9)
+    expect(kinkOf(aave)!.borrowApy).toBeCloseTo(aprToApy(0.0475), 9)
+    expect(kinkOf(aave, 4)!.room).toBeCloseTo(6, 9)
+    expect(kinkOf(aave, 15)!.room).toBeLessThan(0)
+    expect(kinkOf(undefined, 4)).toBeUndefined()
+  })
+
+  it('scales the rate at the kink by the v4 risk premium', () => {
+    expect(kinkOf(aave, 0, 0.1)!.borrowApy).toBeCloseTo(aprToApy(0.0475) * 1.1, 9)
   })
 
   it('Morpho: room to 90 % and the rate at target', () => {
-    const k = kinkOf({ kind: 'morpho', borrowApy: 0.06, supplied: 100, borrowed: 80 })
+    const k = kinkOf({ kind: 'morpho', borrowApy: 0.06, supplied: 100, borrowed: 80 })!
     expect(k.room).toBeCloseTo(10, 9)
     expect(k.borrowApy).toBeCloseTo(aprToApy(Math.log1p(0.06) / morphoCurve(0.8)), 9)
   })

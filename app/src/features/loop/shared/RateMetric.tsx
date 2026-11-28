@@ -1,4 +1,4 @@
-import { kinkOf, rateOf, type AdjustedRate, type RateCurve } from '../../../domain/irm'
+import { rateOf, type AdjustedRate, type Kink } from '../../../domain/irm'
 import { fmtDollars, fmtPct } from '../../../ui/format'
 import { Metric } from '../../../ui/primitives'
 
@@ -10,17 +10,7 @@ export type RateSide = { label: string; rate: AdjustedRate }
 const moved = (r: AdjustedRate) => r.after !== undefined && Math.abs(r.after - r.now) >= SHOWN_GAP
 
 /** « 4,12 % (avant 3,98 %) », or the rate alone when the trade barely moves it */
-export const fmtAdjusted = (r: AdjustedRate) => (moved(r) ? `${fmtPct(rateOf(r))} (avant ${fmtPct(r.now)})` : fmtPct(rateOf(r)))
-
-/** A3: what can still be borrowed on the venue, by anyone, once the trade is done, before the curve's kink; its rate */
-export type Kink = { room: number; borrowApy: number }
-
-/** the kink once `addedBorrowUsd` is borrowed; `premium` scales its rate like the borrow (Aave v4's risk premium) */
-export function kinkAfter(curve: RateCurve | undefined, addedBorrowUsd: number, premium = 0): Kink | undefined {
-  if (!curve) return undefined
-  const k = kinkOf(curve)
-  return { room: k.room - Math.max(0, addedBorrowUsd), borrowApy: k.borrowApy * (1 + premium) }
-}
+const fmtAdjusted = (r: AdjustedRate) => (moved(r) ? `${fmtPct(rateOf(r))} (avant ${fmtPct(r.now)})` : fmtPct(rateOf(r)))
 
 /** « encore 1,2 M$ avant le coude (5,2 %) », amber « au-delà du coude » once the venue is past it */
 export function KinkNote({ kink }: { kink: Kink }) {

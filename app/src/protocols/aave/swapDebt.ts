@@ -103,8 +103,11 @@ export function borrowRoom(cash: bigint, totalDebt: bigint, borrowCapTokens: big
   return left < cash ? left : cash
 }
 
-/** Yearly cost of a debt asset: Aave borrow rate plus the token's own yield, minus the headline Merkl borrow reward. */
-export const borrowCost = (r: Reserve) => r.borrowApy + (r.native?.apy ?? 0) - r.borrowRewardApr
+/**
+ * Yearly cost of a debt asset: Aave borrow rate (today's, or `borrowApy` such as the rate after a trade) plus the
+ * token's own yield, minus the headline Merkl borrow reward.
+ */
+export const borrowCost = (r: Reserve, borrowApy = r.borrowApy) => borrowApy + (r.native?.apy ?? 0) - r.borrowRewardApr
 
 /**
  * Quote of the new debt to sell: first `firstAmount` (an oracle estimate); for a full switch (`target` set) the

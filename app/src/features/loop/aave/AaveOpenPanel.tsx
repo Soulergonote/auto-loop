@@ -10,8 +10,8 @@ import { projectHealthFactor } from '../../../domain/projection'
 import { thresholdOf } from '../../../domain/positionBar'
 import { ApyHistory } from '../shared/ApyHistory'
 import { ApyBreakdown } from '../shared/ApyBreakdown'
-import { kinkAfter, RateMetric } from '../shared/RateMetric'
-import { adjustedRate, rateOf } from '../../../domain/irm'
+import { RateMetric } from '../shared/RateMetric'
+import { adjustedRate, kinkOf, rateOf } from '../../../domain/irm'
 import { useAaveRateSeries } from '../../../protocols/aave/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
 import { canBorrow, eligibleEModes, withEMode, type EModeCategory, type Reserves, type UserState } from '../../../protocols/aave/useMarket'
@@ -44,7 +44,7 @@ import { fmtAmount, fmtBonusEnd, fmtDate, fmtDays, fmtHf, fmtPct, fmtPrice, fmtU
 import { isCorrelated } from '../../../domain/pairs'
 import { useQuery } from '@tanstack/react-query'
 import { exitIssues, exitSellAmount, utilization } from '../../../domain/exitCheck'
-import { aaveRateCurve, snapshotQuery } from '../../../protocols/aave/snapshot'
+import { aaveCurveIn, snapshotQuery } from '../../../protocols/aave/snapshot'
 import { apyTone, hfThresholds, hfTone } from '../../../ui/tone'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, QuoteCompare, Metric, NA, Summary, TxResult } from '../../../ui/primitives'
 import { pairKind, reserveAsset, useSlippage } from '../../../domain/slippage'
@@ -237,8 +237,8 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
       : undefined
   const plainExit = useQuote(plainExitReq)
   const plainExitPending = !!plainExitReq && !plainExit.data && !plainExit.isError
-  // the collateral's Aave reserve almost all lent out: withdrawing it at close may have to wait
-  // (and the reserves' rate curves, for the rates right after this transaction)
+  // the reserves as read on chain: the collateral's almost all lent out (withdrawing it at close may have to wait), and
+  // the rate curves for the rates right after this transaction
   const snapshot = useQuery(snapshotQuery(market))
   const collSnap = snapshot.data?.reserves.find((r) => r.token.address === C.token.address)
   const exitRead =
@@ -344,10 +344,9 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
 
   // the rates right after this transaction: its borrow raises the debt reserve's utilization, its supply lowers the
   // collateral's (irm.ts); today's when the curve is unknown
-  const snapOf = (t: typeof C) => snapshot.data?.reserves.find((r) => r.token.address === t.token.address)
-  const debtCurve = aaveRateCurve(snapOf(D))
+  const debtCurve = aaveCurveIn(snapshot.data, D.token.address)
   const borrowRate = adjustedRate(D.borrowApy, debtCurve, { borrow: Number(soldBase) / 1e8 }, 'borrow')
-  const supplyRate = adjustedRate(C.supplyApy, aaveRateCurve(snapOf(C)), { supply: Number(addedCollBase) / 1e8 }, 'supply')
+  const supplyRate = adjustedRate(C.supplyApy, aaveCurveIn(snapshot.data, C.token.address), { supply: Number(addedCollBase) / 1e8 }, 'supply')
   const borrowApy = rateOf(borrowRate)
   const supplyApy = rateOf(supplyRate)
   if (fixedApy !== undefined && borrowApy + (D.native?.apy ?? 0) > fixedApy)
@@ -704,7 +703,7 @@ export function AaveOpenPanel({ reserves: base, emodes, user, account, aggregato
           <RateMetric
             borrow={{ label: D.token.symbol, rate: borrowRate }}
             supply={pt ? undefined : { label: C.token.symbol, rate: supplyRate }}
-            kink={kinkAfter(debtCurve, Number(soldBase) / 1e8)}
+            kink={kinkOf(debtCurve, Number(soldBase) / 1e8)}
           />
           <YieldMetrics
             pt={pt}

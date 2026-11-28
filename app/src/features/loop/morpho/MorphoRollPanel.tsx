@@ -10,8 +10,8 @@ import {
   readMorphoState,
   type MorphoMarket,
 } from '../../../protocols/morpho/markets'
-import { adjustedRate, rateOf } from '../../../domain/irm'
-import { kinkAfter, RateMetric } from '../shared/RateMetric'
+import { adjustedRate, rateOf, kinkOf } from '../../../domain/irm'
+import { RateMetric } from '../shared/RateMetric'
 import {
   REPAY_ALL,
   encodeAction,
@@ -298,7 +298,7 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
             sub={newCollMin !== undefined && !same && T ? `au moins ${fmtAmount(newCollMin, T.collateral.decimals)}` : undefined}
           />
           <Metric label="Dette déplacée" value={`${fmtAmount(debt, L.decimals)} ${L.symbol}`} sub={lev2 !== undefined ? `levier ${fmtX(lev2)}` : undefined} />
-          {T && <RateMetric borrow={{ label: L.symbol, rate: borrow2Rate }} kink={kinkAfter(curve2, debtUsd2)} />}
+          {T && <RateMetric borrow={{ label: L.symbol, rate: borrow2Rate }} kink={kinkOf(curve2, debtUsd2)} />}
         </div>
         <Banners problems={problems} warnings={warnings} />
         <SettingsFold aggregator={ctx.aggregator} slippage={slippage} auto={autoSlip}>

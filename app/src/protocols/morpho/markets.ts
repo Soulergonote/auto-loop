@@ -6,10 +6,10 @@
  * cannot swap the oracle or the LLTV), and prices, totals, rates and the user's position come from Morpho, the
  * market's oracle and its IRM.
  */
-import type { RateCurve } from '../../domain/irm'
 import { encodeAbiParameters, getAddress, keccak256, zeroAddress, type Address, type Hex } from 'viem'
 import { readContracts } from '@wagmi/core'
 import { wagmiConfig } from '../../chain/wagmi'
+import type { RateCurve } from '../../domain/irm'
 import { erc20Abi, morphoAbi, morphoIrmAbi, morphoOracleAbi } from '../../chain/abi'
 import { MORPHO_NETWORKS, type Token } from '../../config'
 import { fetchOnchainMarkets, readMarketsOnchain, type MarketEntry } from './onchain'

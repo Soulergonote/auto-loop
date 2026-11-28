@@ -29,8 +29,8 @@ import { PositionBar } from '../../../ui/PositionBar'
 import { projectHealthFactor } from '../../../domain/projection'
 import { ApyHistory } from '../shared/ApyHistory'
 import { ApyBreakdown } from '../shared/ApyBreakdown'
-import { kinkAfter, RateMetric } from '../shared/RateMetric'
-import { adjustedRate, rateOf } from '../../../domain/irm'
+import { RateMetric } from '../shared/RateMetric'
+import { adjustedRate, rateOf, kinkOf } from '../../../domain/irm'
 import { useMorphoBorrowSeries } from '../../../protocols/morpho/rateSeries'
 import { useRiskSignals } from '../shared/RiskSignals'
 import { Banners, Card, Fold, LeverageSlider, LoopLayout, Metric, NA, QuoteCompare, Summary, TxResult } from '../../../ui/primitives'
@@ -461,7 +461,7 @@ export function MorphoOpenPanel({ ctx, seedLeverage, seedAmount }: { ctx: Morpho
             value={q ? `${fmtAmount(capColl + q.buyAmount, C.decimals)} ${ptShortSymbol(C.symbol)}` : undefined}
             sub={q && `dont ${fmtAmount(q.buyAmount, C.decimals)} via ${quoteLabel(q)}`}
           />
-          <RateMetric borrow={{ label: L.symbol, rate: borrowRate }} kink={kinkAfter(debtCurve, addedDebtUsd)} />
+          <RateMetric borrow={{ label: L.symbol, rate: borrowRate }} kink={kinkOf(debtCurve, addedDebtUsd)} />
           <YieldMetrics
             pt={pt}
             ptExpired={ptExpired}

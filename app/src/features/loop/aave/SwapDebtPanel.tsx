@@ -21,9 +21,9 @@ import { Banners, Card, Fold, LoopLayout, Metric, QuoteCompare, Segmented, Summa
 import { pairKind, reserveAsset, useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
-import { kinkAfter, RateMetric } from '../shared/RateMetric'
-import { adjustedRate, rateOf, type AdjustedRate } from '../../../domain/irm'
-import { aaveRateCurve, snapshotQuery } from '../../../protocols/aave/snapshot'
+import { RateMetric } from '../shared/RateMetric'
+import { adjustedRate, kinkOf, rateOf } from '../../../domain/irm'
+import { aaveCurveIn, snapshotQuery } from '../../../protocols/aave/snapshot'
 import { DeployPanel } from '../shared/DeployPanel'
 import { SettingsFold, SlippageField, StepsFold } from '../shared/folds'
 
@@ -141,12 +141,11 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
   const costD = borrowCost(D)
   const apyBefore = equity > 0 ? (supplyYield(C) * Number(posC) - costD * Number(posD)) / equity : undefined
   // borrow rates right after the swap: repaying D lowers its reserve's utilization, borrowing T raises T's (irm.ts)
-  const curveOf = (r: Reserve) => aaveRateCurve(snapshot.data?.reserves.find((x) => x.token.address === r.token.address))
-  const dRate = adjustedRate(D.borrowApy, curveOf(D), { borrow: -Number(repaidBase) / 1e8 }, 'borrow')
-  const tRate = T ? adjustedRate(T.borrowApy, curveOf(T), { borrow: Number(newDebtBase) / 1e8 }, 'borrow') : undefined
-  const costAt = (r: Reserve, rate: AdjustedRate) => borrowCost(r) - r.borrowApy + rateOf(rate)
-  const costDAfter = costAt(D, dRate)
-  const costT = T && tRate ? costAt(T, tRate) : 0
+  const tCurve = T && aaveCurveIn(snapshot.data, T.token.address)
+  const dRate = adjustedRate(D.borrowApy, aaveCurveIn(snapshot.data, D.token.address), { borrow: -Number(repaidBase) / 1e8 }, 'borrow')
+  const tRate = T ? adjustedRate(T.borrowApy, tCurve, { borrow: Number(newDebtBase) / 1e8 }, 'borrow') : undefined
+  const costDAfter = borrowCost(D, rateOf(dRate))
+  const costT = T && tRate ? borrowCost(T, rateOf(tRate)) : 0
   // what the swap bought above the debt goes back to the wallet: it stays the user's money, counted with the equity
   const returnedBase = toBase(returned, D.side)
   const equityAfter = Number(posC) - Number(posD - repaidBase) - Number(newDebtBase) + Number(returnedBase)
@@ -350,7 +349,7 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
               value={q ? `${fmtAmount(newDebt, T.token.decimals)} ${T.token.symbol}` : undefined}
               sub={q && `${fmtUsd(newDebtBase)} · sans prime de flash loan`}
             />
-            {tRate && <RateMetric borrow={{ label: T.token.symbol, rate: tRate }} kink={kinkAfter(curveOf(T), Number(newDebtBase) / 1e8)} />}
+            {tRate && <RateMetric borrow={{ label: T.token.symbol, rate: tRate }} kink={kinkOf(tCurve, Number(newDebtBase) / 1e8)} />}
             <Metric
               label="Économie par an"
               value={savedPerYear !== undefined ? fmtUsd(BigInt(Math.round(savedPerYear * 1e8))) : undefined}

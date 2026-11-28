@@ -3,8 +3,8 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 import type { Address } from 'viem'
 import { MARKETS, getMarket, type Market } from '../../../config'
 import { morphoHf, morphoLeverage, morphoNetApy, morphoRateCurve } from '../../../protocols/morpho/markets'
-import { adjustedRate, rateOf } from '../../../domain/irm'
-import { kinkAfter, KinkNote } from '../shared/RateMetric'
+import { adjustedRate, kinkOf, rateOf, type RateChange } from '../../../domain/irm'
+import { KinkNote } from '../shared/RateMetric'
 import {
   REPAY_ALL,
   encodeAction,
@@ -150,14 +150,13 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
     const coll = x.toMorpho ? x.side.supplied : (mUser?.collateral ?? 0n)
     const debt = x.toMorpho ? x.side.borrowed : (mUser?.debt ?? 0n)
     const usd = { supply: Number(toBase(coll, sides.collateral)) / 1e8, borrow: Number(toBase(debt, sides.loan)) / 1e8 }
-    const { collateral: pc, debt: pd } = x.pair
-    const aaveIn = !x.toMorpho
+    // only the place the position lands takes the amount
+    const aave: RateChange = x.toMorpho ? {} : usd
+    const morpho: RateChange = x.toMorpho ? usd : {}
     return {
-      aSupply: aaveSupplyNet(pc) - pc.supplyApy + rateOf(adjustedRate(pc.supplyApy, aaveIn ? aaveRateCurve(pc) : undefined, { supply: usd.supply }, 'supply')),
-      aBorrow: aaveBorrowNet(pd) - pd.borrowApy + rateOf(adjustedRate(pd.borrowApy, aaveIn ? aaveRateCurve(pd) : undefined, { borrow: usd.borrow }, 'borrow')),
-      mBorrowNet:
-        rateOf(adjustedRate(ctx.borrowApy, x.toMorpho ? morphoRateCurve(M, state, ctx.borrowApy) : undefined, { borrow: usd.borrow }, 'borrow')) -
-        ctx.merkl.borrowApr,
+      aSupply: aaveSupplyNet(x.pair.collateral, aave.supply),
+      aBorrow: aaveBorrowNet(x.pair.debt, aave.borrow),
+      mBorrowNet: rateOf(adjustedRate(ctx.borrowApy, morphoRateCurve(M, state, ctx.borrowApy), { borrow: morpho.borrow }, 'borrow')) - ctx.merkl.borrowApr,
     }
   }
 
@@ -332,7 +331,7 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
 
   // A3: the borrow curve where the position lands
   const landingKink = r
-    ? kinkAfter(r.toMorpho ? morphoRateCurve(M, state, ctx.borrowApy) : aaveRateCurve(r.pair.debt), Number(toBase(debtMoved, sides.loan)) / 1e8)
+    ? kinkOf(r.toMorpho ? morphoRateCurve(M, state, ctx.borrowApy) : aaveRateCurve(r.pair.debt), Number(toBase(debtMoved, sides.loan)) / 1e8)
     : undefined
   const borrowOf = (aave: boolean) => (aave && aD ? aBorrow : mBorrowNet)
   return (

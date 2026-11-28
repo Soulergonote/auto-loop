@@ -28,6 +28,10 @@ export type SnapReserve = Reserve & {
 export const aaveRateCurve = (r: SnapReserve | undefined): RateCurve | undefined =>
   r?.irm ? { kind: 'aave', irm: r.irm, cash: Number(r.cashBase) / 1e8, debt: Number(r.totalDebtBase) / 1e8 } : undefined
 
+/** the curve of `token`'s reserve in a snapshot, while it loads: undefined */
+export const aaveCurveIn = (snapshot: Snapshot | undefined, token: Address): RateCurve | undefined =>
+  aaveRateCurve(snapshot?.reserves.find((r) => r.token.address === token))
+
 export type Snapshot = { market: Market; reserves: SnapReserve[]; emodes: EModeCategory[]; premiumBps: bigint }
 
 const MAX_EMODE_ID = 80

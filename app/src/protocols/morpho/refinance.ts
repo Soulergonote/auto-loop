@@ -9,7 +9,8 @@ import { wagmiConfig } from '../../chain/wagmi'
 import { debtTokenAbi, erc20Abi, poolAbi } from '../../chain/abi'
 import { toBase, type Account, type Side } from '../../domain/math'
 import { canBorrow, eligibleEModes, type EModeCategory } from '../aave/useMarket'
-import type { Snapshot, SnapReserve } from '../aave/snapshot'
+import { aaveRateCurve, type Snapshot, type SnapReserve } from '../aave/snapshot'
+import { adjustedRate, rateOf } from '../../domain/irm'
 
 const BPS = 10_000n
 /** 1 $ in Aave base units */
@@ -138,6 +139,9 @@ export function aaveSupplyRoomBase(C: SnapReserve): bigint | undefined {
   return cap > C.totalSupplyBase ? cap - C.totalSupplyBase : 0n
 }
 
-/** Yearly cost of borrowing / yield of supplying on Aave, rewards included (the collateral's own yield excluded). */
-export const aaveBorrowNet = (D: SnapReserve) => D.borrowApy - D.borrowRewardApr
-export const aaveSupplyNet = (C: SnapReserve) => C.supplyApy + C.supplyRewardApr
+/**
+ * Yearly cost of borrowing / yield of supplying on Aave, rewards included (the collateral's own yield excluded); with
+ * an amount (USD) landing there, at the rate right after it does (irm.ts).
+ */
+export const aaveBorrowNet = (D: SnapReserve, borrow = 0) => rateOf(adjustedRate(D.borrowApy, aaveRateCurve(D), { borrow }, 'borrow')) - D.borrowRewardApr
+export const aaveSupplyNet = (C: SnapReserve, supply = 0) => rateOf(adjustedRate(C.supplyApy, aaveRateCurve(C), { supply }, 'supply')) + C.supplyRewardApr
