@@ -22,7 +22,7 @@ export function kinkAfter(curve: RateCurve | undefined, addedBorrowUsd: number, 
   return { room: k.room - Math.max(0, addedBorrowUsd), borrowApy: k.borrowApy * (1 + premium) }
 }
 
-/** « encore 1,2 M$ avant le coude (5,2 %) », amber once the venue is past it */
+/** « encore 1,2 M$ avant le coude (5,2 %) », amber « au-delà du coude » once the venue is past it */
 export function KinkNote({ kink }: { kink: Kink }) {
   return kink.room > 0 ? (
     <span title="Emprunt encore possible sur la réserve, tous emprunteurs, avant que le taux ne prenne sa pente forte">
@@ -30,7 +30,7 @@ export function KinkNote({ kink }: { kink: Kink }) {
     </span>
   ) : (
     <span className="warn-text" title="Utilisation au-delà de l’optimum : chaque emprunt de plus fait monter le taux vite">
-      au-delà du coude ({fmtPct(kink.borrowApy)}) : le taux monte vite
+      au-delà du coude ({fmtPct(kink.borrowApy)})
     </span>
   )
 }
@@ -57,7 +57,7 @@ export function RateMetric({
   const main = lead === 'borrow' ? borrow : supply
   const other = lead === 'borrow' ? supply : borrow
   if (!main) return null
-  const known = main.rate.after !== undefined || other?.rate.after !== undefined
+  const known = main.rate.after !== undefined
   const otherName = lead === 'borrow' ? 'dépôt' : 'emprunt'
   return (
     <Metric
@@ -65,7 +65,7 @@ export function RateMetric({
       value={fmtPct(rateOf(main.rate))}
       sub={
         <>
-          {moved(main.rate) ? `avant : ${fmtPct(main.rate.now)}` : known ? 'inchangé par l’opération' : 'taux actuel'}
+          {moved(main.rate) ? `avant : ${fmtPct(main.rate.now)}` : known ? 'effet de l’opération < 0,1 pt' : 'taux actuel'}
           {other && (
             <>
               <br />
