@@ -6,6 +6,7 @@
  * cannot swap the oracle or the LLTV), and prices, totals, rates and the user's position come from Morpho, the
  * market's oracle and its IRM.
  */
+import type { RateCurve } from '../../domain/irm'
 import { encodeAbiParameters, getAddress, keccak256, zeroAddress, type Address, type Hex } from 'viem'
 import { readContracts } from '@wagmi/core'
 import { wagmiConfig } from '../../chain/wagmi'
@@ -193,6 +194,18 @@ export type MorphoState = {
   /** loan token the market can still lend (supply - borrow) */
   liquidity: bigint
   user?: UserMorpho
+}
+
+/**
+ * The market's curve in USD for the rates after a trade: totals read on-chain when there are, else the list's.
+ * `borrowApy` is today's rate the screen shows. Undefined without a loan price or supply.
+ */
+export function morphoRateCurve(market: MorphoMarket, state: MorphoState | undefined, borrowApy: number): RateCurve | undefined {
+  if (!(market.loanUsd > 0)) return undefined
+  const usd = (x: bigint) => (Number(x) / 10 ** market.loan.decimals) * market.loanUsd
+  const supplied = state ? usd(state.totals.totalSupplyAssets) : market.borrowUsd + market.liquidityUsd
+  const borrowed = state ? usd(state.totals.totalBorrowAssets) : market.borrowUsd
+  return supplied > 0 ? { kind: 'morpho', borrowApy, supplied, borrowed } : undefined
 }
 
 export const rateToApy = (perSecond: bigint) => Math.exp((Number(perSecond) / 1e18) * YEAR) - 1

@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { aaveBorrowApr, aaveModelMatches, aaveRatesAfter, aaveSupplyApr, aprToApy, morphoBorrowApyAfter, morphoCurve } from './irm'
+import {
+  aaveBorrowApr,
+  aaveModelMatches,
+  aaveRatesAfter,
+  aaveSupplyApr,
+  aprToApy,
+  kinkOf,
+  morphoBorrowApyAfter,
+  morphoCurve,
+  ratesAfter,
+  type RateCurve,
+} from './irm'
 
 // Aave Base USDC, read on 2026-11-12: optimal 90 %, base 0, slopes 4.75 % and 10 %, reserve factor 10 %;
 // at 90.9 % utilization the pool showed a 5.6493 % borrow APR and a 4.6217 % supply APR
@@ -42,5 +53,43 @@ describe('Morpho AdaptiveCurveIRM', () => {
     expect(morphoBorrowApyAfter(0.06, 100, 90, 5)).toBeCloseTo(aprToApy(Math.log1p(0.06) * 2.5), 6)
     expect(morphoBorrowApyAfter(0.06, 100, 90, 0)).toBeCloseTo(0.06, 9)
     expect(morphoBorrowApyAfter(0.06, 100, 90, 11)).toBeUndefined()
+  })
+})
+
+describe('ratesAfter, every venue through one call', () => {
+  const aave: RateCurve = { kind: 'aave', irm: usdc, cash: 20, debt: 80 }
+  const morpho: RateCurve = { kind: 'morpho', borrowApy: 0.06, supplied: 100, borrowed: 90 }
+
+  it('prices a loop on Aave: more debt, more collateral', () => {
+    expect(ratesAfter(aave, { borrow: 15 })).toEqual(aaveRatesAfter(usdc, 20, 80, 0, 15))
+    expect(ratesAfter(aave, { supply: 100 })!.supplyApy).toBeLessThan(ratesAfter(aave, {})!.supplyApy!)
+    expect(ratesAfter(aave, { borrow: 25 })).toBeUndefined()
+  })
+
+  it('prices a move out: a repayment lowers the rate, never below an empty reserve', () => {
+    expect(ratesAfter(aave, { borrow: -40 })!.borrowApy).toBeLessThan(ratesAfter(aave, {})!.borrowApy)
+    expect(ratesAfter(aave, { borrow: -500 })!.borrowApy).toBeCloseTo(aprToApy(usdc.base), 9)
+  })
+
+  it('prices a Morpho borrow, with no supply rate', () => {
+    expect(ratesAfter(morpho, { borrow: 5 })).toEqual({ borrowApy: morphoBorrowApyAfter(0.06, 100, 90, 5) })
+    expect(ratesAfter(morpho, { borrow: 11 })).toBeUndefined()
+    expect(ratesAfter(morpho, { supply: 50 })).toEqual({ borrowApy: 0.06 })
+  })
+})
+
+describe('kinkOf (A3)', () => {
+  it('Aave: room to the optimal utilization and the rate there', () => {
+    // 100 in the reserve, 80 borrowed: 10 more to reach 90 %
+    const k = kinkOf({ kind: 'aave', irm: usdc, cash: 20, debt: 80 })
+    expect(k.room).toBeCloseTo(10, 9)
+    expect(k.borrowApy).toBeCloseTo(aprToApy(0.0475), 9)
+    expect(kinkOf({ kind: 'aave', irm: usdc, cash: 5, debt: 95 }).room).toBe(0)
+  })
+
+  it('Morpho: room to 90 % and the rate at target', () => {
+    const k = kinkOf({ kind: 'morpho', borrowApy: 0.06, supplied: 100, borrowed: 80 })
+    expect(k.room).toBeCloseTo(10, 9)
+    expect(k.borrowApy).toBeCloseTo(aprToApy(Math.log1p(0.06) / morphoCurve(0.8)), 9)
   })
 })

@@ -6,7 +6,7 @@ import { readContract, readContracts } from '@wagmi/core'
 import { zeroAddress, type Address } from 'viem'
 import { wagmiConfig } from '../../chain/wagmi'
 import { erc20Abi, oracleAbi, poolAbi, providerAbi, rateStrategyAbi } from '../../chain/abi'
-import { aaveModelMatches, type AaveIrm } from '../../domain/irm'
+import { aaveModelMatches, type AaveIrm, type RateCurve } from '../../domain/irm'
 import type { Market, Token } from '../../config'
 import { decodeReserveConfig, legacyEModes, rayAprToApy, type LegacyEModeData } from './reserveConfig'
 import { toBase } from '../../domain/math'
@@ -23,6 +23,10 @@ export type SnapReserve = Reserve & {
   /** rate curve, when readable and it gives back today's rate (rates after the user's own loop, irm.ts) */
   irm?: AaveIrm
 }
+
+/** The reserve's curve in USD (base currency, 8 decimals), for the rates after a trade; undefined without a curve. */
+export const aaveRateCurve = (r: SnapReserve | undefined): RateCurve | undefined =>
+  r?.irm ? { kind: 'aave', irm: r.irm, cash: Number(r.cashBase) / 1e8, debt: Number(r.totalDebtBase) / 1e8 } : undefined
 
 export type Snapshot = { market: Market; reserves: SnapReserve[]; emodes: EModeCategory[]; premiumBps: bigint }
 

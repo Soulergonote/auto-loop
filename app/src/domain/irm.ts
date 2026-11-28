@@ -59,3 +59,54 @@ export function morphoBorrowApyAfter(borrowApyNow: number, supplied: number, bor
   const atTarget = apyToApr(borrowApyNow) / morphoCurve(borrowed / supplied)
   return aprToApy(atTarget * morphoCurve((borrowed + addDebt) / supplied))
 }
+
+/* ---------- one entry point for every screen ---------- */
+
+/**
+ * A venue's rate curve and its state now, amounts in USD: an Aave v3 or v4 reserve (piecewise linear curve, supply
+ * and borrow rates), or a Morpho market (AdaptiveCurveIRM, borrow rate only: a Morpho collateral is not lent out).
+ */
+export type RateCurve = { kind: 'aave'; irm: AaveIrm; cash: number; debt: number } | { kind: 'morpho'; borrowApy: number; supplied: number; borrowed: number }
+
+/** what the trade adds to the venue, USD: supplied and borrowed (negative = withdrawn, repaid) */
+export type RateChange = { supply?: number; borrow?: number }
+
+export type RatesAfter = {
+  /** Aave only: the supply APY of the reserve */
+  supplyApy?: number
+  borrowApy: number
+}
+
+/**
+ * Rates right after a trade on that venue. Undefined when the trade borrows more than the venue holds: the screen
+ * keeps today's rate, and its capacity check speaks for the amount.
+ */
+export function ratesAfter(curve: RateCurve, change: RateChange): RatesAfter | undefined {
+  const supply = change.supply ?? 0
+  const borrow = change.borrow ?? 0
+  if (curve.kind === 'aave') {
+    // a repayment larger than the reserve's debt (rounding, stale read) leaves it at zero, not below
+    const addDebt = Math.max(borrow, -curve.debt)
+    return aaveRatesAfter(curve.irm, curve.cash, curve.debt, supply, addDebt)
+  }
+  const addDebt = Math.max(borrow, -curve.borrowed)
+  const borrowApy = morphoBorrowApyAfter(curve.borrowApy, curve.supplied, curve.borrowed, addDebt)
+  return borrowApy === undefined ? undefined : { borrowApy }
+}
+
+/**
+ * A3: how much more can be borrowed on the venue, by anyone, before the curve's kink (Aave's optimal utilization,
+ * Morpho's 90 % target), and the borrow APY there. `room` is 0 once past it. USD like the curve.
+ */
+export function kinkOf(curve: RateCurve): { room: number; borrowApy: number; utilization: number } {
+  if (curve.kind === 'aave') {
+    const total = curve.cash + curve.debt
+    return {
+      room: Math.max(0, curve.irm.optimal * total - curve.debt),
+      borrowApy: aprToApy(aaveBorrowApr(curve.irm, curve.irm.optimal)),
+      utilization: curve.irm.optimal,
+    }
+  }
+  const atTarget = curve.supplied > 0 ? apyToApr(curve.borrowApy) / morphoCurve(curve.borrowed / curve.supplied) : 0
+  return { room: Math.max(0, TARGET_U * curve.supplied - curve.borrowed), borrowApy: aprToApy(atTarget), utilization: TARGET_U }
+}
