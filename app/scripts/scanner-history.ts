@@ -21,7 +21,8 @@ if (existsSync(out)) {
   console.log(`${out} existe déjà : rien à écrire.`)
   process.exit(0)
 }
-const of = (name: string) => snap.entries.filter((e) => e.key[0] === name)
+// a query key may carry a shape version (« aave-v4-reserves-3 »): matched with or without it
+const of = (name: string) => snap.entries.filter((e) => typeof e.key[0] === 'string' && (e.key[0] === name || new RegExp(`^${name}-\\d+$`).test(e.key[0])))
 const round = (x: number | undefined) => (x === undefined || !Number.isFinite(x) ? undefined : Math.round(x * 1e6) / 1e6)
 
 const aave = of('snapshot').flatMap((e) => {
