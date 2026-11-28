@@ -511,7 +511,8 @@ export function Scanner({
     .toLowerCase()
     .split(/[\s/]+/)
     .filter(Boolean)
-  const minCapacity = SCAN_CAPACITY_USD[capacity]
+  // « Toutes » (key 1k) hides nothing, not even an almost full market
+  const minCapacity = capacity === '1k' ? 0 : SCAN_CAPACITY_USD[capacity]
   const matching = rows.filter(
     (r) =>
       (filter === 'all' || (filter === 'stable' ? r.stable : r.correlated)) &&
