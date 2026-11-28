@@ -6,6 +6,7 @@
 import type { Address } from 'viem'
 import { DEMO } from '../../config'
 import { rememberName, rememberV4Reserve } from '../../services/recap/names'
+import { aaveModelMatches, type RateCurve } from '../../domain/irm'
 
 export const AAVE_V4_API = 'https://api.v4.aave.com/graphql'
 
@@ -38,11 +39,15 @@ export type V4Reserve = {
   /** what can still be borrowed and supplied, USD */
   borrowableUsd: number
   suppliableUsd: number
+  /** the hub asset's rate curve with its liquidity and debt in USD, when it gives back today's rate: rates after the trade (irm.ts) */
+  curve?: Extract<RateCurve, { kind: 'aave' }>
 }
 
 const QUERY = `query($chainIds: [ChainId!]!) { reserves(request: { query: { chainIds: $chainIds }, filter: ALL, orderBy: { assetName: ASC } }) {
   onChainId chain { chainId name } spoke { name address } status { frozen paused active } canBorrow canSupply canUseAsCollateral
-  asset { hub { name } underlying { address info { symbol decimals } } }
+  asset { hub { name } underlying { address info { symbol decimals } }
+    summary { borrowed { exchange { value } } availableLiquidity { exchange { value } } borrowApy { value } }
+    settings { liquidityFee { value } optimalUtilizationRate { value } baseBorrowRate { value } slopeBelowOptimal { value } slopeAboveOptimal { value } } }
   summary { supplyApy { value } borrowApy { value } underlyingApy { value }
     borrowable { exchange { value } exchangeRate { value } } suppliable { exchange { value } }
     rewards { __typename ... on MerklSupplyReward { extraApy { value } endDate } ... on MerklBorrowReward { discountApy { value } endDate } } }
@@ -58,7 +63,12 @@ type Raw = {
   canBorrow: boolean
   canSupply: boolean
   canUseAsCollateral: boolean
-  asset: { hub?: { name: string }; underlying: { address: Address; info: { symbol: string; decimals: number } } }
+  asset: {
+    hub?: { name: string }
+    underlying: { address: Address; info: { symbol: string; decimals: number } }
+    summary?: { borrowed: { exchange: Num }; availableLiquidity: { exchange: Num }; borrowApy: Num }
+    settings?: { liquidityFee: Num; optimalUtilizationRate: Num; baseBorrowRate: Num; slopeBelowOptimal: Num; slopeAboveOptimal: Num }
+  }
   summary: {
     supplyApy: Num
     borrowApy: Num
@@ -92,6 +102,25 @@ const endOf = (x: { endDate?: string }) => (x.endDate && Number.isFinite(Date.pa
 function endingOf(rewards: Raw['summary']['rewards'], kind: string, apy: (x: Raw['summary']['rewards'][number]) => number): EndingReward {
   const dated = (rewards ?? []).filter((x) => x.__typename === kind && endOf(x) !== undefined)
   return { apy: dated.reduce((s, x) => s + apy(x), 0), endsAt: dated.length ? Math.min(...dated.map((x) => endOf(x)!)) : undefined }
+}
+
+/**
+ * The hub asset's curve, the same piecewise linear one as Aave v3 (utilization = borrowed / (borrowed + liquidity); the
+ * API's own `utilizationRate` counts something else and is not used). Kept only when it gives back the hub's rate.
+ */
+function curveOf(a: Raw['asset']): V4Reserve['curve'] {
+  if (!a.summary || !a.settings) return undefined
+  const irm = {
+    optimal: num(a.settings.optimalUtilizationRate),
+    base: num(a.settings.baseBorrowRate),
+    slope1: num(a.settings.slopeBelowOptimal),
+    slope2: num(a.settings.slopeAboveOptimal),
+    reserveFactor: num(a.settings.liquidityFee),
+  }
+  const cash = num(a.summary.availableLiquidity.exchange)
+  const debt = num(a.summary.borrowed.exchange)
+  if (!(irm.optimal > 0 && irm.optimal < 1) || cash + debt <= 0) return undefined
+  return aaveModelMatches(irm, cash, debt, num(a.summary.borrowApy)) ? { kind: 'aave', irm, cash, debt } : undefined
 }
 
 /** The API's reserves as the scan reads them; frozen, paused and inactive reserves are left out. Pure, tested. */
@@ -128,6 +157,7 @@ export function parseV4Reserves(raw: Raw[]): V4Reserve[] {
         canBorrow: r.canBorrow,
         borrowableUsd: num(r.summary.borrowable.exchange),
         suppliableUsd: num(r.summary.suppliable.exchange),
+        curve: curveOf(r.asset),
       }
     })
 }
@@ -155,7 +185,7 @@ export async function fetchV4Reserves(chainIds: number[], signal?: AbortSignal):
 export const v4ReservesQuery = (chainIds: number[]) => ({
   queryKey: [
     // the version changes with the shape of V4Reserve, so that an hourly snapshot (D1) of the previous shape is not used
-    'aave-v4-reserves-2',
+    'aave-v4-reserves-3',
     ...chainIds,
   ],
   queryFn: ({ signal }: { signal?: AbortSignal }) => fetchV4Reserves(chainIds, signal),
