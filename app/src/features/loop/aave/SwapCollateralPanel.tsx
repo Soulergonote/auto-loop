@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useGasPrice, useReadContract } from 'wagmi'
 import type { Address, Hash } from 'viem'
 import { protocolName, MORPHO_BLUE, type AggregatorChoice, type Token } from '../../../config'
@@ -30,6 +31,9 @@ import { Banners, Card, Fold, LoopLayout, Metric, Notice, QuoteCompare, Segmente
 import { pairKind, reserveAsset, useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
+import { RateMetric } from '../shared/RateMetric'
+import { adjustedRate, rateOf, type AdjustedRate } from '../../../domain/irm'
+import { aaveRateCurve, snapshotQuery } from '../../../protocols/aave/snapshot'
 import { SettingsFold, SlippageField, StepsFold } from '../shared/folds'
 
 const PARTS = ['25', '50', '100'] as const
@@ -90,6 +94,8 @@ export function SwapCollateralPanel({
   const { busy, setBusy, result, setResult, run } = tx
   const batch = useAtomicBatch(market.chain.id, account) === true
   const gasPrice = useGasPrice({ chainId: market.chain.id, query: { refetchInterval: 30_000 } })
+  // the reserves' rate curves, for the rates right after the swap
+  const snapshot = useQuery(snapshotQuery(market))
 
   const full = part === '100'
   // rounded so that the interest the aTokens earn does not re-quote at every block; a full switch withdraws the
@@ -138,6 +144,11 @@ export function SwapCollateralPanel({
   // the pair's position before and after, priced on today's rates (headline Merkl rewards included)
   const posC = toBase(user.aTokenBalance, C.side)
   const posD = toBase(user.debtBalance, D.side)
+  // lending rates right after the swap: withdrawing C raises its reserve's utilization, supplying T lowers T's (irm.ts)
+  const curveOf = (r: Reserve) => aaveRateCurve(snapshot.data?.reserves.find((x) => x.token.address === r.token.address))
+  const cRate = adjustedRate(C.supplyApy, curveOf(C), { supply: -Number(removedBase) / 1e8 }, 'supply')
+  const tRate = T ? adjustedRate(T.supplyApy, curveOf(T), { supply: Number(addedBase) / 1e8 }, 'supply') : undefined
+  const yieldAt = (r: Reserve, rate: AdjustedRate) => rateOf(rate) + (r.native?.apy ?? 0) + r.supplyRewardApr
   const debtCost = D.borrowApy + (D.native?.apy ?? 0) - D.borrowRewardApr
   const apyOf = (parts: [number, bigint][]) => {
     const equity = parts.reduce((s, [, b]) => s + Number(b), 0) - Number(posD)
@@ -147,8 +158,8 @@ export function SwapCollateralPanel({
   const apyAfter =
     T && q
       ? apyOf([
-          [supplyYield(C), posC - removedBase],
-          [supplyYield(T), addedBase],
+          [yieldAt(C, cRate), posC - removedBase],
+          [yieldAt(T, tRate!), addedBase],
         ])
       : undefined
   const whole = pairPosition(user, C.side, D.side)
@@ -376,6 +387,7 @@ export function SwapCollateralPanel({
               sub={q && `minimum ${fmtAmount(toAmount, T.token.decimals)}`}
             />
             <Metric label="Levier après" value={levAfter !== undefined ? fmtX(levAfter) : undefined} sub="dette inchangée" />
+            {tRate && <RateMetric lead="supply" supply={{ label: T.token.symbol, rate: tRate }} />}
           </div>
         )}
 

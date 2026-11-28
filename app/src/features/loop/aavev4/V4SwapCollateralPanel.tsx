@@ -10,7 +10,9 @@ import {
   v4SwapCollateralAction,
   type V4SwapCollateralPlan,
 } from '../../../protocols/aavev4/execute'
-import { readV4ReserveUser, usdToUnits } from '../../../protocols/aavev4/state'
+import { readV4ReserveUser, usdToUnits, v4BorrowApy } from '../../../protocols/aavev4/state'
+import { RateMetric } from '../shared/RateMetric'
+import { adjustedRate, rateOf, type AdjustedRate } from '../../../domain/irm'
 import { v4CollateralTargets, v4Hf } from '../../../protocols/aavev4/switch'
 import { dropToLiquidation } from '../../../protocols/morpho/markets'
 import { getQuote, quoteLabel, type QuoteRequest } from '../../../services/quotes/quotes'
@@ -110,9 +112,17 @@ export function V4SwapCollateralPanel({ ctx }: { ctx: V4Ctx }) {
   const borrowNet = ctx.borrowApy - ctx.borrowRewardApy
   const equity = Number(collValue - debtValue)
   const apyBefore = equity > 0 ? (yieldOf(C) * Number(collValue) - borrowNet * Number(debtValue)) / equity : undefined
+  // lending rates right after the swap on the hubs' curves (irm.ts): selling C raises its utilization, supplying T
+  // lowers T's; the borrow keeps its amount but takes T's risk premium when T alone backs it
+  const cRate = adjustedRate(C.supplyApy, C.curve, { supply: -Number(collValue - leftValue) / 1e8 }, 'supply')
+  const tRate = T ? adjustedRate(T.supplyApy, T.curve, { supply: Number(addedValue) / 1e8 }, 'supply') : undefined
+  const yieldAt = (r: { underlyingApy: number; supplyRewardApy: number }, rate: AdjustedRate) => rateOf(rate) + r.underlyingApy + r.supplyRewardApy
+  const premiumAfter = T && !others ? T.collateralRisk : ctx.riskPremium
+  const borrowNetAfter = v4BorrowApy(D.borrowApy, premiumAfter) - ctx.borrowRewardApy
   const apyAfter =
     T && q && equity > 0
-      ? (yieldOf(C) * Number(leftValue) + yieldOf(T) * Number(addedValue) - borrowNet * Number(debtValue)) / Number(leftValue + addedValue - debtValue)
+      ? (yieldAt(C, cRate) * Number(leftValue) + yieldAt(T, tRate!) * Number(addedValue) - borrowNetAfter * Number(debtValue)) /
+        Number(leftValue + addedValue - debtValue)
       : undefined
 
   const problems: string[] = []
@@ -311,6 +321,13 @@ export function V4SwapCollateralPanel({ ctx }: { ctx: V4Ctx }) {
               sub={q && `au moins ${fmtAmount(toAmount, T.token.decimals)}`}
             />
             <Metric label="Seuil" value={fmtLltv(T.collateralFactor)} sub={`avant ${fmtLltv(C.collateralFactor)}`} />
+            {tRate && (
+              <RateMetric
+                lead="supply"
+                supply={{ label: T.token.symbol, rate: tRate }}
+                borrow={{ label: D.token.symbol, rate: { now: ctx.borrowApy, after: v4BorrowApy(D.borrowApy, premiumAfter) } }}
+              />
+            )}
           </div>
         )}
         <Banners problems={problems} warnings={warnings} />

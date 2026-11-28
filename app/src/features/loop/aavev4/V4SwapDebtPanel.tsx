@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Address, Hash } from 'viem'
 import { encodeV4Action, executeV4SwapDebt, readV4Outcome, v4OutcomeLines, v4SwapDebtAction, type V4SwapDebtPlan } from '../../../protocols/aavev4/execute'
-import { readV4ReserveUser, usdToUnits, v4BorrowApy } from '../../../protocols/aavev4/state'
+import { readV4ReserveUser, usdToUnits, v4BorrowApy, v4AdjustedRates } from '../../../protocols/aavev4/state'
+import { RateMetric } from '../shared/RateMetric'
+import { rateOf } from '../../../domain/irm'
 import { v4DebtTargets, v4Hf } from '../../../protocols/aavev4/switch'
 import { fullDebtTarget, quoteDebtSwap } from '../../../protocols/aave/swapDebt'
 import { dropToLiquidation } from '../../../protocols/morpho/markets'
@@ -110,9 +112,16 @@ export function V4SwapDebtPanel({ ctx }: { ctx: V4Ctx }) {
   const equity = Number(collValue - debtValue)
   const apyBefore = equity > 0 ? (own * Number(collValue) - costD * Number(debtValue)) / equity : undefined
   const equityAfter = Number(collValue) - Number(debtValue - repaidValue) - Number(newValue) + Number(returnedValue)
+  // borrow rates right after the swap on the hubs' curves (irm.ts): repaying D lowers its utilization, borrowing T
+  // raises T's; the account's premium applies to both
+  const dRate = v4AdjustedRates(C, D, ctx.riskPremium, { borrow: -Number(repaidValue) / 1e8 }).borrow
+  const tRate = T ? v4AdjustedRates(C, T, ctx.riskPremium, { borrow: Number(newValue) / 1e8 }).borrow : undefined
+  const costDAfter = rateOf(dRate) - D.borrowRewardApy
+  const costT = T && tRate ? rateOf(tRate) - T.borrowRewardApy : 0
   const apyAfter =
-    T && q && equityAfter > 0 ? (own * Number(collValue) - costD * Number(debtValue - repaidValue) - costOf(T) * Number(newValue)) / equityAfter : undefined
-  const savedPerYear = T && q ? (costD * Number(repaidValue) - costOf(T) * Number(newValue - returnedValue)) / 1e8 : undefined
+    T && q && equityAfter > 0 ? (own * Number(collValue) - costDAfter * Number(debtValue - repaidValue) - costT * Number(newValue)) / equityAfter : undefined
+  const savedPerYear =
+    T && q ? (costD * Number(debtValue) - costDAfter * Number(debtValue - repaidValue) - costT * Number(newValue - returnedValue)) / 1e8 : undefined
 
   const problems: string[] = []
   const warnings: string[] = []
@@ -127,8 +136,7 @@ export function V4SwapDebtPanel({ ctx }: { ctx: V4Ctx }) {
   if (lossIssue) (lossIssue.block ? problems : warnings).push(lossIssue.text)
   if (q?.simulated) warnings.push(`Devis simulé au prix de l’oracle${q.fallbackReason ? ` (${q.fallbackReason})` : ''}. Il ne peut pas être exécuté.`)
   if (target.isError) problems.push(`Lecture de la réserve ${T?.token.symbol} impossible : ${(target.error as Error).message.split('\n')[0]}`)
-  if (T && costOf(T) >= costD)
-    warnings.push(`${T.token.symbol} coûte autant ou plus à emprunter que ${D.token.symbol} (${fmtPct(costOf(T))} contre ${fmtPct(costD)}).`)
+  if (T && costT >= costD) warnings.push(`${T.token.symbol} coûte autant ou plus à emprunter que ${D.token.symbol} (${fmtPct(costT)} contre ${fmtPct(costD)}).`)
   if (T && !isCorrelated({ price: tSide!.price, token: T.token }, { price: sides.loan.price, token: D.token }))
     warnings.push(`${T.token.symbol} et ${D.token.symbol} n’évoluent pas ensemble : la dette, et donc le health factor, suit désormais ${T.token.symbol}.`)
   if (!others && hfAfter !== undefined && Number.isFinite(hfAfter) && hfAfter < hfThresholds(correlated).ok)
@@ -307,6 +315,7 @@ export function V4SwapDebtPanel({ ctx }: { ctx: V4Ctx }) {
               value={q ? `${fmtAmount(newDebt, T.token.decimals)} ${T.token.symbol}` : undefined}
               sub={q && `${fmtUsd(newValue)} · flash loan gratuit`}
             />
+            {tRate && <RateMetric borrow={{ label: T.token.symbol, rate: tRate }} />}
             <Metric
               label="Rendu"
               value={returned > 0n ? `${fmtAmount(returned, D.token.decimals)} ${D.token.symbol}` : '—'}

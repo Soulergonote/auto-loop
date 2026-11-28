@@ -21,6 +21,9 @@ import { Banners, Card, Fold, LoopLayout, Metric, QuoteCompare, Segmented, Summa
 import { pairKind, reserveAsset, useSlippage } from '../../../domain/slippage'
 import { useTxAction } from '../shared/useTxAction'
 import { signBlocker } from '../shared/signing'
+import { RateMetric } from '../shared/RateMetric'
+import { adjustedRate, rateOf, type AdjustedRate } from '../../../domain/irm'
+import { aaveRateCurve, snapshotQuery } from '../../../protocols/aave/snapshot'
 import { DeployPanel } from '../shared/DeployPanel'
 import { SettingsFold, SlippageField, StepsFold } from '../shared/folds'
 
@@ -66,6 +69,8 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
   const { busy, setBusy, result, setResult, run } = tx
   const batch = useAtomicBatch(market.chain.id, account) === true
   const gasPrice = useGasPrice({ chainId: market.chain.id, query: { refetchInterval: 30_000 } })
+  // the reserves' rate curves, for the rates right after the swap
+  const snapshot = useQuery(snapshotQuery(market))
   const executor = market.executor ?? market.quoteTaker
 
   // the new asset's room (cash and borrow cap) and the account's current delegation of it to the contract
@@ -135,13 +140,18 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
   const equity = Number(posC) - Number(posD)
   const costD = borrowCost(D)
   const apyBefore = equity > 0 ? (supplyYield(C) * Number(posC) - costD * Number(posD)) / equity : undefined
+  // borrow rates right after the swap: repaying D lowers its reserve's utilization, borrowing T raises T's (irm.ts)
+  const curveOf = (r: Reserve) => aaveRateCurve(snapshot.data?.reserves.find((x) => x.token.address === r.token.address))
+  const dRate = adjustedRate(D.borrowApy, curveOf(D), { borrow: -Number(repaidBase) / 1e8 }, 'borrow')
+  const tRate = T ? adjustedRate(T.borrowApy, curveOf(T), { borrow: Number(newDebtBase) / 1e8 }, 'borrow') : undefined
+  const costAt = (r: Reserve, rate: AdjustedRate) => borrowCost(r) - r.borrowApy + rateOf(rate)
+  const costDAfter = costAt(D, dRate)
+  const costT = T && tRate ? costAt(T, tRate) : 0
   // what the swap bought above the debt goes back to the wallet: it stays the user's money, counted with the equity
   const returnedBase = toBase(returned, D.side)
   const equityAfter = Number(posC) - Number(posD - repaidBase) - Number(newDebtBase) + Number(returnedBase)
   const apyAfter =
-    T && q && equityAfter > 0
-      ? (supplyYield(C) * Number(posC) - costD * Number(posD - repaidBase) - borrowCost(T) * Number(newDebtBase)) / equityAfter
-      : undefined
+    T && q && equityAfter > 0 ? (supplyYield(C) * Number(posC) - costDAfter * Number(posD - repaidBase) - costT * Number(newDebtBase)) / equityAfter : undefined
   const whole = pairPosition(user, C.side, D.side)
 
   const gas =
@@ -149,7 +159,8 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
   const swapCost = q && T ? swapCostBase(newDebt, T.side, q.buyAmount, D.side) : undefined
   const total = swapCost !== undefined ? swapCost + (gas ?? 0n) : undefined
   // what the lower rate saves per year, against the one-off cost: days to get it back
-  const savedPerYear = T && q ? (costD * Number(repaidBase) - borrowCost(T) * Number(newDebtBase - returnedBase)) / 1e8 : undefined
+  // at the rates after the swap: the debt left on D costs its new rate, the part repaid what it cost today
+  const savedPerYear = T && q ? (costD * Number(posD) - costDAfter * Number(posD - repaidBase) - costT * Number(newDebtBase - returnedBase)) / 1e8 : undefined
   const paybackDays = total !== undefined && savedPerYear !== undefined && savedPerYear > 0 ? ((Number(total) / 1e8) * 365) / savedPerYear : undefined
 
   const oldContract = !!market.executor && market.executorVersion === 2 && !market.executorDebtSwap
@@ -339,11 +350,16 @@ export function SwapDebtPanel({ reserves, emode, tokens, campaigns, user, accoun
               value={q ? `${fmtAmount(newDebt, T.token.decimals)} ${T.token.symbol}` : undefined}
               sub={q && `${fmtUsd(newDebtBase)} · sans prime de flash loan`}
             />
+            {tRate && <RateMetric borrow={{ label: T.token.symbol, rate: tRate }} />}
             <Metric
               label="Économie par an"
               value={savedPerYear !== undefined ? fmtUsd(BigInt(Math.round(savedPerYear * 1e8))) : undefined}
               tone={savedPerYear !== undefined ? apyTone(savedPerYear) : undefined}
-              sub={returned > 0n ? `aux taux actuels · ${fmtAmount(returned, D.token.decimals)} ${D.token.symbol} rendus au portefeuille` : 'aux taux actuels'}
+              sub={
+                returned > 0n
+                  ? `aux taux après le changement · ${fmtAmount(returned, D.token.decimals)} ${D.token.symbol} rendus au portefeuille`
+                  : 'aux taux après le changement'
+              }
             />
           </div>
         )}
