@@ -1,6 +1,17 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { dropToLiquidation, morphoHf, morphoLeverage, morphoNetApy, morphoSides, readMorphoState, type MorphoMarket } from '../../../protocols/morpho/markets'
+import {
+  dropToLiquidation,
+  morphoHf,
+  morphoLeverage,
+  morphoNetApy,
+  morphoRateCurve,
+  morphoSides,
+  readMorphoState,
+  type MorphoMarket,
+} from '../../../protocols/morpho/markets'
+import { adjustedRate, rateOf } from '../../../domain/irm'
+import { RateMetric } from '../shared/RateMetric'
 import {
   REPAY_ALL,
   encodeAction,
@@ -112,7 +123,12 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
   const hfNow = morphoHf(coll, debt, state.price, M.params.lltv)
   const lev2 = newColl !== undefined && price2 !== undefined ? morphoLeverage(newColl, debt, price2) : undefined
   const apy2Collateral = target?.pt ? (q?.pendle?.fixedApy ?? target.pt.impliedApy ?? 0) : same ? ctx.collateralApy : 0
-  const borrow2 = toState.data?.borrowApy ?? T?.borrowApy ?? 0
+  // the target market's borrow rate right after the debt lands there (AdaptiveCurveIRM, irm.ts)
+  const borrow2Now = toState.data?.borrowApy ?? T?.borrowApy ?? 0
+  const borrow2Rate = T
+    ? adjustedRate(borrow2Now, morphoRateCurve(T, toState.data, borrow2Now), { borrow: (Number(debt) / 10 ** L.decimals) * T.loanUsd }, 'borrow')
+    : { now: borrow2Now }
+  const borrow2 = rateOf(borrow2Rate)
   const apy2 = lev2 !== undefined && Number.isFinite(lev2) && T ? morphoNetApy(lev2, apy2Collateral, borrow2) + morphoMerklApy(targetMerkl, lev2) : undefined
   const correlated = T ? isCorrelated({ price: sides.collateral.price, token: T.collateral }, { price: sides.loan.price, token: L }) : true
 
@@ -282,6 +298,7 @@ export function MorphoRollPanel({ ctx, renew }: { ctx: MorphoCtx; renew: boolean
             sub={newCollMin !== undefined && !same && T ? `au moins ${fmtAmount(newCollMin, T.collateral.decimals)}` : undefined}
           />
           <Metric label="Dette déplacée" value={`${fmtAmount(debt, L.decimals)} ${L.symbol}`} sub={lev2 !== undefined ? `levier ${fmtX(lev2)}` : undefined} />
+          {T && <RateMetric borrow={{ label: L.symbol, rate: borrow2Rate }} />}
         </div>
         <Banners problems={problems} warnings={warnings} />
         <SettingsFold aggregator={ctx.aggregator} slippage={slippage} auto={autoSlip}>

@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import type { Address } from 'viem'
 import { MARKETS, getMarket, type Market } from '../../../config'
-import { morphoHf, morphoLeverage, morphoNetApy } from '../../../protocols/morpho/markets'
+import { morphoHf, morphoLeverage, morphoNetApy, morphoRateCurve } from '../../../protocols/morpho/markets'
+import { adjustedRate, rateOf } from '../../../domain/irm'
 import {
   REPAY_ALL,
   encodeAction,
@@ -24,7 +25,7 @@ import {
   type AavePair,
   type AaveSide,
 } from '../../../protocols/morpho/refinance'
-import { snapshotQuery, type Snapshot } from '../../../protocols/aave/snapshot'
+import { aaveRateCurve, snapshotQuery, type Snapshot } from '../../../protocols/aave/snapshot'
 import { headlineRewards, merklQuery } from '../../../services/merkl'
 import { deployMorphoExecutor, sharedMorphoExecutorAddress, useSharedMorphoExecutor } from '../../../chain/deploy'
 import { explainError } from '../../../chain/tx'
@@ -140,6 +141,24 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
   const correlated = isCorrelated({ price: sides.collateral.price, token: C }, { price: sides.loan.price, token: L })
   const own = ctx.collateralApy
   const mBorrow = ctx.borrowApy - ctx.merkl.borrowApr
+  /**
+   * Net rates at both ends of a route: the place the position lands at its rates right after the move (its supply and
+   * borrow change that venue's utilization, irm.ts), the place it leaves at today's, which already count it.
+   */
+  const ratesFor = (x: Route) => {
+    const coll = x.toMorpho ? x.side.supplied : (mUser?.collateral ?? 0n)
+    const debt = x.toMorpho ? x.side.borrowed : (mUser?.debt ?? 0n)
+    const usd = { supply: Number(toBase(coll, sides.collateral)) / 1e8, borrow: Number(toBase(debt, sides.loan)) / 1e8 }
+    const { collateral: pc, debt: pd } = x.pair
+    const aaveIn = !x.toMorpho
+    return {
+      aSupply: aaveSupplyNet(pc) - pc.supplyApy + rateOf(adjustedRate(pc.supplyApy, aaveIn ? aaveRateCurve(pc) : undefined, { supply: usd.supply }, 'supply')),
+      aBorrow: aaveBorrowNet(pd) - pd.borrowApy + rateOf(adjustedRate(pd.borrowApy, aaveIn ? aaveRateCurve(pd) : undefined, { borrow: usd.borrow }, 'borrow')),
+      mBorrowNet:
+        rateOf(adjustedRate(ctx.borrowApy, x.toMorpho ? morphoRateCurve(M, state, ctx.borrowApy) : undefined, { borrow: usd.borrow }, 'borrow')) -
+        ctx.merkl.borrowApr,
+    }
+  }
 
   // amounts and both ends of the move
   const r = route
@@ -148,8 +167,9 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
   const aC = r?.pair.collateral
   const aD = r?.pair.debt
   const lev = collMoved > 0n ? morphoLeverage(collMoved, debtMoved, state.price) : undefined
-  const aaveApy = lev !== undefined && Number.isFinite(lev) && aC && aD ? morphoNetApy(lev, own + aaveSupplyNet(aC), aaveBorrowNet(aD)) : undefined
-  const morphoApy = lev !== undefined && Number.isFinite(lev) ? morphoNetApy(lev, own, mBorrow) : undefined
+  const { aSupply, aBorrow, mBorrowNet } = r ? ratesFor(r) : { aSupply: 0, aBorrow: 0, mBorrowNet: mBorrow }
+  const aaveApy = lev !== undefined && Number.isFinite(lev) && aC && aD ? morphoNetApy(lev, own + aSupply, aBorrow) : undefined
+  const morphoApy = lev !== undefined && Number.isFinite(lev) ? morphoNetApy(lev, own, mBorrowNet) : undefined
   const apyBefore = r?.toMorpho ? aaveApy : morphoApy
   const apyAfter = r?.toMorpho ? morphoApy : aaveApy
   const equityUsd = r ? Number(toBase(collMoved, sides.collateral) - toBase(debtMoved, sides.loan)) / 1e8 : 0
@@ -309,7 +329,7 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
     </Summary>
   )
 
-  const borrowOf = (aave: boolean) => (aave && aD ? aaveBorrowNet(aD) : mBorrow)
+  const borrowOf = (aave: boolean) => (aave && aD ? aBorrow : mBorrowNet)
   return (
     <LoopLayout summary={summary}>
       {ctx.head}
@@ -336,7 +356,7 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
                   {routes.map((x) => (
                     <option key={key(x)} value={key(x)}>
                       {x.toMorpho ? `Aave ${x.pool.label} → Morpho` : `Morpho → Aave ${x.pool.label}`} · emprunt{' '}
-                      {fmtPct(x.toMorpho ? mBorrow : aaveBorrowNet(x.pair.debt))}
+                      {fmtPct(x.toMorpho ? ratesFor(x).mBorrowNet : ratesFor(x).aBorrow)}
                     </option>
                   ))}
                 </select>
@@ -364,14 +384,13 @@ export function MorphoRefinancePanel({ ctx }: { ctx: MorphoCtx }) {
             <dl className="preview">
               <dt>Emprunt {L.symbol}</dt>
               <dd>
-                Aave {fmtPct(aaveBorrowNet(aD))}
-                {aD.borrowRewardApr > 0 ? ` (récompenses ${fmtPct(aD.borrowRewardApr)} déduites)` : ''} · Morpho {fmtPct(mBorrow)}
+                Aave {fmtPct(aBorrow)}
+                {aD.borrowRewardApr > 0 ? ` (récompenses ${fmtPct(aD.borrowRewardApr)} déduites)` : ''} · Morpho {fmtPct(mBorrowNet)}
                 {ctx.merkl.borrowApr > 0 ? ` (récompenses ${fmtPct(ctx.merkl.borrowApr)} déduites)` : ''}
               </dd>
               <dt>Collatéral {ptShortSymbol(C.symbol)}</dt>
               <dd>
-                Aave {fmtPct(aaveSupplyNet(aC))} de dépôt en plus du rendement propre ({fmtPct(own)}) · Morpho : rendement propre seul, le collatéral n’y est
-                pas prêté
+                Aave {fmtPct(aSupply)} de dépôt en plus du rendement propre ({fmtPct(own)}) · Morpho : rendement propre seul, le collatéral n’y est pas prêté
               </dd>
               <dt>Seuil de liquidation</dt>
               <dd>

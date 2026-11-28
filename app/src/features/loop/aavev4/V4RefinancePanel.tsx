@@ -4,10 +4,11 @@ import type { Address, Hash } from 'viem'
 import type { Market } from '../../../config'
 import { readV4Outcome, v4OutcomeLines } from '../../../protocols/aavev4/execute'
 import { encodeV4Refinance, executeV4Refinance, type V4Place, type V4RefinancePlan } from '../../../protocols/aavev4/refinance'
-import { readV4State, v4BorrowApy, v4PairKey, type V4Pair, type V4State } from '../../../protocols/aavev4/state'
+import { readV4State, v4AdjustedRates, v4PairKey, type V4Pair, type V4State } from '../../../protocols/aavev4/state'
+import { adjustedRate, rateOf, type RateChange } from '../../../domain/irm'
 import { v4SamePairs } from '../../../protocols/aavev4/switch'
 import { withInterestMargin } from '../../../protocols/morpho/execute'
-import { morphoHf, morphoMarketsQuery, readMorphoState, type MorphoMarket, type MorphoState } from '../../../protocols/morpho/markets'
+import { morphoHf, morphoMarketsQuery, morphoRateCurve, readMorphoState, type MorphoMarket, type MorphoState } from '../../../protocols/morpho/markets'
 import {
   aaveAccountAfter,
   aaveBorrowNet,
@@ -19,7 +20,7 @@ import {
   type AavePair,
   type AaveSide,
 } from '../../../protocols/morpho/refinance'
-import { snapshotQuery, type Snapshot } from '../../../protocols/aave/snapshot'
+import { aaveRateCurve, snapshotQuery, type Snapshot } from '../../../protocols/aave/snapshot'
 import { headlineRewards, merklQuery, morphoCampaignsQuery, morphoMerkl } from '../../../services/merkl'
 import { toBase } from '../../../domain/math'
 import { isCorrelated } from '../../../domain/pairs'
@@ -161,20 +162,32 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
 
   const correlated = isCorrelated({ price: sides.collateral.price, token: C.token }, { price: sides.loan.price, token: D.token })
   const own = C.underlyingApy
-  const hereSupply = C.supplyApy + C.supplyRewardApy
-  const hereBorrow = ctx.borrowApy - ctx.borrowRewardApy
-  /** lending rate on the collateral and net borrow rate at the other end */
-  const ratesOf = (o: Other): { supply: number; borrow: number } => {
+  /**
+   * Lending rate on the collateral and net borrow rate here, today or, where the position lands (`change` in USD),
+   * right after it does: the move's supply and borrow change that venue's utilization (irm.ts). The place it leaves
+   * keeps today's rates, which already count it.
+   */
+  const hereRates = (change: RateChange = {}): { supply: number; borrow: number } => {
+    const a = v4AdjustedRates(C, ctx.pair.debt, ctx.riskPremium, change)
+    return { supply: rateOf(a.supply) + C.supplyRewardApy, borrow: rateOf(a.borrow) - ctx.borrowRewardApy }
+  }
+  /** the same at the other end */
+  const ratesOf = (o: Other, change: RateChange = {}): { supply: number; borrow: number } => {
     if (o.kind === 'v4') {
       const premium = o.state.user?.otherPositions ? o.state.user.riskPremium : o.pair.collateral.collateralRisk
+      const a = v4AdjustedRates(o.pair.collateral, o.pair.debt, premium, change)
+      return { supply: rateOf(a.supply) + o.pair.collateral.supplyRewardApy, borrow: rateOf(a.borrow) - o.pair.debt.borrowRewardApy }
+    }
+    if (o.kind === 'aave') {
+      const { collateral: pc, debt: pd } = o.pair
       return {
-        supply: o.pair.collateral.supplyApy + o.pair.collateral.supplyRewardApy,
-        borrow: v4BorrowApy(o.pair.debt.borrowApy, premium) - o.pair.debt.borrowRewardApy,
+        supply: aaveSupplyNet(pc) - pc.supplyApy + rateOf(adjustedRate(pc.supplyApy, aaveRateCurve(pc), { supply: change.supply }, 'supply')),
+        borrow: aaveBorrowNet(pd) - pd.borrowApy + rateOf(adjustedRate(pd.borrowApy, aaveRateCurve(pd), { borrow: change.borrow }, 'borrow')),
       }
     }
-    if (o.kind === 'aave') return { supply: aaveSupplyNet(o.pair.collateral), borrow: aaveBorrowNet(o.pair.debt) }
     const merkl = morphoMerkl(morphoCampaigns.data, { id: o.market.id, collateral: o.market.collateral.address, loan: o.market.loan.address })
-    return { supply: 0, borrow: (o.state.borrowApy ?? o.market.borrowApy) - merkl.borrowApr }
+    const base = o.state.borrowApy ?? o.market.borrowApy
+    return { supply: 0, borrow: rateOf(adjustedRate(base, morphoRateCurve(o.market, o.state, base), { borrow: change.borrow }, 'borrow')) - merkl.borrowApr }
   }
 
   // amounts and both ends of the move
@@ -182,9 +195,14 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
   const collV = toBase(moved.coll, sides.collateral)
   const debtV = toBase(moved.debt, sides.loan)
   const equity = Number(collV - debtV)
-  const rates = r ? ratesOf(r.other) : undefined
-  const fromRates = r ? (r.out ? { supply: hereSupply, borrow: hereBorrow } : rates!) : undefined
-  const toRates = r ? (r.out ? rates! : { supply: hereSupply, borrow: hereBorrow }) : undefined
+  /** what a route brings where it lands, USD */
+  const landingOf = (x: Route): RateChange => {
+    const m = x.out ? here : holdings(x.other)
+    return { supply: Number(toBase(m.coll, sides.collateral)) / 1e8, borrow: Number(toBase(m.debt, sides.loan)) / 1e8 }
+  }
+  const landing: RateChange = { supply: Number(collV) / 1e8, borrow: Number(debtV) / 1e8 }
+  const fromRates = r ? (r.out ? hereRates() : ratesOf(r.other)) : undefined
+  const toRates = r ? (r.out ? ratesOf(r.other, landing) : hereRates(landing)) : undefined
   const apyOf = (x?: { supply: number; borrow: number }) =>
     x && equity > 0 ? ((own + x.supply) * Number(collV) - x.borrow * Number(debtV)) / equity : undefined
   const apyBefore = apyOf(fromRates)
@@ -464,7 +482,7 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
                   {routes.map((x) => (
                     <option key={key(x)} value={key(x)}>
                       {x.out ? `Ce spoke → ${otherName(x.other)}` : `${otherName(x.other)} → ce spoke`} · emprunt{' '}
-                      {fmtPct(x.out ? ratesOf(x.other).borrow : hereBorrow)}
+                      {fmtPct(x.out ? ratesOf(x.other, landingOf(x)).borrow : hereRates(landingOf(x)).borrow)}
                     </option>
                   ))}
                 </select>
@@ -490,7 +508,8 @@ export function V4RefinancePanel({ ctx }: { ctx: V4Ctx }) {
             <dl className="preview">
               <dt>Emprunt {D.token.symbol}</dt>
               <dd>
-                {fromName} {fmtPct(fromRates.borrow)} · {toName} {fmtPct(toRates.borrow)} (récompenses déduites, prime de risque v4 comprise)
+                {fromName} {fmtPct(fromRates.borrow)} · {toName} {fmtPct(toRates.borrow)} (récompenses déduites, prime de risque v4 comprise ; à l’arrivée, taux
+                juste après le déplacement)
               </dd>
               <dt>Collatéral {C.token.symbol}</dt>
               <dd>
